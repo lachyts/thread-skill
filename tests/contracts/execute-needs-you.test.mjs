@@ -442,6 +442,7 @@ test('the openings _raise_field reads, the needs-human exits it excludes, and th
     [engine, "'plan not approved after '", 'plan-loop budget run out'],
     [engine, '`plan round budget exhausted without a verdict', 'plan-loop guard'],
     [engine, "'transient infrastructure failure — ", 'TRANSIENT_DIAGNOSIS'],
+    [engine, "'allowance refusal — ", 'ALLOWANCE_DIAGNOSIS'],
     [engine, 'blockerDiagnosis="plan-divergence: <one line>"', 'the implementer\'s plan-divergence stop'],
     [engine, "'agent returned neither verified nor blocked'", 'implement()\'s fallback'],
     [engine, "blockerDiagnosis: 'workflow stage threw — see /workflows'", 'taskResult\'s fallback'],
@@ -456,10 +457,12 @@ test('the openings _raise_field reads, the needs-human exits it excludes, and th
       'step 3\'s prUrlError set-aside'],
   ]
   for (const [src, text, what] of written) assert.ok(src.includes(text), `${what}: ${text} is no longer written`)
-  // Each opening is _raise_field's: the seven own-run openings in NO_BUDGET_OPENINGS, the plan budget's in PLAN_BUDGET_OPENINGS.
+  // Each opening is _raise_field's: the eight own-run openings in NO_BUDGET_OPENINGS (p46-3 added the allowance block's), the
+  // plan budget's in PLAN_BUDGET_OPENINGS.
   const tuple = (name) => JSON.parse('[' + ((leadIntegrate.match(new RegExp(`^${name} = \\(([^)]*)\\)`, 'm')) ?? [])[1] ?? '').replace(/\s+/g, ' ').replace(/,\s*$/, '') + ']')
-  assert.deepEqual(tuple('NO_BUDGET_OPENINGS'), ['workflow call failed:', 'merge-task:', 'transient infrastructure failure', 'plan-divergence:',
-    'agent returned neither verified nor blocked', 'workflow stage threw', 'invalid round budget:'], 'NO_BUDGET_OPENINGS lists the seven own-run openings')
+  assert.deepEqual(tuple('NO_BUDGET_OPENINGS'), ['workflow call failed:', 'merge-task:', 'transient infrastructure failure', 'allowance refusal',
+    'plan-divergence:', 'agent returned neither verified nor blocked', 'workflow stage threw', 'invalid round budget:'],
+  'NO_BUDGET_OPENINGS lists the eight own-run openings')
   assert.deepEqual(tuple('PLAN_BUDGET_OPENINGS'), ['plan not approved after', 'plan round budget exhausted'], 'PLAN_BUDGET_OPENINGS')
 })
 

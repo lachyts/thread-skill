@@ -341,7 +341,8 @@ Subcommands:
       first rule that refused, "" on true), autoRetryError (an `auto_retries`, `max_review_rounds`, `max_iterations`
       or `max_plan_rounds` stamp that is not a valid integer: H12, a (c) item, never a halt (ADR 0048), kept under a
       `## Needs you` question or a recorded answer; else null), autoRetryClass (agent | infra | quota, for a note set
-      aside at its run or at Integration; else null), autoRetryBudget ({autoRetries, maxReviewRounds, overtimeRuns}, each
+      aside at its run or at Integration; else null; quota covers an allowance block too, p46-3: the engine's
+      ALLOWANCE_DIAGNOSIS, a Fable dispatch whose Opus rerun died, cools down as a quota block and spends no budget), autoRetryBudget ({autoRetries, maxReviewRounds, overtimeRuns}, each
       {value, source}, resolved task -> rollout -> rollouts.toml -> built-in by reconcile-rollout.py
       _retry_budget; null until it resolves), autoRetriesUsed and quotaRetriesUsed (the note's counters, 0 when
       absent, null when malformed), fingerprint (the latest block's run sha), autoRetryRaise (lastRound + 1 when
@@ -2956,11 +2957,13 @@ HUMAN_FIX_ACTS = (
     "change the merge setting, hand back or defer",    # H13 a settings block merge-settings.py left (ADR 0080)
 )
 # The fixed openings the engine, its prompts and the lead write for a code-writing task's own run. None of them spends a
-# budget (a dead call, merge-task's exit 1, a dead agent, a plan divergence, the engine's two fallbacks, the lead's own
-# invalid round-budget row, execute § 3), so a run that starts with one never raises max_iterations: only the
-# implementer's or reviser's own paragraph does.
-NO_BUDGET_OPENINGS = ("workflow call failed:", "merge-task:", "transient infrastructure failure", "plan-divergence:",
-                      "agent returned neither verified nor blocked", "workflow stage threw", "invalid round budget:")
+# budget (a dead call, merge-task's exit 1, a dead agent, an allowance block (p46-3: its retry class is quota, so
+# `autoRetryClass: quota` cools it down free), a plan divergence, the engine's two fallbacks, the lead's own invalid
+# round-budget row, execute § 3), so a run that starts with one never raises max_iterations: only the implementer's or
+# reviser's own paragraph does.
+NO_BUDGET_OPENINGS = ("workflow call failed:", "merge-task:", "transient infrastructure failure", "allowance refusal",
+                      "plan-divergence:", "agent returned neither verified nor blocked", "workflow stage threw",
+                      "invalid round budget:")
 PLAN_BUDGET_OPENINGS = ("plan not approved after", "plan round budget exhausted")
 
 

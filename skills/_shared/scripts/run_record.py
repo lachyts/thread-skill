@@ -173,7 +173,8 @@ Kinds (T: a task is required; `?` marks an optional field; every enum is closed)
                      no-runner (a required job no runner took, merge-task's exit-4 set-aside, ADR 0069) |
                      unreported-context (a required context nothing reports on the PR's head, merge-task's exit-4
                      set-aside, ADR 0080) |
-                     merge-task | merge-gate | declined | prepare | revise-stopped | transient | gate |
+                     merge-task | merge-gate | declined | prepare | revise-stopped | allowance (p46-3: the engine's
+                     allowance block, a Fable dispatch whose Opus rerun died too, retried as quota) | transient | gate |
                      needs-human | plan-rejected | review-rounds | approved-without-pr | integration-conflict |
                      integration-red | integration-set-aside | blocked, where needs-human, p16-3, is a stop on a
                      question for a person, never a plan or review round run out, and integration-conflict and
@@ -223,7 +224,8 @@ Kinds (T: a task is required; `?` marks an optional field; every enum is closed)
                      from an underestimate). p28-2: one per (task, M), for each task whose Slot was open at a marked
                      Morning (taken before it, not freed at or before it), read from this record's Slot intervals.
   quota-stall        stage?; detail?; runId?, call? (task | revise | integrate | resume: the task's latest run-bound,
-                     omitted when it has none; p29-10); stamp?; reconciledAt? (as slot-freed)
+                     omitted when it has none; p29-10); stamp?; reconciledAt? (as slot-freed). An allowance block
+                     (reasonClass allowance, p46-3) writes none: score.py's quota_stalls bound is 0.
   auto-retry      T  stage (plan | implement | verify | review | integrate: the stage of the block it re-enters,
                      the task's latest set-aside line's), setAsideAt (run | integration), retryClass (agent | infra
                      | quota), used (int >= 0: auto_retries_used after this retry; a quota retry leaves it), budget
@@ -285,7 +287,7 @@ Kinds (T: a task is required; `?` marks an optional field; every enum is closed)
                      review's first reviewer (p52-2, ADR 0081 d2: outside the draw, so its line never carries arm, and
                      the master-review line of a segment that holds one carries none either), review the master review,
                      integrate the integrator, integration-review the Integration judge); model, effort (the role's first `ran` entry:
-                     what the engine asked); dispatches (int >= 1: its `ran` entries); outcome (the row's status, a
+                     what the engine asked: the entry's `asked` when it fell back, p46-3); dispatches (int >= 1: its `ran` entries); outcome (the row's status, a
                      string); tokens? (int >= 0: summed over this segment's journal agents of the role that are not
                      `cached`), fresh? (int >= 0: how many such agents), replayed? (int >= 1: its agents with `cached:
                      true`, a resume's replay); tokensPartial? (true: replayed exceeds the fresh summed over the
@@ -295,11 +297,22 @@ Kinds (T: a task is required; `?` marks an optional field; every enum is closed)
                      one; refused anywhere else); climbs? (int >= 1: the row's climbs at this role's stage, no-ops
                      included: plan the planner's, implement the builder's or the investigator's, review the
                      builder's); fellBack? (true: a fresh agent of a `ran` label that asked fable ran on a model id
-                     without "fable"; on a first-reviewer line also a ` on-rung` dispatch, a dead Fable first
+                     without "fable", or a `ran` entry marked fellBack (p46-3: the engine ran it on Opus in Fable's
+                     place); on a first-reviewer line also a ` on-rung` dispatch, a dead Fable first
                      reviewer's rerun on the task's rung on another model); fableRung? (true: any `ran` entry of the call is on an all-Fable rung of its
-                     args.ladder, so the call left the comparison of arms). ADR 0079 decision 8 (p46-2): one line per
+                     args.ladder, so the call left the comparison of arms); refused? (true, p46-3: a fresh agent of
+                     the role that asked fable ended `state: "error"` on an allowance refusal's text, "reached your …
+                     limit", where a plain connection drop leaves fellBack alone). ADR 0079 decision 8 (p46-2): one line per
                      role per journal segment, written only by reconcile-rollout.py fold-journals (its docstring holds
                      when), after the fact, keyed by (runId, startTime, role).
+  fable-share        ceiling, share (each {role: a number from 0 to 1}, its roles SHARE_ROLES: the drawn roles and the
+                     lead); pace (a number from 0 to 1); login? (the caller's Chorus Login, the quota store row's
+                     profile); fable?, general? (numbers from 0 to 100: the Login's Fable and general weekly windows'
+                     utilization); fetchedAt? (a UTC Z stamp: the older window's fetch); why? (a non-empty string:
+                     why the reading gave a share of nothing, then neither fable, general nor fetchedAt). p46-3, ADR
+                     0079 decision 6: one line per arms draw, by reconcile-rollout.py mark-started (a task's first
+                     dispatch, its task set) and record-entry (the lead's draw, no task): the ceiling ([share]) times
+                     fable_pace.py's pace for the Login is the share each role was drawn against.
   review-round       repo, head, digest; doc?; mode?; effort?; findings?, original?, regression?
                      (ints >= 0); verdict? (legacy, a string and no enum: stop or continue, written only before
                      fresh-review ADR 0001 and ADR 0065 retired the ledger's STOP rule; review-round.py writes none
@@ -640,6 +653,9 @@ docstring lists each verb's events and the stage, reasonClass and idle-reason ta
   call, a sign of the lead's life or a record's last line. The writer takes the same flock as call-journal and skips a
   line whose (runId, startTime, role) is already there, so two folds at once never duplicate it: write role-call only
   through this module.
+- fable-share (p46-3, ADR 0079 decision 6): a live line, one per arms draw (a task's first dispatch, or the lead's), at
+  the draw's own time. Its `share` is what each role was drawn against: the ceiling times the pace fable_pace.py read for
+  the Login, 0 with a `why`. Nothing reads it yet; it is the record a later reading of the pace reads.
 - Human acts (p21-2; a Reflection's Hands-off rate, skills/reflect/scripts/score.py). Each is recorded by the verb
   that acts on it, never model-written. Acts: `answer-recorded` (a Recorded answer); `gate-signed` standing=false (a
   bare approve-gates sign-off); `handed-back` via=retry (a "retry [[task]]" or repair hand-back that re-enters a block
@@ -1544,6 +1560,25 @@ def _exact_counts(v, keys):
     return isinstance(v, dict) and set(v) == set(keys) and all(_count0(v[k]) for k in keys)
 
 
+# ---- the paced share's line (reconcile-rollout.py's draws; p46-3, ADR 0079 decision 6) --------------------------------
+# fable-share's ceiling and share: {role: a number from 0 to 1}, its roles the drawn ones and the lead (ladder.py's
+# SHARE_ROLES, which equal ARMS_ROLES); fable and general are a store window's utilization, 0 to 100.
+SHARE_ROLES = ARMS_ROLES
+
+
+def _fraction(v):
+    return None if _number(v) and 0 <= v <= 1 else "a number from 0 to 1"
+
+
+def _utilization(v):
+    return None if _number(v) and 0 <= v <= 100 else "a number from 0 to 100"
+
+
+def _role_fractions(v):
+    ok = isinstance(v, dict) and all(k in SHARE_ROLES and _fraction(x) is None for k, x in v.items())
+    return None if ok else "an object of {role: a number from 0 to 1}, its roles among %s" % ", ".join(SHARE_ROLES)
+
+
 def _percent(v):
     return isinstance(v, int) and not isinstance(v, bool) and 0 <= v <= 100
 
@@ -1819,7 +1854,10 @@ KINDS = {
                          "model": _str, "effort": _str, "dispatches": _int(1), "outcome": _str},
                   {"tokens": _int(0), "fresh": _int(0), "replayed": _int(1), "tokensPartial": _true,
                    "models": _model_ids, "arm": _enum("opus", "fable"), "climbs": _int(1), "fellBack": _true,
-                   "fableRung": _true}),
+                   "fableRung": _true, "refused": _true}),
+    # p46-3 (ADR 0079 decision 6): reconcile-rollout.py's two draws (mark-started's _start_arms, record-entry's _lead_arm).
+    "fable-share": (False, {"ceiling": _role_fractions, "share": _role_fractions, "pace": _fraction},
+                    {"login": _str, "fable": _utilization, "general": _utilization, "fetchedAt": _stampz, "why": _str}),
     "review-round": (False, {"repo": _str, "head": _str, "digest": _str},
                      {"doc": _str, "mode": _str, "effort": _str, "findings": _int(0), "original": _int(0),
                       "regression": _int(0), "verdict": _str, "status": _enum("pending", "consumed"),

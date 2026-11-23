@@ -228,7 +228,12 @@ prints `no role-call for <n> segments: <why>`. Those segments are lost: a later 
 resume was bound after its last fold, and then reads only the journal the resume rewrote. So of the calls folded while
 a rollout's engine predates the kind, only a resumed call's latest segment can still be written, by a fold after the
 rollout moves to an engine that reads it or finishes. A `first-reviewer` role-call line (p52-2, ADR 0081 d2) exists only
-in the record of a call whose engine dispatches a doubled master review. The task note's `unreachable: true` stamp and
+in the record of a call whose engine dispatches a doubled master review. The allowance refusal's forms (p46-3, ADR 0079
+d7) come only from snapshots that have them: a row's `allowance` and its `ran` entries' `asked` and `fellBack` (an
+engine at p46-3 or later), the note's `fell_back:` stamp (its `reconcile`), a role-call line's `refused` (its
+`fold-journals`) and the `fable-share` Run record lines (its `mark-started` and `record-entry`). An older reader ignores
+each: an unknown row key, an unknown note line, an optional field, a kind it never reads. The fallback itself is
+engine-side, inside one call, and inert while no ladder names Fable (task p46-7 writes the first that does). The task note's `unreachable: true` stamp and
 its `## Felt check` lines (p52-2, ADR 0081 d3; vault-grammar § Felt check) are written by a `reconcile` at p52-2 or later
 only; an older engine ignores both, so its tasks take a single master review and no check. `felt-check` and
 `unfinished-rollout.py needs-you` read them from any root at p52-2 or later (`felt-check` is guard-exempt: it writes

@@ -77,6 +77,18 @@ test('role-call is emitted by reconcile-rollout.py alone, inside cmd_fold_journa
   assert.deepEqual(md.filter(({ text }) => /run_record\.py["']?\s+emit\b[^\n]*role-call/.test(text)).map(({ file }) => file), [])
 })
 
+// p46-3 (ADR 0079 decision 6): fable-share is written at each arms draw, by reconcile-rollout.py's two draw helpers alone.
+test('fable-share is emitted by reconcile-rollout.py alone, inside _start_arms and _lead_arm, never by prose', () => {
+  const by = scripts().filter(({ text }) => emits(text, 'fable-share')).map(({ file }) => file)
+  assert.deepEqual(by, ['skills/execute/scripts/reconcile-rollout.py'])
+  const rr = read('skills/execute/scripts/reconcile-rollout.py')
+  const helpers = ['_start_arms', '_lead_arm'].map((name) => defBody(rr, name))
+  assert.ok(helpers.every((b) => emits(b, 'fable-share')), 'each draw helper emits it')
+  assert.ok(!emits(helpers.reduce((t, b) => t.replace(b, ''), rr), 'fable-share'), 'and nowhere else in the file')
+  const md = [...textFiles('skills'), ...textFiles('docs'), ...textFiles('hooks')].filter(({ file }) => file.endsWith('.md'))
+  assert.deepEqual(md.filter(({ text }) => /run_record\.py["']?\s+emit\b[^\n]*fable-share/.test(text)).map(({ file }) => file), [])
+})
+
 // p54-7 (ADR 0084 Decided for you 3): master-run has one writer, master-runs' locked write (_master_locked), on one line.
 test('master-run is emitted by reconcile-rollout.py alone, inside _master_locked, never by prose', () => {
   const by = scripts().filter(({ text }) => emits(text, 'master-run')).map(({ file }) => file)

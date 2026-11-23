@@ -169,7 +169,10 @@ rollout body, i.e. the `## Queue` table; unlisted tasks after). Status reads the
   or `red` (a verifier red at Integration, `integration: verifier red: …`); the key is absent otherwise. An
   `integrating` task whose Run record's last lane line for it is `lane-freed release=origin` (its lead yielded the
   origin lane to another project's Integration on the same origin, ADR 0064) also carries `originWait`: `{origin,
-  since}`; the key is absent otherwise, and with an unreadable record.
+  since}`; the key is absent otherwise, and with an unreadable record. An unlanded task (one of the carried states:
+  queued, running, awaiting Integration, integrating or set aside) whose note carries `fell_back:` (p46-3, ADR 0079 d7:
+  a call of it read an allowance refusal and ran Fable's dispatches on Opus) carries `fellBack`, that stamp; the key is
+  absent otherwise. Its line adds `fell back to Opus <stamp>`: information, never a hold or a needs-you item.
 
 Each task's `queueState` is one of the six in the count (`merged`, `running`, `integrating`,
 `awaiting-integration`, `queued`, `set-aside`) or one of two outside it: `folded` (an affine tombstone) and
@@ -576,7 +579,8 @@ parsed), and list every distinct tag.
 A count shows only when `autoRetryBudget` is non-null (the verdict reached the budget), and the first matching form
 wins: `auto-retry off` when `autoRetryBudget.autoRetries.value` is 0 (every retry off, quota included);
 `overtime <overtime.used>/<overtime.budget>` when `overtime` is non-null (an Overtime run past the spent budget,
-p39-14, ADR 0070); `quota <quotaRetriesUsed>/5` when `autoRetryClass` is `quota` (a quota block spends no budget);
+p39-14, ADR 0070); `quota <quotaRetriesUsed>/5` when `autoRetryClass` is `quota` (a quota block spends no budget; an
+allowance block, its blocker summary opening `allowance refusal`, p46-3, is one);
 otherwise `auto-retry <autoRetriesUsed>/<autoRetryBudget.autoRetries.value>`. A non-null `takeOut` adds its own state
 after the count: `take-out failed <takeOut.failures>/3` once a try failed (at 3 its `humanFix` H10 is in the Needs you
 block), else `take-out cools down until <autoRetryAfter>` while its cool-down runs, else `take-out waits on [[d]]` when

@@ -177,6 +177,29 @@ for (const reasonClass of ['no-runner', 'unreported-context']) {
   })
 }
 
+// p46-3 (ADR 0079 d7): an allowance block writes no quota-stall and retries as quota, so its wait is quota-bound whether it
+// still waits (its reasonClass) or an auto-retry with retryClass quota moved it.
+test('L1: an allowance set-aside\'s wait is quota-bound/cool-down, still waiting or moved by its quota auto-retry', (t) => {
+  for (const [name, moved, want] of [['still waiting', [], 3], ['moved by its quota auto-retry', [
+    [T('11', '22:30'), 'auto-retry', 'w1', { stage: 'implement', setAsideAt: 'run', retryClass: 'quota', used: 0, budget: 2, quotaRetries: 1 }],
+    [T('11', '22:30'), 'slot-taken', 'w1', S('hand-back')],
+  ], 1.5]]) {
+    const h = setup(t)
+    emitAll(h, 'l-allow', [
+      [T('11', '20:00'), 'slot-taken', 'w1', S('start')],
+      [T('11', '21:00'), 'set-aside', 'w1', { stage: 'implement', reasonClass: 'allowance', setAsideAt: 'run' }],
+      [T('11', '21:00'), 'slot-freed', 'w1', { outcome: 'set-aside' }],
+      [T('11', '21:00'), 'idle-slots', null, idle('awaiting-hand-back')],
+      ...moved,
+    ])
+    rolloutNote(h, 'l-allow')
+    const b = ledgerCli(h, LSINCE, LUNTIL)
+    assert.deepEqual(b.row.byCause['quota-bound'], { 'cool-down': want }, `${name}: ${b.flags.join('\n')}`)
+    const stalls = b.row.byCause.stalls || {}
+    assert.ok(!('cool-down' in stalls) && !('hand-back' in stalls), `${name}: never stalls: ${JSON.stringify(b.row.byCause)}`)
+  }
+})
+
 test('L1 controls: a live serial chain and a superseding rollout not yet run price 0 h, flagged; re-shaped parallel, the chain prices from its first engine line; the carried rollout from its first Slot', (t) => {
   const h = setup(t)
   emitAll(h, 'l-serial', FIXTURE['l-serial'])

@@ -844,3 +844,121 @@ test('arms: none everywhere is byte-identical to no arms, and logs no arms line'
   assert.deepEqual([E.armOf(st, 'builder'), E.armOf(st, 'master-review'), E.armOf(st, 'investigator')], ['fable', '', ''])
   assert.deepEqual([E.fixedPass(st, 'builder'), E.fixedPass(st, 'master-review'), E.fixedPass(st, null)], [true, false, false])
 })
+
+// ---- allowance refusal (p46-3, ADR 0079 d7) ----------------------------------------------------------------------
+// A Fable dispatch still dead after runAgent's retry is read as its Login's Fable allowance refused: it runs once more on
+// Opus (`<label> on-rung`), and every later Fable dispatch of the call runs on Opus at once under its own label, each
+// recorded as fell back (`asked`, `fellBack` on its ran entry; the row's `allowance`). Only the rerun's own death is an
+// allowance block (ALLOWANCE_DIAGNOSIS, `blocked`, never plan feedback); a redirected death is the plain transient block.
+
+// The script with every Fable dispatch dead (a null, as the Workflow agent() returns on a refusal), plus `kill(label,
+// opts)` for the Opus deaths a case needs.
+const noFable = (script, kill = () => false) => Object.fromEntries(Object.entries(script).map(([k, v]) =>
+  [k, (p, o) => (o.model === 'fable' || kill(k, o) ? null : typeof v === 'function' ? v(p, o) : v)]))
+const ALLOWANCE_RE = /^allowance refusal — /
+const fellOf = (r) => r.row.ran.filter((x) => x.fellBack).map((x) => [x.label, x.model, x.effort, x.asked.model, x.asked.effort])
+
+test('allowance refusal: a dead Fable dispatch reruns once on Opus at its rung\'s effort, and every later Fable ask runs on Opus at once', async (t) => {
+  const S = 'proj-allow'
+  const gated = { scope: 'cross-cutting', planGate: true }
+  for (const [name, ladder, task, script, calls, refused] of [
+    ['a builder Fable arm', ladderFrom(t, BUILT_IN_RUNGS), { arms: { builder: 'fable' } }, fightOf(S), [
+      [`implement:${S}`, 'fable', 'high'], [`implement:${S}`, 'fable', 'high'], [`implement:${S} on-rung`, 'opus', 'high'],
+      [`review:${S} r1`, 'opus', 'xhigh'], [`revise:${S} r2`, 'opus', 'high'], [`review:${S} r2`, 'opus', 'xhigh'],
+    ], `implement:${S}`],
+    // The planner dies on its plan model; the plan judge, riding with it, asks Fable too and is redirected at the rung's judge.
+    ['a plan model', ladderFrom(t, P3), gated, {
+      [`plan:${S}`]: plan, [`plan-judge:${S} r1`]: approve, [`implement:${S}`]: green(`implement:${S}`), [`review:${S} r1`]: approve,
+    }, [
+      [`plan:${S}`, 'fable', 'high'], [`plan:${S}`, 'fable', 'high'], [`plan:${S} on-rung`, 'opus', 'high'],
+      [`plan-judge:${S} r1`, 'opus', 'medium'], [`implement:${S}`, 'opus', 'high'], [`review:${S} r1`, 'opus', 'high'],
+    ], `plan:${S}`],
+    // On an all-Fable rung the fallback takes the Integration rung's efforts (opus-xhigh: xhigh, review xhigh).
+    ['an all-Fable rung', ladderFrom(t, THREE), { rung: 'fable-high' }, { [`implement:${S}`]: green(`implement:${S}`), [`review:${S} r1`]: approve }, [
+      [`implement:${S}`, 'fable', 'high'], [`implement:${S}`, 'fable', 'high'], [`implement:${S} on-rung`, 'opus', 'xhigh'], [`review:${S} r1`, 'opus', 'xhigh'],
+    ], `implement:${S}`],
+  ]) {
+    const r = await run(mkArgs(mkTask(S, task), { ladder }), noFable({ ...script, [`${refused} on-rung`]: script[refused] }))
+    clean(r)
+    assert.deepEqual(triples(r), calls, name)
+    assert.equal(r.row.status, 'review', name)
+    assert.ok(!r.row.blockerDiagnosis, name)
+    const redirected = calls.filter(([l, m], i) => m === 'opus' && i > calls.findIndex(([x]) => x.endsWith(' on-rung')) && fellOf(r).some(([fl]) => fl === l))
+    assert.deepEqual(r.row.allowance, { refused: [refused], fellBack: 1 + redirected.length }, name)
+    assert.deepEqual(fellOf(r)[0], [`${refused} on-rung`, 'opus', calls[2][2], 'fable', 'high'], `${name}: the rerun's entry asked Fable at high`)
+    assert.ok(r.logs.includes(`allowance: ${refused} on fable died twice — read as its Login's Fable allowance refused (ADR 0079 d7); once more on opus at ${calls[2][2]}, and Fable is out for the rest of this call`), `${name}: ${r.logs.join('\n')}`)
+    assert.equal(callOf(r, `${refused} on-rung`).prompt, callOf(r, refused).prompt, `${name}: the rerun carries the same prompt (its framing kept)`)
+    assert.equal(r.calls.filter((c) => c.model === 'fable').length, 2, `${name}: Fable is asked only by the dispatch that died twice`)
+  }
+  // The arm's reviser and the plan judge were redirected under their own labels, with asked and fellBack.
+  const arm = await run(mkArgs(mkTask(S, { arms: { builder: 'fable' } }), { ladder: ladderFrom(t, BUILT_IN_RUNGS) }),
+    noFable({ ...fightOf(S), [`implement:${S} on-rung`]: green(`implement:${S}`) }))
+  assert.deepEqual(fellOf(arm), [[`implement:${S} on-rung`, 'opus', 'high', 'fable', 'high'], [`revise:${S} r2`, 'opus', 'high', 'fable', 'high']])
+  assert.deepEqual(arm.row.climbs, [{ stage: 'review', from: 'opus-high', to: 'opus-high' }], 'the Fable arm keeps its no-op climbs')
+})
+
+test('allowance refusal: an Opus rerun that dies too is the allowance block at every stage, blocked and never plan feedback', async (t) => {
+  const S = 'proj-allowdead'
+  // dies(label, opts): the dispatches that return null. Each case refuses one stage's Fable dispatch, then its Opus rerun.
+  const refuse = (prefix) => (k, o) => k.startsWith(prefix) && (o.model === 'fable' || k.endsWith(' on-rung'))
+  for (const [name, ladder, task, script, dies, rounds] of [
+    // A plan reviser on its plan model, after a judged round on Fable: the plan rounds used are kept.
+    ['the plan reviser', ladderFrom(t, P3), { scope: 'cross-cutting', planGate: true },
+      { [`plan:${S}`]: plan, [`plan-judge:${S} r1`]: changes('tighten'), [`plan-revise:${S} r2`]: plan }, refuse('plan-revise:'), 2],
+    ['the implementer', ladderFrom(t, BUILT_IN_RUNGS), { arms: { builder: 'fable' } }, { [`implement:${S}`]: green(`implement:${S}`) }, refuse('implement:'), 0],
+    ['the review judge', ladderFrom(t, BUILT_IN_RUNGS), { arms: { 'master-review': 'fable' } },
+      { [`implement:${S}`]: green(`implement:${S}`), [`review:${S} r1`]: approve }, refuse('review:'), 0],
+    ['the reviser', ladderFrom(t, BUILT_IN_RUNGS), { arms: { builder: 'fable' } },
+      { ...fightOf(S), [`implement:${S}`]: green(`implement:${S}`) }, refuse('revise:'), 0],
+  ]) {
+    const all = Object.fromEntries(Object.entries(script).flatMap(([k, v]) => [[k, v], [`${k} on-rung`, v]]))
+    const r = await run(mkArgs(mkTask(S, task), { ladder }), Object.fromEntries(Object.entries(all).map(([k, v]) => [k, (p, o) => (dies(k, o) ? null : v)])))
+    clean(r)
+    assert.equal(r.row.status, 'blocked', name)
+    assert.match(r.row.blockerDiagnosis, ALLOWANCE_RE, name)
+    assert.equal(r.row.planRoundsUsed, rounds, name)
+    assert.ok(r.labels.at(-1).endsWith(' on-rung'), `${name}: the last dispatch is the rerun`)
+    assert.equal(r.row.allowance.fellBack, 1, name)
+    assert.equal(r.row.plan, task.planGate ? null : '', `${name}: no plan settled at the plan stage`)
+  }
+})
+
+test('allowance refusal: a redirected death and an Opus death with no Fable stay transient, and a ladder with no Fable adds no key', async (t) => {
+  const { TRANSIENT_DIAGNOSIS } = loadEngine(['TRANSIENT_DIAGNOSIS'])
+  const S = 'proj-allowguard'
+  // The Fable arm's implementer falls back and lands on Opus; the redirected reviser then dies twice on Opus.
+  const red = await run(mkArgs(mkTask(S, { arms: { builder: 'fable' } }), { ladder: ladderFrom(t, BUILT_IN_RUNGS) }),
+    noFable({ ...fightOf(S), [`implement:${S} on-rung`]: green(`implement:${S}`) }, (k) => k.startsWith('revise:')))
+  clean(red)
+  assert.deepEqual([red.row.status, red.row.blockerDiagnosis], ['blocked', TRANSIENT_DIAGNOSIS], 'a redirected death is transient')
+  assert.deepEqual(red.labels.slice(-2), [`revise:${S} r2`, `revise:${S} r2`], 'retried once under its own label, never rerun again')
+  // No Fable asked: an Opus death is today's transient block, and plan-blocked at the plan stage.
+  const ladder = ladderFrom(t, BUILT_IN_RUNGS)
+  for (const [name, task, script, status] of [
+    ['implement', {}, { [`implement:${S}`]: null }, 'blocked'],
+    ['plan', { scope: 'cross-cutting', planGate: true }, { [`plan:${S}`]: null }, 'plan-blocked'],
+  ]) {
+    const r = await run(mkArgs(mkTask(S, task), { ladder }), script)
+    clean(r)
+    assert.deepEqual([r.row.status, r.row.blockerDiagnosis], [status, TRANSIENT_DIAGNOSIS], name)
+    assert.ok(!('allowance' in r.row), name)
+    assert.deepEqual(r.labels, [r.labels[0], r.labels[0]], `${name}: no on-rung rerun`)
+  }
+  // A clean run on a ladder that names no Fable carries no allowance, asked or fellBack key.
+  const plain = await run(mkArgs(mkTask(S), { ladder }), fightOf(S))
+  clean(plain)
+  assert.ok(!('allowance' in plain.row))
+  assert.ok(plain.row.ran.every((x) => !('asked' in x) && !('fellBack' in x)))
+})
+
+test('allowance refusal: the diagnosis opens with the mark, holds no word a transient or quota reader reads, and the rerun suffix is reconcile\'s', () => {
+  const E = loadEngine(['ALLOWANCE_MARK', 'ALLOWANCE_DIAGNOSIS', 'FALLBACK_SUFFIX'])
+  assert.equal(E.ALLOWANCE_MARK, 'allowance refusal')
+  assert.ok(E.ALLOWANCE_DIAGNOSIS.startsWith(E.ALLOWANCE_MARK + ' — '))
+  for (const word of ['transient infrastructure failure', 'quota', 'usage limit', '"']) {
+    assert.ok(!E.ALLOWANCE_DIAGNOSIS.toLowerCase().includes(word), `no ${word}`)
+  }
+  const rr = fs.readFileSync(path.join(root, 'skills', 'execute', 'scripts', 'reconcile-rollout.py'), 'utf8')
+  assert.equal(JSON.parse(rr.match(/^ON_RUNG_SUFFIX = ("[^"]*")/m)[1]), E.FALLBACK_SUFFIX)
+  assert.equal(JSON.parse(rr.match(/^ALLOWANCE_MARK = ("[^"]*")/m)[1]), E.ALLOWANCE_MARK)
+})

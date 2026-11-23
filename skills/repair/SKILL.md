@@ -287,7 +287,10 @@ above, never asked; `record-answer --raise` stays for an H9 cause that is still 
 mid-run is an infra block, never a quota block: it gets the infra cool-downs, the budget and the Overtime, then the
 take-out. When the limit is known to the lead's Session,
 execute § 4.5 *Lost call* first resumes such a transient row once from its own run, so only that resume's row, or
-the dead call's row, reaches this class.
+the dead call's row, reaches this class. One exception (ADR 0079 d7, p46-3): when the agent it kills was asked Fable
+and its Opus rerun dies too, the row opens `allowance refusal`, an allowance block, which retries as a quota block
+(`autoRetryClass: quota`: the quota cool-downs, no budget spent; it is **retry (automatic)**, never his); under a usage
+limit the lead's Session knows of, *Lost call* resumes it first, as it does a transient row.
 
 **Classed before the answer.** § 2 classes each task on the state § 1's diagnosis read. A § 3b answer changes what
 `inputs` reads (an answered block reads `answered for this block …`, its `humanFix` the answer's own), and the

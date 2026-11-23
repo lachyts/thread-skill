@@ -293,9 +293,10 @@ function checkRoomStop({ skill, status, handoff, repair, context, legs }) {
   if (!lostRoom.startsWith('- While a room stop stands') || !lostRoom.includes('it takes the `Otherwise, once:` resume with a fresh once') ||
     !lostRoom.includes('at step 1.3 or 1.4') || lostHead.includes('resumeFromRunId')) fails.push('lost-call-room')
 
-  // usage-limit: how the limit is known, and what a transient row after it is.
+  // usage-limit: how the limit is known, and what a transient row after it is; p46-3: an allowance row is one too.
   if (!['`hit its usage limit`', 'Lost calls the limit cut', '`usage limit reached`', 'with or without a `Chorus: ` head',
     'contains `transient infrastructure failure`', 'is never reconciled', 'each usage limit grants a fresh once',
+    'contains `allowance refusal`', 'is a transient row here and at every site that reads one',
     "A call the CLI's respawn ended with no row at all (a usage-limit or signed-out re-send opened the entry, and *Cold resume* finds it gone) gets the same fresh once"].every((k) => lostUsage.includes(k))) {
     fails.push('usage-limit')
   }
@@ -306,6 +307,9 @@ function checkRoomStop({ skill, status, handoff, repair, context, legs }) {
     !st2.includes('it goes to *Lost call* (*After a usage limit*)') || !st2.includes('Any other error, no row, or a transient row after a usage limit: *Lost call*') ||
     !integ.includes('A transient row after a usage limit (its `blockerDiagnosis` contains `transient infrastructure failure`) is the exception, as at step 2: it is never reconciled, writes no `## Integration log` line, keeps `integrating:` and the lane held, and goes to *Lost call*') ||
     !s6.includes('One row is never reconciled: a transient row after a usage limit (its `blockerDiagnosis` contains `transient infrastructure failure`') ||
+    // p46-3: an allowance row after a usage limit routes the same way at step 2 and § 6.
+    !st2.includes('So does a row whose `blockerDiagnosis` contains `allowance refusal` from such a call (*After a usage limit*)') ||
+    !s6.includes('An allowance row (`allowance refusal`) from such a call is one too.') ||
     !checkSites.includes('A transient row after a usage limit is checked there like any row but never reconciled')) fails.push('transient-routing')
 
   // lost-handle: a runId alone never resumes; a lost integrate handle frees the lane and re-enters through prepare.
@@ -671,6 +675,8 @@ test('control: each usage-limit part missing fails usage-limit', () => {
   only(sk(', and each usage limit grants a fresh once.', '.'), 'usage-limit', 'no fresh once')
   only(sk(" A call the CLI's respawn ended with no row at all (a usage-limit or signed-out re-send opened the entry, and *Cold resume* finds it gone) gets the same fresh once.", ''),
     'usage-limit', 'no fresh once for a respawn-cut call')
+  only(sk(' An allowance row (its `blockerDiagnosis` contains `allowance refusal`, ADR 0079 d7) from such a call is a transient row here and at every site that reads one (step 2, § 6, *Check sites*).', ''),
+    'usage-limit', 'no allowance sentence (p46-3)')
 })
 
 test('control: a reconcile site that reconciles the row, or reads "starts", fails transient-routing', () => {
@@ -680,6 +686,8 @@ test('control: a reconcile site that reconciles the row, or reads "starts", fail
     'is reconciled like any row, and goes to *Lost call*, unless'), 'transient-routing', 'integrate return')
   only(sk(', or a transient row after a usage limit (*After a usage limit*, below), or which', ', or which'), 'transient-routing', 'definition')
   only(sk('except a row whose `blockerDiagnosis` contains `transient', 'except a row whose `blockerDiagnosis` starts `transient'), 'transient-routing', 'starts')
+  only(sk(' So does a row whose `blockerDiagnosis` contains `allowance refusal` from such a call (*After a usage limit*).', ''), 'transient-routing', 'no step 2 allowance row (p46-3)')
+  only(sk(' An allowance row (`allowance refusal`) from such a call is one too.', ''), 'transient-routing', 'no § 6 allowance row (p46-3)')
 })
 
 test('control: a runId alone as a handle, or a lost integrate handle kept, fails lost-handle', () => {

@@ -2084,12 +2084,23 @@ through time, from attention to merged PRs. Terms only — no implementation.
 - **Fable share** — the live part of a Login's work drawn into Fable Arms,
   which pacing moves so its Fable allowance and its general allowance run
   down together, never above the role's **Fable ceiling**: the most of a
-  drawn role's work its Fable arm may take, a rollout setting, one per drawn
-  role, and the only part a Tuning changes. Not the **Parallel ceiling** or
-  the retired **Ceiling**. Plans, the Fable rung and an
-  **Unreachable surface**'s first reviewer take Fable first; the arms get
-  what is left (ADR 0079). _Avoid_: reserve, cap, quota (alone), bare
-  "ceiling".
+  drawn role's work its Fable arm may take, one per drawn role, read from the
+  ladder's `[share]` table until p46-10 moves it into the Rollout settings,
+  and the only part a Tuning changes. The pace is read per Login from the
+  quota store at each draw: half the ceiling when the two weekly windows are
+  even, less when Fable is further used, more when it is behind, nothing
+  when it is spent or the reading is missing or stale (every role then draws
+  Opus, never a stop). Not the **Parallel ceiling** or the retired
+  **Ceiling**. Plans, the Fable rung and an **Unreachable surface**'s first
+  reviewer take Fable first; the arms get what is left (ADR 0079). _Avoid_:
+  reserve, cap, quota (alone), bare "ceiling".
+- **Allowance refusal** — a Fable dispatch that dies twice, read as its
+  Login's Fable allowance refused: it runs once more on Opus, and every later
+  Fable dispatch of the call runs on Opus at once, each marked fell back
+  (`fell_back:` on the note). It is never transient and never plan
+  feedback. When the Opus rerun dies too it is an allowance block, retried
+  as a quota block, or resumed as a Lost call (execute § 4.5) under a usage
+  limit the lead knows of (ADR 0079 d7). _Avoid_: quota block, transient.
 - **Top rung** — the Ladder's last rung, the ceiling for every task and every
   Integration (ADR 0029). Integration never runs on an all-Fable rung: it
   runs on the highest rung below it (ADR 0079). _Avoid_: top tier, ceiling,

@@ -186,30 +186,41 @@ test('a question from either reviewer that says changes ends review-blocked with
   assert.ok(r.logs.includes(`review:${S} r1: needsHuman on an approve verdict ignored`))
 })
 
-test('a dead first reviewer on Fable runs once more on the rung; a dead rerun or second reviewer is the transient block', async () => {
+// p46-3 (ADR 0079 d7): a first reviewer on Fable that dies twice is an allowance refusal, runAgent's engine-wide fallback:
+// it reruns once on Opus, and every later Fable dispatch of the call (a `[role]` second reviewer's included) runs on Opus
+// at once, so a doubled review runs both reviewers on Opus for the rest of the call.
+test('a dead first reviewer on Fable runs once more on Opus, and both reviewers run on Opus after; a dead rerun is the allowance block, a dead second reviewer the transient one', async () => {
   const over = ladder({ share: { 'master-review': 0.5 } })
-  // The rerun takes the rung's own model whichever names Fable; under [role] the second reviewer stays on Fable.
-  for (const [name, o, second] of [
-    ['a master-review share', over, 'opus/xhigh'],
-    ['the master review\'s role model', ladder({ roles: { 'master-review': 'fable' } }), 'fable/high'],
+  const ALLOWANCE_LOG = `allowance: first-review:${S} r1 on fable died twice — read as its Login's Fable allowance refused (ADR 0079 d7); once more on opus at xhigh, and Fable is out for the rest of this call`
+  for (const [name, o] of [
+    ['a master-review share', over],
+    ['the master review\'s role model', ladder({ roles: { 'master-review': 'fable' } })],
   ]) {
     const r = await runTask(mkArgs({}, o), agentOf({ ...MARKED, firstDead: 'fable' }))
     const row = r.result.tasks[0]
     assert.equal(row.status, 'review', name)
     assert.deepEqual(reviewLabels(r), [`first-review:${S} r1`, `first-review:${S} r1`, `first-review:${S} r1 on-rung`, `review:${S} r1`], name)
-    assert.deepEqual(ranOn(row), { 'first-review r1': 'fable/high', 'first-review r1 on-rung': 'opus/xhigh', 'review r1': second }, name)
-    assert.ok(r.logs.includes(`review: ${S} r1: the first reviewer on fable died; once more on the rung's opus`), `${name}: ${r.logs.join('\n')}`)
-    assert.ok(r.logs.includes(`review: ${S} r1: first approve on opus, second approve on ${second.split('/')[0]}`), `${name}: ${r.logs.join('\n')}`)
+    assert.deepEqual(ranOn(row), { 'first-review r1': 'fable/high', 'first-review r1 on-rung': 'opus/xhigh', 'review r1': 'opus/xhigh' }, name)
+    assert.ok(r.logs.includes(ALLOWANCE_LOG), `${name}: ${r.logs.join('\n')}`)
+    assert.ok(!r.logs.some((l) => l.includes('the first reviewer on fable died')), `${name}: the old log line is gone`)
+    assert.ok(r.logs.includes(`review: ${S} r1: first approve on opus, second approve on opus`), `${name}: ${r.logs.join('\n')}`)
+    const fell = row.ran.filter((x) => x.fellBack)
+    // Under [role] the second reviewer asked Fable too, so it is redirected; under a share it asked the rung's Opus.
+    const want = name === 'a master-review share' ? [`first-review:${S} r1 on-rung`] : [`first-review:${S} r1 on-rung`, `review:${S} r1`]
+    assert.deepEqual(fell.map((x) => x.label), want, name)
+    assert.ok(fell.every((x) => x.asked.model === 'fable' && x.asked.effort === 'high'), name)
+    assert.deepEqual(row.allowance, { refused: [`first-review:${S} r1`], fellBack: want.length }, name)
   }
-  for (const [name, s, last] of [
-    ['a dead rerun', { firstDead: 'all' }, `first-review:${S} r1 on-rung`],
-    ['a dead second reviewer', { reviews: [null] }, `review:${S} r1`],
+  for (const [name, s, last, diag] of [
+    ['a dead rerun', { firstDead: 'all' }, `first-review:${S} r1 on-rung`, /^allowance refusal/],
+    ['a dead second reviewer', { reviews: [null] }, `review:${S} r1`, /transient infrastructure failure/],
   ]) {
     const agent = agentOf({ ...MARKED, ...s })
     const d = await runTask(mkArgs({}, over), s.reviews ? async (p, o) => (o.label.startsWith('review:') ? null : agent(p, o)) : agent)
     const drow = d.result.tasks[0]
     assert.equal(drow.status, 'blocked', name)
-    assert.match(drow.blockerDiagnosis, /transient infrastructure failure/, name)
+    assert.match(drow.blockerDiagnosis, diag, name)
+    if (s.firstDead) assert.doesNotMatch(drow.blockerDiagnosis, /transient infrastructure failure/, name)
     assert.equal(reviewLabels(d).at(-1), last, name)
   }
 })

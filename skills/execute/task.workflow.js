@@ -315,7 +315,7 @@ export const meta = {
 // Returns { rolloutSlug, tasks: [ONE row: { slug, scope, status, prUrl, branch, worktreePath,
 //   reviewRoundsUsed, planRoundsUsed, blockerDiagnosis, reviewFeedback, reviewHistory,
 //   approvedAtCeiling, summary, startRung, rung, climbs, rungDrift, ran, needsHuman, gatedInputs, plan,
-//   reviewVerdicts, flakes, unreachable }] }
+//   reviewVerdicts, flakes, unreachable[, allowance] }] }
 // — the pre-p12-5 envelope with exactly one row, the called task's, the shape reconcile-rollout.py reads —
 // where status ∈ review | review-blocked | blocked | plan-blocked | gate-pending. The rung record (ADR 0029
 // decision 7): startRung is the rung the call started on, rung the one it ended on (reconcile stamps it as
@@ -323,7 +323,14 @@ export const meta = {
 // review, from, to } (from === to is a recorded no-op on the top rung), rungDrift the task's `rung:` when
 // the ladder lacks it ('' otherwise), and ran every dispatch as { label, rung, model, effort }, in order. A doubled
 // master review (p52-2, ADR 0081 d2) dispatches `first-review:<slug> r<N>` before each round's `review:<slug> r<N>`, and
-// `first-review:<slug> r<N> on-rung` when its first reviewer on Fable died and ran once more on the task's rung.
+// `first-review:<slug> r<N> on-rung` when its first reviewer on Fable died and ran once more on Opus (an allowance
+// refusal, below). A dispatch that ran on Opus in Fable's place (p46-3, ADR 0079 d7: runAgent's allowance refusal) adds
+// `asked: { model: 'fable', effort }` (what the engine asked) and `fellBack: true` to its entry, whose model and effort
+// are what ran: the `<label> on-rung` rerun of a Fable dispatch that died twice, and each later Fable dispatch of the
+// call, redirected under its own label. allowance (p46-3) is present only on a row whose call read an allowance
+// refusal: { refused: [the label of the Fable dispatch that died twice], fellBack: the dispatches run on Opus in Fable's
+// place, its retries never counted (>= 1) }; reconcile stamps the note `fell_back: <stamp>`. A call whose Opus rerun
+// died too ends blocked with ALLOWANCE_DIAGNOSIS (an allowance block, retried as a quota block), never plan-blocked.
 // A block on the top rung is a wall at the operator's ceiling: raising it is an edit to the ladder file.
 // gatedInputs lists the declared-but-unapproved gates when status is gate-pending
 // (a declared gate always pauses for a human — ADR 0008). A plan-gate gate-pending that follows a plan judge's
@@ -2588,6 +2595,8 @@ function rungState(task, a) {
   // (result, paths), against args.unreachablePaths' globs; unreachableRow reads them into the row.
   // share (p52-2): the ladder's [share], read only by fableNamedForReview. doubled (p52-2): set by reviewLoop at a round's
   // start once this call's mark or task.unreachable holds, sticky for the call; armOf reads it.
+  // allowance (p46-3, ADR 0079 d7): absent until runAgent reads an allowance refusal, then { refused, fellBack } for the
+  // rest of the call (every later Fable dispatch runs on Opus); rowRecord copies it onto the row.
   const arms = task && task.arms && typeof task.arms === 'object' ? { ...task.arms } : {}
   const globs = a && Array.isArray(a.unreachablePaths) ? a.unreachablePaths.slice() : []
   return {
@@ -2603,13 +2612,16 @@ function rungRecord(st) {
   return { startRung: st.rungs[st.start].name, rung: cur(st).name, climbs: st.climbs.map((c) => ({ ...c })) }
 }
 // The record plus the call's drift and its dispatches: the row's five rung keys, the call's judged review
-// rounds (p21-3) and its Flakes (p29-9), so every task-mode row carries them, a stage throw included.
+// rounds (p21-3) and its Flakes (p29-9), so every task-mode row carries them, a stage throw included. The call's
+// allowance refusal (p46-3) only when it read one: a call that asked no Fable, or whose Fable ran, carries no key.
 function rowRecord(st) {
   return {
-    ...rungRecord(st), rungDrift: st.drift, ran: st.ran.map((x) => ({ ...x })),
+    ...rungRecord(st), rungDrift: st.drift,
+    ran: st.ran.map((x) => (x.asked ? { ...x, asked: { ...x.asked } } : { ...x })),
     reviewVerdicts: (st.verdicts || []).map((v) => ({ ...v, feedback: [...v.feedback] })),
     flakes: (st.flakes || []).map((f) => ({ ...f })),
     unreachable: unreachableRow(st),
+    ...(st.allowance ? { allowance: { refused: [...st.allowance.refused], fellBack: st.allowance.fellBack } } : {}),
   }
 }
 
@@ -2702,8 +2714,9 @@ function runOn(st, role) {
 }
 // A doubled master review (p52-2, ADR 0081 d2). Whether the operator's file names Fable for the master review: its
 // `roles` gives the master review Fable, or its [share] gives it a share above 0. Never on an all-Fable rung, where the
-// rung runs every role. The engine cannot see the Login's room: a dead first reviewer on Fable reruns on the rung
-// (doubledVerdict), standing in for an allowance refusal.
+// rung runs every role. The engine cannot see the Login's room: a first reviewer on Fable that dies twice is read as an
+// allowance refusal (p46-3, runAgent), so it reruns once on Opus and every later Fable dispatch of the call, a `[role]`
+// second reviewer's included, runs on Opus at once.
 function fableNamedForReview(st) {
   if (allFable(cur(st))) return false
   const roles = st.roles || {}
@@ -2740,10 +2753,43 @@ function integrationRungOf(L) {
 // sentinel instead of a raw null. Every layer below checks `.__dead` immediately after the call and converts
 // it into a CLEAN transient block, so no stage ever dereferences a null and the cause is CLASSIFIED —
 // reconcile then writes an actionable "re-dispatch cleanly" note instead of the generic stage-threw string.
+//
+// The Fable case (p46-3, ADR 0079 d7: an allowance refusal). A Login whose Fable allowance is spent refuses every Fable
+// dispatch ("You've reached your Fable limit"), and the Workflow `agent()` hands the script the same bare null, twice
+// (the journal's workflowProgress entry holds the text, readable only after the fact: reconcile's fold reads it as
+// `refused`). So a Fable dispatch still dead after its retry is read as an allowance refusal: it runs once more on Opus
+// (fallbackOn), labelled `<label> on-rung`, and every later Fable dispatch of the call runs on Opus at once under its own
+// label, each recorded as fell back (`asked`, `fellBack` on its `ran` entry; the row's `allowance`). Only that rerun's
+// own death is an allowance block (ALLOWANCE_DIAGNOSIS: the Login's general allowance is likely spent too); a redirected
+// dispatch that dies is the plain transient block, most likely a connection drop. Nothing locks: it is never plan
+// feedback and never a stop.
 const TRANSIENT_DIAGNOSIS =
   'transient infrastructure failure — the agent process died mid-run on a terminal API/connection error ' +
   '(e.g. "Connection closed mid-response"), NOT a task-authored blocker. Re-dispatch cleanly: the worktree ' +
   'and any committed work are reusable and a fresh dispatch of the same prompt should proceed normally.'
+// ALLOWANCE_DIAGNOSIS opens with ALLOWANCE_MARK, reconcile-rollout.py's ALLOWANCE_MARK (reasonClass allowance, retry class
+// quota) and lead-integrate.py's NO_BUDGET_OPENINGS entry. It holds no `transient infrastructure failure`, `quota`,
+// `usage limit` or double quote, so neither a TRANSIENT_MARK reader nor a QUOTA_RE reader misreads it, and the lead can
+// copy it into a ROLLOUT-STATUS reason.
+const ALLOWANCE_MARK = 'allowance refusal'
+const ALLOWANCE_DIAGNOSIS =
+  'allowance refusal — a dispatch on Fable died twice, read as its Login\'s Fable allowance refused (ADR 0079 d7), ' +
+  'and its rerun on Opus died too, so the Login\'s general allowance is likely spent as well. NOT a task-authored ' +
+  'blocker and never plan feedback: the task re-enters by the automatic retry after its long cool-down; the worktree, ' +
+  'branch and any PR are reusable.'
+// The rerun's label suffix: reconcile-rollout.py's ON_RUNG_SUFFIX (pinned equal by tests/engine-ladder.test.mjs).
+const FALLBACK_SUFFIX = ' on-rung'
+
+// { model: 'opus', effort } a dispatch labelled `label` runs on in Fable's place: the task's current rung, or the
+// Integration rung (integrationRungOf) when the current rung is all-Fable, at the effort its role reads there (the plan
+// judge's `judge`, a master reviewer's `review`, every other role's `effort`). So a fallback runs as it would if the
+// rung named no plan model and the role had no model of its own.
+function fallbackOn(st, label) {
+  const R = allFable(cur(st)) ? integrationRungOf({ rungs: st.rungs }) : cur(st)
+  const kind = String(label || '').split(':')[0]
+  const effort = kind === 'plan-judge' ? R.judge : kind === 'review' || kind === 'first-review' ? R.review : R.effort
+  return { model: 'opus', effort }
+}
 
 // p29-9 (ADR 0050): the Flakes an agent's Flake check returned, sanitised onto `have` (the call's list so far): each
 // entry { test, sha } with test a non-empty one-line string of at most FLAKE_TEST_MAX characters (trimmed) and sha
@@ -2815,28 +2861,72 @@ function unreachableRow(st) {
 // it records its agents on its own trace, also before each runs (integrate()).
 // p29-9: the one push site of a task call's Flakes (st.flakes): an IMPL_RESULT (or IMPL_RESULT_SECURED) agent's that returned (never a dead
 // one's), the read-only investigator's never (its prompt has no Flake check). A signed-gate replay dedupes.
+// p46-3 (ADR 0079 d7, the dispatch-resilience section above): only with st. While st.allowance stands, a dispatch whose
+// opts.model is 'fable' is redirected at once to fallbackOn under its own label; a dead one is the plain { __dead: true }.
+// Otherwise a Fable dispatch still dead after its retry sets st.allowance and runs once more on fallbackOn as
+// `<label> on-rung`, with its own one retry; still dead, it returns { __dead: true, allowance: true }. Each Opus dispatch
+// in Fable's place is pushed on st.ran before it runs, with `asked` and `fellBack`, and counts once in
+// st.allowance.fellBack (its retry never does). The Flake and Unreachable bookkeeping reads the opts that ran: the label's
+// prefix and the schema are kept.
 async function runAgent(prompt, opts, st) {
-  if (st) st.ran.push({ label: (opts && opts.label) || '', rung: cur(st).name, model: opts && opts.model, effort: opts && opts.effort })
-  let r = await agent(prompt, opts)
-  if (r == null) {
-    log(`agent death (null return) on ${(opts && opts.label) || '?'} — one automatic retry`)
-    r = await agent(prompt, opts)
+  const label = (opts && opts.label) || ''
+  const attempt = async (o) => {
+    let r = await agent(prompt, o)
+    if (r == null) {
+      log(`agent death (null return) on ${(o && o.label) || '?'} — one automatic retry`)
+      r = await agent(prompt, o)
+    }
+    return r
   }
-  if (r != null && st && opts && (opts.schema === IMPL_RESULT || opts.schema === IMPL_RESULT_SECURED) && !String(opts.label || '').startsWith('investigate:')) {
-    st.flakes = flakesOf(r, st.flakes || [], opts.label || '?')
-    noteUnreachable(st, r, opts.label || '?')
+  const fellBackOn = (o) => {
+    const on = fallbackOn(st, o.label)
+    st.ran.push({ label: o.label, rung: cur(st).name, model: on.model, effort: on.effort, asked: { model: 'fable', effort: opts.effort }, fellBack: true })
+    st.allowance.fellBack += 1
+    return { ...o, ...on }
   }
+  const book = (r, o) => {
+    if (r != null && st && o && (o.schema === IMPL_RESULT || o.schema === IMPL_RESULT_SECURED) && !String(o.label || '').startsWith('investigate:')) {
+      st.flakes = flakesOf(r, st.flakes || [], o.label || '?')
+      noteUnreachable(st, r, o.label || '?')
+    }
+  }
+  const fable = !!st && !!opts && opts.model === 'fable'
+  if (fable && st.allowance) {
+    const o = fellBackOn({ ...opts, label })
+    log(`allowance: ${label} asked fable — on opus at ${o.effort} (Fable is out for the rest of this call)`)
+    const r = await attempt(o)
+    book(r, o)
+    return r == null ? { __dead: true } : r
+  }
+  if (st) st.ran.push({ label, rung: cur(st).name, model: opts && opts.model, effort: opts && opts.effort })
+  const r = await attempt(opts)
+  if (r == null && fable) {
+    st.allowance = { refused: [label], fellBack: 0 }
+    const o = fellBackOn({ ...opts, label: label + FALLBACK_SUFFIX })
+    log(`allowance: ${label} on fable died twice — read as its Login's Fable allowance refused (ADR 0079 d7); once more on opus at ${o.effort}, and Fable is out for the rest of this call`)
+    const again = await attempt(o)
+    book(again, o)
+    return again == null ? { __dead: true, allowance: true } : again
+  }
+  book(r, opts)
   return r == null ? { __dead: true } : r
 }
 
 // Layer-appropriate clean blocks for a dead agent (see runAgent). The specific diagnosis is what makes the
 // transient case cheap: reconcile writes "re-dispatch cleanly" and the lead auto-retries instead of
-// hand-diagnosing an infra blip from the <failures> block.
-function transientPlanBlock(task, rounds) {
+// hand-diagnosing an infra blip from the <failures> block. deadDiagnosis (p46-3) reads which death it was: an
+// allowance block (runAgent's Opus rerun of a refused Fable dispatch died too) is ALLOWANCE_DIAGNOSIS, which is never
+// plan feedback, so the plan stage's block is `blocked` (reconcile's `## Blocker diagnosis`), never `plan-blocked`. A
+// plain death keeps today's row byte for byte.
+function deadDiagnosis(r) {
+  return r && r.allowance ? ALLOWANCE_DIAGNOSIS : TRANSIENT_DIAGNOSIS
+}
+function transientPlanBlock(task, rounds, dead) {
+  if (dead && dead.allowance) return { task, blocked: true, status: 'blocked', blockerDiagnosis: ALLOWANCE_DIAGNOSIS, planRoundsUsed: rounds }
   return { task, blocked: true, status: 'plan-blocked', blockerDiagnosis: TRANSIENT_DIAGNOSIS, planRoundsUsed: rounds }
 }
-function transientImplBlock(extra) {
-  return { blocked: true, blockerDiagnosis: TRANSIENT_DIAGNOSIS, ...(extra || {}) }
+function transientImplBlock(extra, dead) {
+  return { blocked: true, blockerDiagnosis: deadDiagnosis(dead), ...(extra || {}) }
 }
 
 // Round budgets (p12-2). planLoop and reviewLoop are bounded `while (round <= budget)` loops whose only
@@ -2876,7 +2966,7 @@ async function planLoop(task, st, a) {
   let plan = await runAgent(plannerPrompt(task, a, st, ''), {
     label: `plan:${task.slug}`, phase: 'Plan-gate', schema: PLAN_VERDICT, ...runOn(st, 'planner'),
   }, st)
-  if (plan.__dead) return transientPlanBlock(task, 0)
+  if (plan.__dead) return transientPlanBlock(task, 0, plan)
   if (plan.blocked || !plan.ready) {
     // A first-pass planner failure is the plan stage's first evidence of hardness: it climbs (a no-op on
     // the top rung) and the planner gets one retry, on the rung it is now on, before plan-blocked.
@@ -2884,7 +2974,7 @@ async function planLoop(task, st, a) {
     plan = await runAgent(plannerPrompt(task, a, st, plan.blockerCause || 'first-pass planner produced no plan'), {
       label: `plan:${task.slug}@${cur(st).name}`, phase: 'Plan-gate', schema: PLAN_VERDICT, ...runOn(st, 'planner'),
     }, st)
-    if (plan.__dead) return transientPlanBlock(task, 0)
+    if (plan.__dead) return transientPlanBlock(task, 0, plan)
   }
   if (plan.blocked || !plan.ready) {
     return { task, blocked: true, status: 'plan-blocked', blockerDiagnosis: plan.blockerCause || 'planner returned no plan', planRoundsUsed: 0 }
@@ -2930,7 +3020,7 @@ async function planLoop(task, st, a) {
     const verdict = await runAgent(planJudgePrompt(task, plan.plan, a), {
       label: `plan-judge:${task.slug} r${round}`, phase: 'Plan-gate', schema: pricerOf(a) ? PLAN_JUDGE_PRICED : PLAN_JUDGE, ...runOn(st, 'plan-judge'),
     }, st)
-    if (verdict.__dead) return transientPlanBlock(task, round)
+    if (verdict.__dead) return transientPlanBlock(task, round, verdict)
     if (verdict.verdict === 'approve' && askOf(verdict)) log(`plan-judge:${task.slug} r${round}: needsHuman on an approve verdict ignored`)
     if (verdict.verdict === 'approve') {
       if (Array.isArray(verdict.gateBounce) && verdict.gateBounce.some((g) => typeof g === 'string' && g.trim())) {
@@ -2982,7 +3072,7 @@ async function planLoop(task, st, a) {
     plan = await runAgent(planReviserPrompt(task, plan.plan, priorFeedback, round + 1, a), {
       label: `plan-revise:${task.slug} r${round + 1}`, phase: 'Plan-gate', schema: PLAN_VERDICT, ...runOn(st, 'planner'),
     }, st)
-    if (plan.__dead) return transientPlanBlock(task, round + 1)
+    if (plan.__dead) return transientPlanBlock(task, round + 1, plan)
     if (plan.blocked || !plan.ready) {
       return { task, blocked: true, status: 'plan-blocked', blockerDiagnosis: plan.blockerCause || 'plan-reviser returned no plan', planRoundsUsed: round + 1 }
     }
@@ -3003,7 +3093,7 @@ async function implement(task, st, prev, a) {
     let r = await runAgent(readOnlyPrompt(task, a, st, ''), {
       label: `investigate:${task.slug}`, phase: 'Implement', schema: IMPL_RESULT, ...runOn(st, 'investigator'),
     }, st)
-    if (r.__dead) return transientImplBlock()
+    if (r.__dead) return transientImplBlock(undefined, r)
     // A question only a person can answer (p16-3): a stop, never a climb or a retry.
     if (r.blocked && askOf(r)) return { ...r, blocked: true, needsHuman: askOf(r) }
     if (r.blocked) {
@@ -3012,7 +3102,7 @@ async function implement(task, st, prev, a) {
       r = await runAgent(readOnlyPrompt(task, a, st, r.blockerDiagnosis || 'first-pass investigation did not complete'), {
         label: `investigate:${task.slug}@${cur(st).name}`, phase: 'Implement', schema: IMPL_RESULT, ...runOn(st, 'investigator'),
       }, st)
-      if (r.__dead) return transientImplBlock()
+      if (r.__dead) return transientImplBlock(undefined, r)
     }
     return { ...r, needsHuman: r.blocked ? askOf(r) : '' }
   }
@@ -3045,7 +3135,7 @@ async function implement(task, st, prev, a) {
   let r = await runAgent(prompt(''), firstOpts, st)
   r = await pastSignedGates(task, r, prompt(''), firstOpts, st)
   // A dead agent is transient infra, NOT evidence of hardness — do NOT climb; report a clean block.
-  if (r.__dead) return transientImplBlock(planExtra)
+  if (r.__dead) return transientImplBlock(planExtra, r)
   const gatedFirst = gatePending(r)
   if (gatedFirst) return gatedFirst
   const askedFirst = asks(r)
@@ -3073,7 +3163,7 @@ async function implement(task, st, prev, a) {
     const retryOpts = { label: `implement:${task.slug}@${cur(st).name}`, phase: 'Implement', schema: implSchema(a), ...runOn(st, 'builder') }
     r = await runAgent(prompt(prior, retryTask), retryOpts, st)
     r = await pastSignedGates(task, r, prompt(prior, retryTask), retryOpts, st)
-    if (r.__dead) return transientImplBlock(planExtra)
+    if (r.__dead) return transientImplBlock(planExtra, r)
     const gatedRetry = gatePending(r)
     if (gatedRetry) return gatedRetry
   }
@@ -3103,7 +3193,7 @@ async function reviseRound(task, st, current, priorFeedback, round, a, planText,
   // A replayed (or fresh) stop for gates the note has since approved: continuations (pastSignedGates), on the
   // same reviser prompt re-rendered from the same inputs. A dead result passes through (signedStop is false).
   revised = await pastSignedGates(task, revised, reviserPrompt(task, current, priorFeedback, round, a, planText, seeded), reviseOpts, st)
-  if (revised.__dead) return { stop: { ...current, status: 'blocked', blockerDiagnosis: TRANSIENT_DIAGNOSIS } }
+  if (revised.__dead) return { stop: { ...current, status: 'blocked', blockerDiagnosis: deadDiagnosis(revised) } }
   if (revised.blocked) {
     // A reviser can DISCOVER a gated input the earlier passes never hit (ADR 0008) — same human
     // stop, never a plain block.
@@ -3164,7 +3254,7 @@ async function reviewLoop(task, st, prev, a, planText, seed) {
         label: `review:${task.slug} r${round}`, phase: 'Review', schema: REVIEW_VERDICT, ...runOn(st, 'master-review'),
       }, st)
     // Dead review-judge: the PR is real and stands — block on transient infra so the lead re-judges it.
-    if (verdict.__dead) return stopped({ ...current, status: 'blocked', blockerDiagnosis: TRANSIENT_DIAGNOSIS })
+    if (verdict.__dead) return stopped({ ...current, status: 'blocked', blockerDiagnosis: deadDiagnosis(verdict) })
     // p21-3: the round's record, with its own bullets, BEFORE every exit below (approve, a question, the ceiling, a
     // reviser that stops), so a call that stops after a `changes` round still carries its findings. The one push site.
     if (!st.verdicts) st.verdicts = []
@@ -3205,29 +3295,23 @@ async function reviewLoop(task, st, prev, a, planText, seed) {
 // One doubled master-review round (p52-2, ADR 0081 d2): two independent reviewers, one after the other (both may run
 // tests in the task tree), each pushed on st.ran before it runs (runAgent). The first runs on firstReviewerOn (Fable
 // when the file names it), the second on the task's rung (runOn, its arm excluded: armOf); neither sees the other's
-// verdict, and both read the same prompt with the accumulated history. A first reviewer on Fable still dead after
-// runAgent's retry runs once more on the rung's own model at its review effort (` on-rung`, a fell-back call; never
-// runOn, which under `[role]` names Fable again); a dead second reviewer, or a dead rerun, is
-// the transient block, as a dead single judge is. The combined verdict: approve only when both approve; else changes,
+// verdict, and both read the same prompt with the accumulated history. A reviewer on Fable still dead after runAgent's
+// retry is an allowance refusal (p46-3, runAgent, the engine-wide fallback): it runs once more on Opus at its review
+// effort (`first-review:<slug> r<N> on-rung`, a fell-back call), and every later Fable dispatch of the call, a `[role]`
+// second reviewer's included, runs on Opus at once, so both reviewers run on Opus for the rest of the call. A dead second
+// reviewer is the transient block, as a dead single judge is, and a dead rerun the allowance block (deadDiagnosis); the
+// summary log names the model each reviewer ran on (its last st.ran entry). The combined verdict: approve only when both approve; else changes,
 // with the first's changes bullets then the second's (identical strings once); head the first valid one; needsHuman the
 // first ask of a reviewer that said changes (an ask on an approve is logged and ignored, as the single judge's).
 async function doubledVerdict(task, st, current, a, priorFeedback, round) {
   const prompt = reviewJudgePrompt(task, current, a, priorFeedback, unreachableReviewBlock(st))
   const tag = `${task.slug} r${round}`
-  const firstOn = firstReviewerOn(st)
-  let firstModel = firstOn.model
-  let first = await runAgent(prompt, { label: `first-review:${tag}`, phase: 'Review', schema: REVIEW_VERDICT, ...firstOn }, st)
-  if (first.__dead && firstOn.model === 'fable' && fableNamedForReview(st)) {
-    // The rung's own model, never runOn's: under `[role] master-review = "fable"` runOn hands back Fable again.
-    const on = { model: cur(st).model, effort: judgeEffort(st, 'review') }
-    log(`review: ${tag}: the first reviewer on fable died; once more on the rung's ${on.model}`)
-    firstModel = on.model
-    first = await runAgent(prompt, { label: `first-review:${tag} on-rung`, phase: 'Review', schema: REVIEW_VERDICT, ...on }, st)
-  }
+  const first = await runAgent(prompt, { label: `first-review:${tag}`, phase: 'Review', schema: REVIEW_VERDICT, ...firstReviewerOn(st) }, st)
   if (first.__dead) return first
-  const secondOn = runOn(st, 'master-review')
-  const second = await runAgent(prompt, { label: `review:${tag}`, phase: 'Review', schema: REVIEW_VERDICT, ...secondOn }, st)
+  const firstModel = st.ran[st.ran.length - 1].model
+  const second = await runAgent(prompt, { label: `review:${tag}`, phase: 'Review', schema: REVIEW_VERDICT, ...runOn(st, 'master-review') }, st)
   if (second.__dead) return second
+  const secondModel = st.ran[st.ran.length - 1].model
   const both = [first, second]
   const approve = both.every((v) => v.verdict === 'approve')
   const feedback = []
@@ -3243,7 +3327,7 @@ async function doubledVerdict(task, st, current, a, priorFeedback, round) {
     if (v.verdict === 'changes') needsHuman = needsHuman || q
     else log(`review:${tag}: needsHuman on an approve verdict ignored`)
   }
-  log(`review: ${tag}: first ${first.verdict} on ${firstModel}, second ${second.verdict} on ${secondOn.model}`)
+  log(`review: ${tag}: first ${first.verdict} on ${firstModel}, second ${second.verdict} on ${secondModel}`)
   return { verdict: approve ? 'approve' : 'changes', feedback: approve ? [] : feedback, head, needsHuman }
 }
 
@@ -3317,6 +3401,8 @@ function taskResult(t, r, st) {
     flakes: norm.flakes || [],
     // p52-1: the task's Unreachable-surface mark (rowRecord, unreachableRow).
     unreachable: norm.unreachable || { marked: false, by: [], paths: [] },
+    // p46-3: the call's allowance refusal (rowRecord), only when it read one.
+    ...(norm.allowance ? { allowance: norm.allowance } : {}),
   }
 }
 

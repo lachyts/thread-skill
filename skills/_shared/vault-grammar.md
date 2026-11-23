@@ -300,6 +300,12 @@ surface** and **Felt check** are the terms.
 plan its first call approved, is still doubled: `mark-started` prints `<slug>: unreachable true` on every fresh call, and
 the lead passes `task.unreachable: true`.
 
+**`fell_back: <stamp>`** (p46-3, ADR 0079 d7) records that a call of the task read an allowance refusal and ran Fable's
+dispatches on Opus. `reconcile-rollout.py reconcile` writes it from a task-mode row whose `allowance` is `{refused,
+fellBack}`, after `unreachable:`, at the call's end; a later such row restamps it and nothing removes it, so `defer`
+keeps it. `reconcile-rollout.py status` reads it, as an unlanded task's `fellBack` (status shows `fell back to Opus
+<stamp>`); nothing else reads it yet.
+
 **The lines.** One `- <stamp> <state>: <text>` line per event under the task note's `## Felt check`; the latest line
 decides (`_felt_state`):
 

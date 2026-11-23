@@ -211,6 +211,13 @@ Subcommands:
               the task is hard: `work_depth: deep` or `scope: cross-cutting`); a later one stamps them all `none`, the
               task having begun outside the draw. No [share] table: nothing, the note's bytes as before. A refused
               ladder: nothing stamped, no line, one `WARN:` per run. defer keeps the stamp, as it keeps `rung:`.
+              The paced share (p46-3, ADR 0079 decision 6): a first dispatch draws each role against its Fable ceiling
+              (the [share] value, _fable_ceiling) times the pace fable_pace.py reads for the caller's Login
+              (_caller_login) from the quota store, read once per run, and writes one `fable-share` Run record line per
+              task drawn (login, ceiling, share, pace, then the reading or its why; nothing on --dry-run). A reading
+              with a why (no Login, no store, unreadable, no row, a stale or ended window, a stamp ahead) paces 0, so
+              every role draws Opus, and prints one `WARN: fable share: <why>: every role draws Opus` line per run:
+              never a stop, its exit and stdout unchanged. A later dispatch's `none` stamp reads nothing.
               An Unreachable surface (p52-2, ADR 0081 d2): after the arms line, a note whose `unreachable:` is truthy
               prints `<slug>: unreachable true`, which the lead passes as args.task.unreachable on a fresh call; a
               `--start resume` prints nothing (a resume re-passes its call's own args).
@@ -561,7 +568,9 @@ Subcommands:
               `arms:`, it also stamps `arms: lead=<opus|fable|none>` on the rollout note (drawn by the rollout's slug
               when `lead` has a share; `none` when it has none, or when the record already held a lead-entry) and prints
               a second line, `<stem>: arms lead=<arm> (stamped)`. The stamp is kept whatever the share is later. It
-              is the seam Chorus reads: nothing here runs the lead on it, and the lead-entry line carries no arm.
+              is the seam Chorus reads: nothing here runs the lead on it, and the lead-entry line carries no arm. Its
+              draw is paced as mark-started's (p46-3: the `lead` ceiling times the caller's Login's pace, one WARN when
+              the reading names why) and writes one `fable-share` line with no task once its stamp lands.
               Exit 0 (written, skipped, or a warned write failure); 1 no rollout note (an ERROR line); 2 usage and the
               Engine snapshot guard.
 
@@ -1535,7 +1544,8 @@ integrate call's reconciled `integrated` row and the merge; a hand-back restamps
                     every slot-taken; `max` (p53-4: capacity_max, the hard count) only while the budget admits,
                     so its presence, never `budget`'s, marks a Slot the budget admitted. No resolvable
                     ceiling (or no rollout note): one `run_record: warning: slot-taken for <slug> not
-                    recorded: <why>` line.
+                    recorded: <why>` line. Before it, a first dispatch's arms draw (p46-3) writes fable-share
+                    {ceiling, share, pace, login?, fable?, general?, fetchedAt?, why?} for the task.
   mark-integrating  lane-taken, on every successful call; on an origin-lane refusal (exit 4, ADR 0064) with this
                     rollout's record lane open on the task (or the record unreadable): hold-ended hold=merge when one is
                     open, then lane-freed release=origin origin=<owner/name>.
@@ -1646,7 +1656,8 @@ integrate call's reconciled `integrated` row and the merge; a hand-back restamps
                     suite-timeout {site, run, seconds, sha?} for a timeout. reconcile writes flake events too, from a
                     row's `flakes` (the row-field mapping below).
   record-entry      (p29-10) stopped {cause, inferred: true, at, calls, boot?, wake?} for each stop the entry finds, in
-                    `at` order, then one lead-entry {by, session?, stop?}; nothing for a skipped note.
+                    `at` order, then one lead-entry {by, session?, stop?}; nothing for a skipped note. Then (p46-3)
+                    fable-share (task null) when it draws the lead's arm and the stamp lands.
   bind-run, free-lane, hold, record-pause   above.
   git-env-canary.py hold-started / hold-ended hold=git-env (task null) on the hold's empty <-> non-empty edge.
 set-aside stage, first match (auto-retry's stage too, when the record holds no set-aside line for the task: the lead
@@ -1671,8 +1682,9 @@ retries as infra);
 unreported-context (exit 4's `unreported-context:` set-aside, ADR 0080: a required context nothing reports on the PR's
 head while no run on it is in flight, a renamed job; a stop that retries as infra, a settings block like no-runner);
 merge-task (a reason starting `merge-task`, and exit 4's `base moved` / `head moved after
-Integration`); declined; prepare (any other lead integration reason); revise-stopped; transient (the engine's
-TRANSIENT_DIAGNOSIS); then gate (gate-pending); needs-human (p16-3: the row's own needsHuman is a non-empty
+Integration`); declined; prepare (any other lead integration reason); revise-stopped; allowance (p46-3: the engine's
+ALLOWANCE_DIAGNOSIS, ALLOWANCE_MARK in the diagnosis, an allowance block that retries as quota and writes no
+quota-stall); transient (the engine's TRANSIENT_DIAGNOSIS); then gate (gate-pending); needs-human (p16-3: the row's own needsHuman is a non-empty
 string, never the note's `## Needs you`, so a lead row, or an integrate row, which carries null, never reads it,
 except an integrate row's security set-aside, which carries the security scan's question (p39-8); a
 question is no round run out, so it must not reach plan-rejected or review-rounds, the classes the Reflection raises
@@ -2186,6 +2198,14 @@ Status mapping (workflow status -> note writes), per execute/SKILL.md §6:
                     nothing (a lead-written row, a pre-p29-9 engine's). An integrate row reconciled with --no-verdict
                     records none (a git-env trip inside its window voids its runs, Flakes included): one `<slug>: N
                     Flake(s) not recorded: --no-verdict …` line instead. Nothing on --dry-run but the lines.
+  allowance      -> (any status; task-mode rows; p46-3, ADR 0079 d7) `fell_back: <the row's stamp>` (its call's end,
+                    else now), after `unreachable:`, when the row's `allowance` is {refused: a non-empty list of
+                    labels, fellBack: an int >= 1} (the engine ran Fable's dispatches on Opus); a later such row
+                    restamps it, nothing removes it, and defer keeps it; status shows it as an unlanded task's
+                    `fellBack`. Absent or null stamps nothing; any other shape is one ERROR (exit 1) that stamps
+                    nothing, the rest of the row landing. A blocked row whose diagnosis opens ALLOWANCE_MARK (its Opus
+                    rerun died too) is written as any blocked row, under "## Blocker diagnosis", reasonClass
+                    allowance, and writes no quota-stall.
 
 Accumulated feedback (p6-4): the run sections keep every run, never only the first. Each run is a block
 
@@ -4635,7 +4655,10 @@ def _ladder_top():
 
 # ---- arms (p46-2, ADR 0079 decisions 3 and 4) -----------------------------------------------------------------------
 # A drawn role falls in its Opus or its Fable arm by a draw fixed by the task's name (a rollout's lead by the rollout's),
-# compared with the role's Fable share: the ladder's [share] table until p46-3 supplies the paced one. The draw is made
+# compared with the role's Fable share: its Fable ceiling (the ladder's [share] table, _fable_ceiling, until p46-10 moves
+# it into the Rollout settings) times the pace fable_pace.py reads for the caller's Login (p46-3, ADR 0079 decision 6:
+# the Login's Fable and general weekly windows run down together; a missing or stale reading paces 0, so every role
+# draws Opus, with one `fable-share` Run record line per draw and one WARN, never a stop). The draw is made
 # once, at a task's first dispatch (mark-started), and stamped on its note as `arms:`, as its rung is, so a resume or a
 # later dispatch keeps it whatever the share is by then. A task's builder is drawn only when the task is hard
 # (`work_depth: deep` or `scope: cross-cutting`, read once, at that first stamp); every other role of the task's kind is
@@ -4706,13 +4729,83 @@ def _arms_json(arms) -> str:
     return json.dumps(arms, separators=(",", ":"))
 
 
-def _start_arms(note, slug, first, explicit, ladder_once):
+# The paced share (p46-3, ADR 0079 decision 6): fable_pace.py, beside this file, loaded once per process.
+FABLE_PACE_PY = Path(__file__).resolve().parent / "fable_pace.py"
+FABLE_SHARE_WARN = "WARN: fable share:"
+_FABLE_PACE_MOD = None
+
+
+def _fable_pace_module():
+    """fable_pace.py as a module (loaded once per process), or None when it will not load: every reading then names
+    why, and every role draws Opus. Never raises."""
+    global _FABLE_PACE_MOD
+    if _FABLE_PACE_MOD is None:
+        try:
+            spec = importlib.util.spec_from_file_location("thread_fable_pace", FABLE_PACE_PY)
+            mod = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(mod)
+            _FABLE_PACE_MOD = mod
+        except Exception:
+            _FABLE_PACE_MOD = False
+    return _FABLE_PACE_MOD or None
+
+
+def _fable_ceiling(ladder) -> dict:
+    """Each drawn role's Fable ceiling (ADR 0079 decision 6), {role: number in [0, 1]}: the ladder's [share] table (p46-2),
+    {} with none. The one place task p46-10 changes when it moves the ceiling into the Rollout settings."""
+    return dict(ladder.get("share") or {})
+
+
+def _fable_reading(now) -> dict:
+    """fable_pace.read for the caller's Login (_caller_login) at `now`: {login, fable, general, fetchedAt, why}, `why`
+    set when the reading gives a share of nothing (fable_pace.py's docstring). Never raises."""
+    login = _caller_login()
+    mod = _fable_pace_module()
+    if mod is None:
+        return {"login": login, "fable": None, "general": None, "fetchedAt": None, "why": "fable_pace.py will not load"}
+    try:
+        return mod.read(login, now)
+    except Exception:  # noqa: BLE001 — read() never raises; one that does gives nothing
+        return {"login": login, "fable": None, "general": None, "fetchedAt": None, "why": "unreadable"}
+
+
+def _fable_warn(reading):
+    """The one stderr line a reading with a `why` prints: `WARN: fable share: <why>: every role draws Opus`."""
+    if reading.get("why"):
+        print(f"{FABLE_SHARE_WARN} {reading['why']}: every role draws Opus", file=sys.stderr)
+
+
+def _paced_share(ceiling, reading) -> dict:
+    """{pace, share}: `ceiling` times the reading's pace (fable_pace.share); a pace of 0 when the module will not load."""
+    mod = _fable_pace_module()
+    try:
+        return mod.share(ceiling, reading) if mod else {"pace": 0.0, "share": {r: 0.0 for r in ceiling}}
+    except Exception:  # noqa: BLE001 — share() never raises
+        return {"pace": 0.0, "share": {r: 0.0 for r in ceiling}}
+
+
+def _fable_share_fields(ceiling, paced, reading) -> dict:
+    """One draw's `fable-share` Run record fields (run_record.py's catalogue): login (when the caller names one), ceiling,
+    share, pace, and either the reading (fable, general, fetchedAt) or its why."""
+    fields = {"ceiling": dict(ceiling), "share": dict(paced["share"]), "pace": paced["pace"]}
+    if reading.get("login"):
+        fields["login"] = reading["login"]
+    if reading.get("why"):
+        fields["why"] = reading["why"]
+    else:
+        fields.update(fable=reading["fable"], general=reading["general"], fetchedAt=reading["fetchedAt"])
+    return fields
+
+
+def _start_arms(note, slug, first, explicit, ladder_once, pace_once=None, rollout=None, args=None):
     """mark-started's arms for one note (p46-2): the stamp to print as `<slug>: arms <json>`, or None for no line.
     `--start resume` draws, stamps and prints nothing (a resume re-passes its call's own args). A note with `arms:`
     keeps it (one WARN and no line when it does not parse). Else, with a [share] table: a first dispatch (`first`:
-    no `started:` before this call's writes) draws every role of the task's kind (_task_arms); a later one stamps them
-    all `none` (the task began outside the draw). No [share] table, or a refused ladder: nothing. Sets ARMS_KEY when
-    it stamps; the caller saves the note."""
+    no `started:` before this call's writes) draws every role of the task's kind (_task_arms) against its Fable ceiling
+    (_fable_ceiling) times the pace of `pace_once()` (p46-3: the run's one reading, _fable_reading), and writes one
+    `fable-share` Run record line for the task (nothing on --dry-run, through _event); a later one stamps them all
+    `none` (the task began outside the draw), reading nothing and writing no line. No [share] table, or a refused
+    ladder: nothing. Sets ARMS_KEY when it stamps; the caller saves the note."""
     if explicit == "resume":
         return None
     raw = note.get(ARMS_KEY)
@@ -4723,9 +4816,16 @@ def _start_arms(note, slug, first, explicit, ladder_once):
                   f"{', '.join(ARM_ROLES)}): kept as it is; this call runs with no arms", file=sys.stderr)
         return arms
     ladder = ladder_once()
-    if ladder["error"] or not ladder["share"]:
+    ceiling = _fable_ceiling(ladder)
+    if ladder["error"] or not ceiling:
         return None
-    arms = _task_arms(note, ladder["share"], slug) if first else {role: "none" for role in _task_roles(note)}
+    if first:
+        reading = pace_once() if pace_once is not None else {"why": "no reading", "login": None}
+        paced = _paced_share(ceiling, reading)
+        arms = _task_arms(note, paced["share"], slug)
+        _event(rollout, "fable-share", slug, _fable_share_fields(ceiling, paced, reading), args)
+    else:
+        arms = {role: "none" for role in _task_roles(note)}
     note.set(ARMS_KEY, _format_arms(arms), after=("rung", "started", "owner", "status"))
     return arms
 
@@ -4773,6 +4873,29 @@ def _unreachable_shape(u) -> str:
         text = json.dumps(u, ensure_ascii=False, sort_keys=True)
     except (TypeError, ValueError):
         text = type(u).__name__
+    return text if len(text) <= 80 else text[:80] + "…"
+
+
+# p46-3 (ADR 0079 d7): a task-mode row's `allowance` ({refused, fellBack}: the engine read an allowance refusal and ran
+# Fable's dispatches on Opus) stamps `fell_back: <the row's stamp>` on the note, after `unreachable:`; defer keeps it, and
+# status shows it on an unlanded task (`fellBack`). Nothing else reads it yet.
+FELL_BACK_KEY = "fell_back"
+
+
+def _allowance_shape(a) -> str:
+    """'' when a task row's `allowance` is usable: null or absent, or an object whose `refused` is a non-empty list of
+    non-empty strings and whose `fellBack` is an int >= 1; else its shape, cut, for the row's ERROR line."""
+    if a is None:
+        return ""
+    if isinstance(a, dict):
+        refused, fell = a.get("refused"), a.get("fellBack")
+        if isinstance(refused, list) and refused and all(isinstance(x, str) and x for x in refused) \
+                and isinstance(fell, int) and not isinstance(fell, bool) and fell >= 1:
+            return ""
+    try:
+        text = json.dumps(a, ensure_ascii=False, sort_keys=True)
+    except (TypeError, ValueError):
+        text = type(a).__name__
     return text if len(text) <= 80 else text[:80] + "…"
 
 
@@ -5102,6 +5225,15 @@ def cmd_reconcile(args) -> int:
                               "not stamped")
             elif isinstance(unr, dict) and unr.get("marked") is True:
                 note.set(UNREACHABLE_KEY, "true", after=("arms", "rung", "started", "owner", "status"))
+            # p46-3 (ADR 0079 d7): a call that read an allowance refusal stamps `fell_back: <stamp>` (the latest such
+            # call's), as `unreachable:` is stamped; a malformed `allowance` is one ERROR that stamps nothing.
+            alw = task.get("allowance")
+            alw_shape = _allowance_shape(alw)
+            if alw_shape:
+                errors.append(f"{slug}: allowance is not null or an object {{refused: [label, …], fellBack: >= 1}} "
+                              f"({alw_shape}) — no {FELL_BACK_KEY}: stamped")
+            elif alw is not None:
+                note.set(FELL_BACK_KEY, _stamp(at), after=(UNREACHABLE_KEY, "arms", "rung", "started", "owner", "status"))
             if status == "review" and _truthy_flag(note.get(UNREACHABLE_KEY)):
                 note.apply(_felt_open, f"- {_stamp(at)} open: try [[{slug}]] by hand once it is live (an Unreachable "
                                        f"surface: {_unreachable_why(task)})")
@@ -8613,6 +8745,16 @@ def cmd_mark_started(args) -> int:
                       "stamped this run", file=sys.stderr)
         return ladder["l"]
 
+    # The pace's reading (p46-3): the caller's Login in the quota store, read once per run on a first draw; one WARN when
+    # it names why (every role draws Opus), --dry-run included.
+    pace = {}
+
+    def pace_once():
+        if "r" not in pace:
+            pace["r"] = _fable_reading(now)
+            _fable_warn(pace["r"])
+        return pace["r"]
+
     for slug, _path, note in _each_note(args):
         status = _status(note)
         if status in FINISHED_STATUSES:
@@ -8644,7 +8786,7 @@ def cmd_mark_started(args) -> int:
         existing = _scalar(note.get("started"))
         if not existing:
             note.set("started", _stamp(now))
-        arms = _start_arms(note, slug, not existing, args.start, ladder_once)
+        arms = _start_arms(note, slug, not existing, args.start, ladder_once, pace_once, rollout, args)
         note.remove("integrating")
         signed = _scalar(note.get(GATES_SIGNED_KEY))
         note.remove(GATES_SIGNED_KEY)
@@ -9636,6 +9778,11 @@ def cmd_status(args) -> int:
         ask = needs_human(r["note"]) if r["state"] == "set-aside" else ""
         if ask:
             row["needsHuman"] = ask
+        # p46-3 (ADR 0079 d7): an unlanded task whose call ran Fable's dispatches on Opus carries the note's `fell_back:`
+        # stamp (the latest such call's); the key is absent otherwise, as needsHuman's is.
+        fell = _scalar(r["note"].get(FELL_BACK_KEY)) if r["state"] in CARRIED_STATES else ""
+        if fell:
+            row["fellBack"] = fell
         # p27-4: a task set aside at Integration whose latest run opens a named marker carries which one (`conflict`:
         # an Integration conflict, `red`: a verifier red); the key is absent otherwise, as needsHuman's is.
         block = integration_block(row["blockerSummary"]) \
@@ -9837,7 +9984,10 @@ ROLE_OF_LABEL = {"plan": "planner", "plan-revise": "planner", "plan-judge": "pla
                  "review": "master-review", "integrate": "integrator", "integration-review": "integration-judge"}
 ROLE_CALL_ORDER = ("planner", "plan-judge", "builder", "investigator", "first-reviewer", "master-review", "integrator",
                    "integration-judge")
-ON_RUNG_SUFFIX = " on-rung"   # a dead Fable first reviewer's rerun on the task's rung (task.workflow.js doubledVerdict)
+ON_RUNG_SUFFIX = " on-rung"   # a dead Fable dispatch's rerun on Opus (task.workflow.js FALLBACK_SUFFIX, runAgent: p46-3)
+# A journal agent's error that reads as an allowance refusal (p46-3, ADR 0079 d7): the CLI's "You've reached your Fable
+# limit. …" The engine sees only a null; the fold reads the text after the fact, as a role-call's `refused`.
+ALLOWANCE_TEXT_RE = re.compile(r"reached your [^\n]{0,60}?limit", re.I)
 # The stages whose climb is a role's (a no-op included): plan the planner's, implement the builder's or the
 # investigator's, review the builder's (the reviser a review-stage climb would strengthen).
 ROLE_CLIMB_STAGES = {"planner": ("plan",), "builder": ("implement", "review"), "investigator": ("implement",)}
@@ -9913,11 +10063,22 @@ def _role_calls(run_id, call, segment, args_, earlier_fresh):
     record's earlier segment lines for this runId}, which tokensPartial is read against. A segment whose `ran` holds a
     first-reviewer dispatch (a doubled master review, p52-2) leaves the master-review line's `arm` off: that review sat
     outside the draw. A first-reviewer line is fellBack when one of its dispatches is the ` on-rung` rerun on a model
-    that is not Fable."""
+    that is not Fable. p46-3 (ADR 0079 d7): a `ran` entry the engine ran on Opus in Fable's place carries `asked` (what it
+    asked) and `fellBack`: model and effort read the role's first entry's `asked` when it is an object with non-empty
+    string model and effort, the label->asked map its `asked.model`, and any entry's `fellBack: true` makes the line
+    fellBack. `refused` holds when a fresh journal agent of the role asked Fable and ended `state: "error"` on an
+    allowance refusal's text (ALLOWANCE_TEXT_RE): the refusal itself, which a plain connection drop never is."""
     start, row, agents = segment
     ran = [r for r in row["ran"] if isinstance(r, dict) and _label_role(r.get("label"))]
     doubled = any(_label_role(r["label"]) == "first-reviewer" for r in ran)
-    asked = {r["label"]: r.get("model") for r in ran}
+
+    def asked_of(r):
+        a = r.get("asked")
+        ok = isinstance(a, dict) and isinstance(a.get("model"), str) and a.get("model") \
+            and isinstance(a.get("effort"), str) and a.get("effort")
+        return a if ok else r
+
+    asked = {r["label"]: asked_of(r).get("model") for r in ran}
     task = args_.get("task") if isinstance(args_.get("task"), dict) else {}
     arms = task.get("arms") if isinstance(task.get("arms"), dict) else {}
     ladder = args_.get("ladder") if isinstance(args_.get("ladder"), dict) else {}
@@ -9928,11 +10089,12 @@ def _role_calls(run_id, call, segment, args_, earlier_fresh):
     out = []
     for role in ROLE_CALL_ORDER:
         mine = [r for r in ran if _label_role(r["label"]) == role]
-        if not mine or not isinstance(mine[0].get("model"), str) or not mine[0].get("model") \
-                or not isinstance(mine[0].get("effort"), str) or not mine[0].get("effort"):
+        first = asked_of(mine[0]) if mine else {}
+        if not mine or not isinstance(first.get("model"), str) or not first.get("model") \
+                or not isinstance(first.get("effort"), str) or not first.get("effort"):
             continue
-        fields = {"runId": run_id, "startTime": start, "call": call, "role": role, "model": mine[0]["model"],
-                  "effort": mine[0]["effort"], "dispatches": len(mine), "outcome": row["status"]}
+        fields = {"runId": run_id, "startTime": start, "call": call, "role": role, "model": first["model"],
+                  "effort": first["effort"], "dispatches": len(mine), "outcome": row["status"]}
         agents_of = [g for g in agents if _label_role(g.get("label")) == role]
         fresh = [g for g in agents_of if g.get("cached") is not True]
         replayed = len(agents_of) - len(fresh)
@@ -9961,6 +10123,11 @@ def _role_calls(run_id, call, segment, args_, earlier_fresh):
         if role == "first-reviewer" and any(str(r["label"]).endswith(ON_RUNG_SUFFIX) and r.get("model") != "fable"
                                             for r in mine):
             fields["fellBack"] = True
+        if any(r.get("fellBack") is True for r in mine):
+            fields["fellBack"] = True
+        if any(asked.get(g.get("label")) == "fable" and g.get("state") == "error" and isinstance(g.get("error"), str)
+               and ALLOWANCE_TEXT_RE.search(g["error"]) for g in fresh):
+            fields["refused"] = True
         if fable_rung:
             fields["fableRung"] = True
         out.append(fields)
@@ -10221,8 +10388,11 @@ CALL_END_MARK = "call-end"
 CALL_END_FALLBACK = "fallback"
 # A dead call's error line that reads as a usage or rate limit (quota-stall; only `workflow call failed:` lines
 # are scanned, so task text that mentions a quota never matches).
-QUOTA_RE = re.compile(r"usage limit|rate[ -]?limit|quota|too many requests|\b429\b", re.I)
+QUOTA_RE = re.compile(r"usage limit|rate[ -]?limit|quota|too many requests|\b429\b|reached your [^\n]{0,60}limit", re.I)
 TRANSIENT_MARK = "transient infrastructure failure"           # the engine's TRANSIENT_DIAGNOSIS opening
+# The engine's ALLOWANCE_DIAGNOSIS opening (p46-3, ADR 0079 d7): a Fable dispatch died twice and its Opus rerun died too,
+# an allowance block. Its reasonClass is allowance, and it retries as a quota block (_retry_class).
+ALLOWANCE_MARK = "allowance refusal"
 REVISE_MARK = "revise: rejected at integration re-review"     # the engine's REVISE_MARKER opening, lowercased
 OWN_RUN_PREFIX = "own run: "                                  # stageDiagnosis's escape (lead-integrate.py)
 
@@ -10788,8 +10958,9 @@ def cmd_record_entry(args) -> int:
     (_lease_write, by "entry"; p28-4), so a lapsed lead counts in the Trickle again from its first entry, naming its
     Login (_caller_login, p36-7) as `next`'s does. Off --dry-run, it stamps the lead's arm (p46-2, _lead_arm) on the
     rollout note while the ladder has a [share] table and the note has no `arms:`: `arms: lead=<arm>`, drawn by the
-    rollout's slug when `lead` has a share, `none` when it has none or the record already held a lead-entry (the
-    rollout was led before the draw). The lead-entry line itself carries no arm."""
+    rollout's slug when `lead` has a share (paced, p46-3: its ceiling times the caller's Login's pace, with one
+    fable-share line), `none` when it has none or the record already held a lead-entry (the rollout was led before the
+    draw). The lead-entry line itself carries no arm."""
     rollout_path = Path(os.path.expanduser(args.rollout))
     if not rollout_path.is_file():
         print(f"ERROR: record-entry: rollout note not found at {rollout_path}", file=sys.stderr)
@@ -10868,32 +11039,44 @@ def cmd_record_entry(args) -> int:
     said.append(f"lead-entry by={args.by}" + (f" stop={gap['stop']}" if gap is not None else ""))
     print(f"{ro}: " + "; ".join(said) + (" (dry-run)" if args.dry_run else ""))
     if not args.dry_run:
-        arm = _lead_arm(note, ro, led)
+        arm = _lead_arm(note, ro, led, args, now)
         if arm is not None:
             print(f"{ro}: arms lead={arm} (stamped)")
     return 0
 
 
-def _lead_arm(note, ro, led):
+def _lead_arm(note, ro, led, args=None, now=None):
     """record-entry's stamp of the lead's arm on the rollout note (p46-2): the arm stamped, or None when it stamps
     nothing (the note has `arms:`, parsed or not; the ladder has no [share] table; or the ladder is refused, which
     the lead's own ladder.py call at each Workflow call names, so a heartbeat tick never repeats it). The arm is
-    drawn by the rollout's slug when `lead` has a share, else `none`; `none` too when the record already held a
-    lead-entry (`led`), since the rollout was led before the draw. Nothing makes the lead run on it: it is the seam
-    Chorus reads (Chorus Phase 104)."""
+    drawn by the rollout's slug when `lead` has a Fable ceiling (_fable_ceiling), against that ceiling times the pace of
+    the caller's Login (p46-3, _fable_reading at `now`, read once; one WARN when it names why), else `none`; `none`
+    too when the record already held a lead-entry (`led`), since the rollout was led before the draw. A draw whose stamp
+    lands writes one `fable-share` Run record line with no task; a `none` stamp reads nothing and writes none. Nothing
+    makes the lead run on it: it is the seam Chorus reads (Chorus Phase 104)."""
     if note.get(ARMS_KEY) is not None:
         return None
     ladder = _ladder()
-    if ladder["error"] or not ladder["share"]:
+    ceiling = _fable_ceiling(ladder)
+    if ladder["error"] or not ceiling:
         return None
-    share = ladder["share"]
-    arm = _draw_arm(LEAD_ROLE, ro, share[LEAD_ROLE]) if LEAD_ROLE in share and not led else "none"
+    drawn = None
+    if LEAD_ROLE in ceiling and not led:
+        reading = _fable_reading(now if now is not None else datetime.now().astimezone())
+        _fable_warn(reading)
+        paced = _paced_share(ceiling, reading)
+        arm = _draw_arm(LEAD_ROLE, ro, paced["share"][LEAD_ROLE])
+        drawn = _fable_share_fields(ceiling, paced, reading)
+    else:
+        arm = "none"
     note.set(ARMS_KEY, _format_arms({LEAD_ROLE: arm}), after=("status",))
     try:
         note.save()
     except OSError as e:  # never fails the entry; the next one stamps `none`, as for a rollout led before the draw
         print(f"WARN: record-entry: cannot stamp {ARMS_KEY}: on {note.path}: {e}", file=sys.stderr)
         return None
+    if drawn is not None:
+        _event(ro, "fable-share", None, drawn, args)
     return arm
 
 
@@ -11475,6 +11658,8 @@ def _reason_class(note_status, integ, lead, prior, failed, reason, diag, pr, ask
         return "prepare"
     if lead == "revise-stopped":
         return "revise-stopped"
+    if ALLOWANCE_MARK in diag:
+        return "allowance"
     if TRANSIENT_MARK in diag:
         return "transient"
     if note_status == GATE_PENDING_STATUS:
@@ -13528,7 +13713,8 @@ QUOTA_COOLDOWN_MIN = (30, 60, 120, 240, 480)
 # An infra block (the engine's TRANSIENT_DIAGNOSIS, or any other dead call) spends the budget after a short cool-down,
 # from the same base: INFRA_COOLDOWN_MIN[auto_retries_used], the last repeating (15, then 60 minutes on the default
 # budget of 2). A usage limit that kills an agent mid-run reads as TRANSIENT, never as a quota line, so this back-off
-# is all it gets before the budget is spent; then it runs Overtime, each run after INFRA_COOLDOWN_MIN[-1] (240)
+# is all it gets before the budget is spent (on a Fable dispatch whose Opus rerun died too it reads as an allowance
+# block, ALLOWANCE_MARK, which retries as quota, p46-3); then it runs Overtime, each run after INFRA_COOLDOWN_MIN[-1] (240)
 # minutes, and is taken out once the Overtime is spent (ADR 0033 decision 5, ADR 0070 d3).
 INFRA_COOLDOWN_MIN = (15, 60, 240)
 TAKE_OUT_COOLDOWN_MIN = INFRA_COOLDOWN_MIN[:2]
@@ -13708,7 +13894,8 @@ def _merge_task_ci_timeout(reason) -> bool:
 
 def _retry_class(note) -> str:
     """How an automatic retry treats a block: `quota` (a dead call, `workflow call failed:`, whose error line reads as
-    a usage or rate limit: QUOTA_RE), `infra` (the engine's TRANSIENT_DIAGNOSIS, any other dead call, a lead-written
+    a usage or rate limit: QUOTA_RE; or, p46-3, the engine's ALLOWANCE_DIAGNOSIS, ALLOWANCE_MARK in the block, checked
+    before TRANSIENT_MARK: an allowance block, whose Login's allowance is likely spent), `infra` (the engine's TRANSIENT_DIAGNOSIS, any other dead call, a lead-written
     Integration set-aside whose reason opens with one of INFRA_LEAD_OPENINGS, or a stop on GitHub's side, ADR 0069 d3:
     an Integration set-aside opening MERGE_TASK_GITHUB_OPENING whose rest is a _merge_task_infra_stop, a third exit 8
     (MERGE_TASK_EXIT8_OPENING) carrying MERGE_TASK_SETTLING_MARK, merge-task's exit-4 settings set-asides
@@ -13730,7 +13917,10 @@ def _retry_class(note) -> str:
         return "infra"
     if kind == "own" and first.lower().startswith("merge-task") and _merge_task_infra_stop(reason):
         return "infra"
-    return "infra" if TRANSIENT_MARK in _blocker_summary(note) else "agent"
+    summary = _blocker_summary(note)
+    if ALLOWANCE_MARK in summary:
+        return "quota"
+    return "infra" if TRANSIENT_MARK in summary else "agent"
 
 
 _WAIT_WORD_RE = re.compile(r"\b(?:%s)\b" % "|".join(map(re.escape, MERGE_TASK_WAIT_WORDS)), re.I)

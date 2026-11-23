@@ -47,9 +47,11 @@ for the whole ladder. An operator's file that uses both might read:
 The table may also be written inline, `role = { builder = "...", ... }`, or as dotted keys, `role.builder = "..."`,
 each before the first `[[rung]]`.
 
-A third optional key is one `[share]` table (ADR 0079 decision 3, task p46-2): each drawn role's Fable share, the
-chance in [0, 1] that a task (a rollout, for `lead`) falls in that role's Fable arm. It is the share's source until
-p46-3 supplies the paced one:
+A third optional key is one `[share]` table (ADR 0079 decision 3, task p46-2): each drawn role's Fable ceiling, the
+most of that role's work, in [0, 1], its Fable arm may take. reconcile-rollout.py paces the live share under it per
+Login (p46-3, ADR 0079 decision 6: the ceiling times fable_pace.py's pace for the caller's Login), and a task (a
+rollout, for `lead`) falls in the role's Fable arm with that chance, until task p46-10 moves the ceiling into the
+Rollout settings:
 
     [share]
     master-review = 0.5    # an int or a float in [0, 1]; a boolean is refused
@@ -60,7 +62,7 @@ p46-3 supplies the paced one:
 Its keys are SHARE_ROLES (ROLES and `lead`), never `planner` or `plan-judge`: planning takes the rung's plan model and
 is never drawn. A role that names its own model in `[role]` runs on that model for every task, so it is never drawn
 and is refused in `[share]`. The inline form `share = { ... }` and dotted keys `share.<role> = ...` are accepted, as
-`[role]`'s are. This loader only validates and passes it on: reconcile-rollout.py draws each task's arms from it at
+`[role]`'s are. This loader only validates and passes it on: reconcile-rollout.py draws each task's arms from it, paced, at
 the task's first dispatch and stamps them on the note (`arms:`), and the engine reads only that stamp.
 
 The plan model and the role models. `plan` and each role's value are a model alias, as `model` is. A rung's `plan`
