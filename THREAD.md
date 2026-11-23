@@ -1,7 +1,7 @@
 ---
 slug: thread-skill
 created: 2026-07-14
-last_touched: 2026-11-18
+last_touched: 2026-11-24
 state: active
 scope: Build + maintain the thread:* plugin — continuity verbs + the rollout queue engine (one system, two lanes)
 ---
@@ -9,6 +9,15 @@ scope: Build + maintain the thread:* plugin — continuity verbs + the rollout q
 # thread-skill — THREAD
 
 ## Where we are
+
+**2026-11-24: [[thread-skill-rollout-2026-11-12]] is complete, 80 of 80 merged, completion verify green at `7b9acea`, archived. Nothing runs under this thread now.**
+- **The second lead's stretch** (17 to 24 Nov, Stage session "thread 2", snapshot `302490ba440a` throughout). It took the rollout from 51 to 80. It halted `stuck` on 21 Nov at 77 of 81 with three tasks set aside for Lachy, and sat two and a half days until he ran `/thread:repair` on 23 Nov.
+- **His three answers at repair (23 Nov).** p39-19's spend gate signed (cap US$110, asked only because the month's standing approvals would have reached US$231 against the US$200 line; the evals cost US$83.57). p46-3's credential gate signed. p49-2 taken out and closed `dropped`, superseded by #422 and #430 (six planners had said so).
+- **Landed after it.** p39-19 (#468), p46-3 (#469), p47-12 (#470). The rollout note's `## Completion log` has every task, PR and duration. Phase 49 closed; Phases 36, 39, 46, 47, 48, 50 and 54 stay open on an open or carried task.
+- **The probe's answer** (p46-3's Do 3, now in ADR 0079): Fable use also draws down the general weekly window. Over one long `claude -p --model fable` run the Fable meter went 0 to 3 and the general meter 2.0 to 3.0.
+- **The Engine catch-up never ran.** The rollout finished on `302490ba440a`, so the catch-up the 18 Nov entry called due is moot for it; the next rollout is cut from the current tip.
+- **Filed.** [[thread-skill-followup-prove-the-fixes-of-phases-47-48-and-51]] (the rollout's Post-rollout item 3). Still open from agents' earlier filings: [[thread-skill-followup-ci-shard-weight-for-reflect-weekly]], [[thread-skill-p39-22-bound-the-last-live-fetches]], [[thread-skill-followup-restate-test-yml-long-pole-and-retune-shard-timeouts]].
+- **Score.** `t-20261123T150652Z-135c77`; `/thread:reflect [[thread-skill-rollout-2026-11-12]]` reads it.
 
 **2026-11-18: the first lead of [[thread-skill-rollout-2026-11-12]] closed after five and a half days; a fresh lead (Stage session "thread 2") runs it, at 51 of 80 merged.**
 - **What that lead landed.** 42 of 80 between 12 Nov and 17 Nov, Phase 54's p54-1 to p54-5, p54-7 and p54-9 to p54-13, p54-16 and p54-17 among them (#405 to #431). p54-6 (#425), p54-8 (#433) and p54-14 (#436) landed under the fresh lead on 17 and 18 Nov.
@@ -950,6 +959,10 @@ scheduled 2026-07-15.
 
 ## Known quirks (don't re-derive)
 
+- **A signed-gate handle kept on disk survived two compactions and a process respawn (23 Nov 2026).** execute § 3.7 says a compaction or a new session loses the handle. The second lead had written p39-19's runId, script sha and args path to its scratchpad and `/tmp`, and three days later `resumeFromRunId` replayed the plan and its judge from cache (4 of 4 saved results) and went straight to the build on the plan Lachy signed. A handle only in the conversation is lost; one written down is not.
+- **After a compaction a lead may not be able to re-read execute's SKILL.md whole in one turn (23 Nov 2026).** The file is about 110k tokens; a Read of 400 lines was refused as more than the turn had left once repair's own text was loaded. The lead read it by section, each just before the step it governs (§ 2.8, § 3.7, Restart routing, step 3, step 4, step 5). Evidence for [[thread-skill-grill-a-rollout-lead-hands-over-before-compaction-costs]].
+- **An agent's import probe can red the next verify with stray bytecode (23 Nov 2026).** p46-3's Integration verify went red on L8 and D14 ("no bytecode") because an ignored `skills/execute/scripts/__pycache__/reconcile-rollout.cpython-311.pyc` sat in the task tree; the reviser had tripped the same two tests the same way an hour earlier. The Flake check reads it `unplaced`, so it costs an integrate call (39 minutes here). Same family as [[thread-skill-followup-flake-bc5117e61d]].
+
 - **A lead that compacts re-reads SKILL.md from the engine root before its next command (17 Nov 2026).** execute § 1.5 calls a compaction a § 1 entry, and nothing enforces it. Rebuilt from a summary, six commands came out wrong in one stretch: an integrate call's `integration.headSha` given `prepare`'s `prHead` where its `anchor` belongs (no exit code catches it before the merge step), a merge-task set-aside written in the lead's words where merge-task's own text from its last `ERROR:` line is what the retry rule reads, `next --running` given a count where slugs belong, and three wrong paths or flags.
 
 - **merge-task.sh can read a transient GitHub 401 as a failed required check** (2026-11-11, #370's second attempt): both checks were still pending, `gh auth status` was fine a minute later, and the run was set aside as `a REQUIRED check FAILED`. Before acting on a merge-task exit 1, read `gh pr checks` and the log's last lines; if it recurs, file a fix for the checks watch's error classing.
@@ -1255,6 +1268,13 @@ scheduled 2026-07-15.
 
 ## Resume instructions
 
+**From 2026-11-24 (the rollout's completion):** nothing runs under this thread. This supersedes the 18 November block's steps 2 and 3 and every earlier line that says [[thread-skill-rollout-2026-11-12]] is running.
+1. **Next task for this thread:** [[thread-skill-grill-a-rollout-lead-hands-over-before-compaction-costs]], filed, not started (a Fable hand session; both of Lachy's questions are settled in the note). The two 23 Nov entries under Known quirks are evidence for it.
+2. **Then** [[thread-skill-p46-7-switch-fables-arms-on-once-the-lock-is-edited]]: p46-1 to p46-6 have all merged, so it waits on nothing but their going live (the Green tip).
+3. **A `/thread:orient Thread Skill --steer`** schedules what the rollout left out: [[thread-skill-p30-2-a-review-stop-is-the-agents-to-resolve]], [[thread-skill-p50-3-build-adr-0077-auto-file-and-drop]], [[thread-skill-p39-13-fresh-review-landing-loop-review-follow-ups]], and the open follow-ups named in Where we are.
+4. **As proofs come in:** [[thread-skill-followup-prove-the-fixes-of-phases-47-48-and-51]].
+5. **His, for a sitting he chooses:** the product calls on [[thread-skill-retire-legs-in-place-mode]] and [[thread-skill-retire-protocol-3-migration-and-k6]].
+
 **From 2026-11-18 (the first lead's close):** [[thread-skill-rollout-2026-11-12]] runs under its fresh lead (Stage session "thread 2"); `/thread:status [[thread-skill-rollout-2026-11-12]]` reads where it is. This supersedes step 3 of the 16 November block below.
 1. **Next task for this thread:** [[thread-skill-grill-a-rollout-lead-hands-over-before-compaction-costs]], filed, not started. A Fable hand session decides the technical design (how a lead hands over by itself, how it counts compactions on disk, a free redo of its own launch error), records it as an ADR and files the build as phased tasks, ahead of ordinary work. Both of Lachy's questions are settled in the note: do not grill him.
 2. **The first Engine catch-up, through the rollout's lead:** p54-8 (#433) and p54-14 (#436) are in the Green tip, and the rollout still runs snapshot `302490ba440a`. Pause it and reinstate it (`/thread:execute`), so its lead runs the new engine and its `verifier:` is restamped from CLAUDE.md. Only its lead can do that cleanly. Then confirm the tasks held on p54-8 start with no hand in it.
@@ -1319,6 +1339,8 @@ The in-place checkout `~/repos/tools/thread-skill` is still held behind origin/m
 4. `/thread:reflect [[thread-skill-rollout-2026-10-19]]` is on offer; the next weekly Reflection is due 2026-10-24.
 
 ## Session log
+
+- 2026-11-24 (close, rollout lead): led [[thread-skill-rollout-2026-11-12]] from 51 of 80 to complete; halted on three set-asides 21 Nov, his three answers at `/thread:repair` 23 Nov (two gates signed, p49-2 dropped); p39-19, p46-3 and p47-12 landed (#468 to #470); completion verify green at 7b9acea; Phase 49 closed; archived and scored.
 
 - 2026-11-18 (close, rollout lead): led [[thread-skill-rollout-2026-11-12]] from 12 Nov to 42 of 80; after its third compaction the lead passed a wrong anchor and stalled p54-6 for 16 hours; on his word the rollout was hard-paused and handed [[thread-skill-rollout-2026-11-12]] to a fresh lead on a fresh snapshot (#432); his ruling on a lead's automatic hand-over is filed as a design task; the first Engine catch-up is due.
 - 2026-11-16 (close, the merge wait): suite audit from CI's own runs (65 min of lane per merge; the fast tier ran 191 of 199 files); grilled into ADR 0084 (Green tip, Slow tier, Speed fix, Engine catch-up; PR #413, three review rounds); macOS dropped from the ruleset by hand; Phase 54 (17 tasks) joined [[thread-skill-rollout-2026-11-12]] and the hold moved to p54-8; carried today's Lunch restart. Afternoon: the restart was held at 13:40 (input 12 s before the check) and its drain undone; Lachy chose Tuesday's Lunch. By 15:53 #413, #414, #415 and p54-1 (#416) had merged, the Stage (up since 08:04) runs Chorus #796 to #800, and p54-5 was building.
