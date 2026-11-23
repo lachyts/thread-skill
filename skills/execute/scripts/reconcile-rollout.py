@@ -1683,8 +1683,8 @@ unreported-context (exit 4's `unreported-context:` set-aside, ADR 0080: a requir
 head while no run on it is in flight, a renamed job; a stop that retries as infra, a settings block like no-runner);
 merge-task (a reason starting `merge-task`, and exit 4's `base moved` / `head moved after
 Integration`); declined; prepare (any other lead integration reason); revise-stopped; allowance (p46-3: the engine's
-ALLOWANCE_DIAGNOSIS, ALLOWANCE_MARK in the diagnosis, an allowance block that retries as quota and writes no
-quota-stall); transient (the engine's TRANSIENT_DIAGNOSIS); then gate (gate-pending); needs-human (p16-3: the row's own needsHuman is a non-empty
+ALLOWANCE_DIAGNOSIS, a diagnosis whose own reason opens ALLOWANCE_MARK, _allowance_block: an allowance block that
+retries as quota and writes no quota-stall); transient (the engine's TRANSIENT_DIAGNOSIS); then gate (gate-pending); needs-human (p16-3: the row's own needsHuman is a non-empty
 string, never the note's `## Needs you`, so a lead row, or an integrate row, which carries null, never reads it,
 except an integrate row's security set-aside, which carries the security scan's question (p39-8); a
 question is no round run out, so it must not reach plan-rejected or review-rounds, the classes the Reflection raises
@@ -2203,9 +2203,9 @@ Status mapping (workflow status -> note writes), per execute/SKILL.md §6:
                     labels, fellBack: an int >= 1} (the engine ran Fable's dispatches on Opus); a later such row
                     restamps it, nothing removes it, and defer keeps it; status shows it as an unlanded task's
                     `fellBack`. Absent or null stamps nothing; any other shape is one ERROR (exit 1) that stamps
-                    nothing, the rest of the row landing. A blocked row whose diagnosis opens ALLOWANCE_MARK (its Opus
-                    rerun died too) is written as any blocked row, under "## Blocker diagnosis", reasonClass
-                    allowance, and writes no quota-stall.
+                    nothing, the rest of the row landing. A blocked row whose diagnosis's own reason opens
+                    ALLOWANCE_MARK (_allowance_block: its Opus rerun died too) is written as any blocked row, under
+                    "## Blocker diagnosis", reasonClass allowance, and writes no quota-stall.
 
 Accumulated feedback (p6-4): the run sections keep every run, never only the first. Each run is a block
 
@@ -11658,7 +11658,7 @@ def _reason_class(note_status, integ, lead, prior, failed, reason, diag, pr, ask
         return "prepare"
     if lead == "revise-stopped":
         return "revise-stopped"
-    if ALLOWANCE_MARK in diag:
+    if _allowance_block(diag):
         return "allowance"
     if TRANSIENT_MARK in diag:
         return "transient"
@@ -13823,11 +13823,16 @@ def _block_stamp(note):
 
 
 def _note_reason(note):
-    """(kind, reason) of a set-aside note's latest block: _lead_reason with the kind read off the note, so an engine
-    row and a lead-written one read alike. The text is _blocker_summary's (its own status's section first): one
-    starting `integration:` -> integration; a revise marker carrying a `revise stopped:` line -> revise-stopped;
-    anything else -> own (its `own run: ` escape dropped)."""
-    text = _blocker_summary(note)
+    """(kind, reason) of a set-aside note's latest block: _reason_of over _blocker_summary's text (its own status's
+    section first), so an engine row and a lead-written one read alike."""
+    return _reason_of(_blocker_summary(note))
+
+
+def _reason_of(text):
+    """(kind, reason) of one block's text: _lead_reason with the kind read off the text. One starting `integration:` ->
+    integration; a revise marker carrying a `revise stopped:` line -> revise-stopped; anything else -> own (its
+    `own run: ` escape dropped)."""
+    text = str(text or "")
     low = text.strip().lower()
     if low.startswith(INTEGRATION_PREFIX):
         kind = "integration"
@@ -13836,6 +13841,15 @@ def _note_reason(note):
     else:
         kind = "own"
     return kind, _lead_reason(kind, text)
+
+
+def _allowance_block(text) -> bool:
+    """Whether a block is the engine's allowance block (p46-3, ADR 0079 d7): its own reason (_reason_of) opens with
+    ALLOWANCE_MARK, stripped and lowercased, as ALLOWANCE_DIAGNOSIS does; a seeded revise's, which stageDiagnosis wraps
+    in the revise marker, is its `revise stopped:` line. A block that names the mark anywhere else (a verifier red that
+    quotes an `allowance refusal: …` test, a blocker about the feature) is the agent's own. Read by _reason_class
+    (reasonClass allowance) and _retry_class (quota)."""
+    return _reason_of(text)[1].strip().lower().startswith(ALLOWANCE_MARK)
 
 
 # The lead's own Integration set-asides that are the environment's, never the task's (ADR 0048, p29-7; execute § 4.5
@@ -13894,8 +13908,9 @@ def _merge_task_ci_timeout(reason) -> bool:
 
 def _retry_class(note) -> str:
     """How an automatic retry treats a block: `quota` (a dead call, `workflow call failed:`, whose error line reads as
-    a usage or rate limit: QUOTA_RE; or, p46-3, the engine's ALLOWANCE_DIAGNOSIS, ALLOWANCE_MARK in the block, checked
-    before TRANSIENT_MARK: an allowance block, whose Login's allowance is likely spent), `infra` (the engine's TRANSIENT_DIAGNOSIS, any other dead call, a lead-written
+    a usage or rate limit: QUOTA_RE; or, p46-3, the engine's ALLOWANCE_DIAGNOSIS, a block whose own reason opens
+    ALLOWANCE_MARK (_allowance_block), checked before TRANSIENT_MARK: an allowance block, whose Login's allowance is
+    likely spent), `infra` (the engine's TRANSIENT_DIAGNOSIS, any other dead call, a lead-written
     Integration set-aside whose reason opens with one of INFRA_LEAD_OPENINGS, or a stop on GitHub's side, ADR 0069 d3:
     an Integration set-aside opening MERGE_TASK_GITHUB_OPENING whose rest is a _merge_task_infra_stop, a third exit 8
     (MERGE_TASK_EXIT8_OPENING) carrying MERGE_TASK_SETTLING_MARK, merge-task's exit-4 settings set-asides
@@ -13918,7 +13933,7 @@ def _retry_class(note) -> str:
     if kind == "own" and first.lower().startswith("merge-task") and _merge_task_infra_stop(reason):
         return "infra"
     summary = _blocker_summary(note)
-    if ALLOWANCE_MARK in summary:
+    if _allowance_block(summary):
         return "quota"
     return "infra" if TRANSIENT_MARK in summary else "agent"
 

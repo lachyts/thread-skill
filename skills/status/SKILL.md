@@ -580,7 +580,8 @@ A count shows only when `autoRetryBudget` is non-null (the verdict reached the b
 wins: `auto-retry off` when `autoRetryBudget.autoRetries.value` is 0 (every retry off, quota included);
 `overtime <overtime.used>/<overtime.budget>` when `overtime` is non-null (an Overtime run past the spent budget,
 p39-14, ADR 0070); `quota <quotaRetriesUsed>/5` when `autoRetryClass` is `quota` (a quota block spends no budget; an
-allowance block, its blocker summary opening `allowance refusal`, p46-3, is one);
+allowance block, its blocker summary opening `allowance refusal` (a seeded revise's on its `revise stopped:` line),
+p46-3, is one);
 otherwise `auto-retry <autoRetriesUsed>/<autoRetryBudget.autoRetries.value>`. A non-null `takeOut` adds its own state
 after the count: `take-out failed <takeOut.failures>/3` once a try failed (at 3 its `humanFix` H10 is in the Needs you
 block), else `take-out cools down until <autoRetryAfter>` while its cool-down runs, else `take-out waits on [[d]]` when
