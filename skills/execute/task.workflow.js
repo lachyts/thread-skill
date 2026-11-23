@@ -2789,17 +2789,19 @@ const FALLBACK_SUFFIX = ' on-rung'
 // its own block in its own words ("A safety classifier stopped this planning round partway through …"). Another pass
 // on the same brief meets the same classifier, so the stop is never evidence of hardness and never retried in the call:
 // runAgent reads it off the agent's own failure (classifierStopOf) and ends the call at once, `blocked` (never
-// plan-blocked, never plan feedback) with CLASSIFIER_DIAGNOSIS, which names the stage and the dispatch it stopped. No
+// plan-blocked, never plan feedback) with classifierDiagnosis, which names the stage and the dispatch it stopped. No
 // climb, no second pass, no plan revise, no review round. reconcile reads it as reasonClass `classifier`, and the
 // automatic retry spends nothing on it: it is set aside for a person (lead-integrate.py's verdict, H5 `decide scope or
 // defer`). A rescoped brief is a later dispatch's, never this one's retry. Task mode only: Integration reads none.
 // CLASSIFIER_MARK is reconcile-rollout.py's CLASSIFIER_MARK and lead-integrate.py's NO_BUDGET_OPENINGS entry (pinned by
 // tests/contracts/execute-needs-you.test.mjs).
 const CLASSIFIER_MARK = 'classifier stop'
-// The agent's own words, read only at their opening: the engine's mark, or a safety (or usage-policy) classifier named
-// first and a stop verb in the same sentence. A block that names a classifier anywhere later (a verifier red quoting a
-// test named for this rule, merge-task's infra classifier) is the agent's own block.
-const CLASSIFIER_OPENING_RE = /^\W*(?:classifier stop\b|(?:(?:an?|the)\s+)?(?:safety|usage[- ]policy)\s+classifier\b[^.\n]*?\b(?:stopped|stops|withheld|withholds|blocked|blocks|flagged|halted|cut|ended|refused))/i
+// The agent's own words, read only at their opening: a safety (or usage-policy) classifier named first and a stop verb in
+// the same sentence. A block that names a classifier anywhere later (a verifier red quoting a test named for this rule,
+// merge-task's infra classifier) is the agent's own block, and so is one that opens with the engine's bare mark but names
+// no classifier stopping it (a red on a task about this rule, `classifier stop tests fail`): no prompt asks an agent to
+// write the mark, so only the engine's own diagnosis carries it.
+const CLASSIFIER_OPENING_RE = /^\W*(?:(?:an?|the)\s+)?(?:safety|usage[- ]policy)\s+classifier\b[^.\n]*?\b(?:stopped|stops|withheld|withholds|blocked|blocks|flagged|halted|cut|ended|refused)/i
 const CLASSIFIER_TEXT_MAX = 400
 // The stage a dispatch's label names (AUTO_RETRY_STAGES' words): the planner, its reviser and the plan judge plan; the
 // builder and the investigator implement; the reviser and the master reviewers review.

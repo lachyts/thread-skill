@@ -980,9 +980,17 @@ test('classifier stop: the call ends at the stopped dispatch, blocked with its s
     assert.equal(r.labels.filter((l) => l === last).length, 1, `${name}: the stopped dispatch is never retried`)
     assert.ok(!r.row.climbs.some((c) => c.stage === stage && stage !== 'review'), `${name}: no climb on the stop`)
   }
-  // The control: a planner block that names the classifier mid-text is the planner's own, retried and plan-blocked.
-  const own = await run(mkArgs(mkTask(S, gated), { ladder }), {
-    [`plan:${S}`]: { ...stopPlan, blockerCause: `first pass: ${STOPPED}` }, [`plan:${S}@opus-xhigh`]: noPlan })
-  clean(own)
-  assert.deepEqual([own.row.status, own.labels], ['plan-blocked', [`plan:${S}`, `plan:${S}@opus-xhigh`]])
+  // The controls, each the agent's own block on today's path: a planner block that names the classifier mid-text (retried,
+  // plan-blocked), and a builder block that opens with the engine's mark but names no classifier stopping it (a red on a
+  // task about this rule: climbed and retried).
+  for (const [name, task, script, want] of [
+    ['mid-text', gated, { [`plan:${S}`]: { ...stopPlan, blockerCause: `first pass: ${STOPPED}` }, [`plan:${S}@opus-xhigh`]: noPlan },
+      ['plan-blocked', [`plan:${S}`, `plan:${S}@opus-xhigh`]]],
+    ['the bare mark', {}, { [`implement:${S}`]: { ...ralphBlocked, blockerDiagnosis: 'classifier stop tests fail in engine-ladder' },
+      [`implement:${S}@opus-xhigh`]: ralphBlocked }, ['blocked', [`implement:${S}`, `implement:${S}@opus-xhigh`]]],
+  ]) {
+    const own = await run(mkArgs(mkTask(S, task), { ladder }), script)
+    clean(own)
+    assert.deepEqual([own.row.status, own.labels], want, name)
+  }
 })
