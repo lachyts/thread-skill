@@ -2777,7 +2777,7 @@ const ALLOWANCE_DIAGNOSIS =
   'and its rerun on Opus died too, so the Login\'s general allowance is likely spent as well. NOT a task-authored ' +
   'blocker and never plan feedback: the task re-enters by the automatic retry after its long cool-down; the worktree, ' +
   'branch and any PR are reusable.'
-// The rerun's label suffix: reconcile-rollout.py's ON_RUNG_SUFFIX (pinned equal by tests/engine-ladder.test.mjs).
+// The rerun's label suffix: reconcile-rollout.py's ON_RUNG_SUFFIX (both pinned by tests/contracts/execute-needs-you.test.mjs).
 const FALLBACK_SUFFIX = ' on-rung'
 
 // { model: 'opus', effort } a dispatch labelled `label` runs on in Fable's place: the task's current rung, or the
