@@ -951,14 +951,13 @@ test('allowance refusal: a redirected death and an Opus death with no Fable stay
   assert.ok(plain.row.ran.every((x) => !('asked' in x) && !('fellBack' in x)))
 })
 
-test('allowance refusal: the diagnosis opens with the mark, holds no word a transient or quota reader reads, and the rerun suffix is reconcile\'s', () => {
-  const E = loadEngine(['ALLOWANCE_MARK', 'ALLOWANCE_DIAGNOSIS', 'FALLBACK_SUFFIX'])
+// The mark and the rerun suffix are pinned against reconcile's own copies in tests/contracts/execute-needs-you.test.mjs
+// (the openings the engine writes and its readers read).
+test('allowance refusal: the diagnosis opens with the mark and holds no word a transient or quota reader reads', () => {
+  const E = loadEngine(['ALLOWANCE_MARK', 'ALLOWANCE_DIAGNOSIS'])
   assert.equal(E.ALLOWANCE_MARK, 'allowance refusal')
   assert.ok(E.ALLOWANCE_DIAGNOSIS.startsWith(E.ALLOWANCE_MARK + ' — '))
-  for (const word of ['transient infrastructure failure', 'quota', 'usage limit', '"']) {
+  for (const word of ['transient infrastructure failure', 'quota', 'usage limit', 'reached your', '"']) {
     assert.ok(!E.ALLOWANCE_DIAGNOSIS.toLowerCase().includes(word), `no ${word}`)
   }
-  const rr = fs.readFileSync(path.join(root, 'skills', 'execute', 'scripts', 'reconcile-rollout.py'), 'utf8')
-  assert.equal(JSON.parse(rr.match(/^ON_RUNG_SUFFIX = ("[^"]*")/m)[1]), E.FALLBACK_SUFFIX)
-  assert.equal(JSON.parse(rr.match(/^ALLOWANCE_MARK = ("[^"]*")/m)[1]), E.ALLOWANCE_MARK)
 })
