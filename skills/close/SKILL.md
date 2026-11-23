@@ -1,6 +1,6 @@
 ---
 name: close
-description: 'End-of-thread capture — update the active thread (THREAD.md or a shared thread) with what happened this session, then save the rest without asking. It lands its own close-out commits (pushed, or a queued `landing` PR; ADR 0028), and lands the session''s own branch: `/fresh-review` inline, fixes, merge queued only after a clean round (§ Land the own branch); it proposes new vault tasks but files review follow-ups itself. Use when the work is FINISHED for now and state should persist; if the work continues elsewhere use thread:handoff, if it''s being set down for later use thread:stash or thread:defer. Invoke with `/thread:close` or "close this thread".'
+description: 'End-of-thread capture — update the active thread (THREAD.md or a shared thread) with what happened this session, then save the rest without asking. It lands its own close-out commits (pushed, or a queued `landing` PR; ADR 0028), and lands the session''s own branch: `/fresh-review` inline, fixes, merge queued only after a clean round (§ Land the own branch); it proposes new vault tasks but files review follow-ups itself, and starts a prepared rollout''s lead. Use when the work is FINISHED for now; if it continues elsewhere use thread:handoff, if set down for later thread:stash or thread:defer. Invoke with `/thread:close` or "close this thread".'
 ---
 
 # /thread:close — close out this thread
