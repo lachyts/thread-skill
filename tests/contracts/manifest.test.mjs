@@ -17,7 +17,7 @@ const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '.
 const read = (p) => fs.readFileSync(path.join(root, p), 'utf8')
 
 const DESCRIPTION_LIMIT = 700
-const DESCRIPTION_TOTAL_RATCHET = 7950
+const DESCRIPTION_TOTAL_RATCHET = 7940
 
 // Minimal frontmatter reader for the shapes this repo uses: `key: plain`, `key: 'single ''quoted'''`,
 // `key: "double quoted"`, one line each. Anything else fails loudly rather than parsing wrong.
