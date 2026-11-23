@@ -174,7 +174,9 @@ Kinds (T: a task is required; `?` marks an optional field; every enum is closed)
                      unreported-context (a required context nothing reports on the PR's head, merge-task's exit-4
                      set-aside, ADR 0080) |
                      merge-task | merge-gate | declined | prepare | revise-stopped | allowance (p46-3: the engine's
-                     allowance block, a Fable dispatch whose Opus rerun died too, retried as quota) | transient | gate |
+                     allowance block, a Fable dispatch whose Opus rerun died too, retried as quota) | classifier
+                     (p47-12: the engine's classifier stop, a safety classifier stopped an agent; never retried by
+                     itself, and its stage the one the stop names) | transient | gate |
                      needs-human | plan-rejected | review-rounds | approved-without-pr | integration-conflict |
                      integration-red | integration-set-aside | blocked, where needs-human, p16-3, is a stop on a
                      question for a person, never a plan or review round run out, and integration-conflict and

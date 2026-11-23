@@ -521,6 +521,18 @@ for c in "q5|revise: rejected at Integration re-review — revise on the branch,
   ok "$(since ro "$((M+1))" '[d["stage"], d["reasonClass"]]')" "$want" "$s: the block's own reason decides its reasonClass"
 done
 
+echo "== 16c. (p47-12) the engine's classifier stop: reasonClass classifier at the stage it names; mid-text is the agent's own"
+for c in "c1|classifier stop at plan (plan:c1) — a safety classifier stopped the agent (p47-12). The agent said: A safety classifier stopped this planning round.|[\"plan\",\"classifier\"]" \
+         "c2|revise: rejected at Integration re-review — revise on the branch, then re-integrate\nrevise stopped: classifier stop at review (revise:c2 r2) — a safety classifier stopped the agent.|[\"review\",\"classifier\"]" \
+         "c3|verifier red: tests/engine-ladder.test.mjs 'classifier stop at plan: the call ends' fails|[\"implement\",\"blocked\"]"; do
+  IFS='|' read -r s d want <<< "$c"
+  mkt "$s" ro in_progress
+  rrs mark-started --tasks "$s" --tasks-dir "$V" --now "$NOW" >/dev/null
+  M=$(cnt ro)
+  row "$(trow "$s" "$(python3 -c 'import json, sys; print(json.dumps({"status": "blocked", "blockerDiagnosis": sys.argv[1].replace("\\n", "\n")}))' "$d")")" >/dev/null
+  ok "$(since ro "$((M+1))" '[d["stage"], d["reasonClass"]]')" "$want" "$s: a classifier stop's reasonClass and stage"
+done
+
 echo "== 17. a read-only approval -> slot-freed(completed), merged(readOnly)"
 mkt r ro in_progress "scope_note: x"
 setfm r scope read-only

@@ -811,6 +811,21 @@ rec "$(row "$C" blocked "verifier red: tests/engine-ladder.test.mjs 'allowance r
 ok "$(j "$(INOW=2026-10-03T10:00:00Z inp "$C")" '[d["autoRetry"], d["autoRetryClass"]]')" '[true,"agent"]' \
   "A11b control: a block that quotes the mark mid-text stays agent"
 
+# A11c (p47-12, Watch ef8ad104): the engine's classifier stop is never re-entered by itself, whatever budget is left: the
+# same brief meets the same classifier, so it waits for Lachy, H5 `decide scope or defer`. The verb writes nothing. Its
+# retry class is agent even when the agent's own words, quoted after the opening, name the transient mark.
+scen a11c
+mkro; mkt "$A" in_progress "owner: execute-test"
+CLF='classifier stop at plan (plan:a) — a safety classifier stopped the agent (p47-12). The agent said: A safety classifier stopped this planning round; no transient infrastructure failure.'
+rec "$(row "$A" blocked "$CLF")" 2026-10-03T10:00:00Z
+I=$(INOW=2026-10-04T10:00:00Z inp "$A")
+ok "$(j "$I" '[d["autoRetry"], d["autoRetryClass"], d["autoRetryAfter"], d["takeOut"]]')|$(hf "$I")" '[false,"agent",null,null]|["decide scope or defer",true,null]' \
+  "A11c: a classifier stop → no automatic retry, class agent, no cool-down, no take-out; H5 for Lachy"
+has "$(fix "$I" detail)" "classifier stop at plan (plan:a)" "A11c: the fix names the stop and its stage"
+before=$(snap)
+ANOW=2026-10-04T10:00:00Z ar "$A"
+ok "$rc|$(snap)" "1|$before" "A11c: the verb refuses it (nothing written)"
+
 # ── A12: the budget's lifetime ───────────────────────────────────────────────────────────────────────────────
 scen a12-hand-back
 mkro; mkt "$A" open; mkt "$B" open

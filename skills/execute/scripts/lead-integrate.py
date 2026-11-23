@@ -2944,7 +2944,8 @@ HUMAN_FIX_ACTS = (
     "fix its rollout: or defer",                       # H2  no rollout note
     "decide RACE", "decide UNVERIFIED",                # H3  an undecided RACE or UNVERIFIED
     "answer the question",                             # H4  a `## Needs you` question
-    "decide scope or defer",                           # H5  plan-blocked after a descope, or a refused descope
+    "decide scope or defer",                           # H5  plan-blocked after a descope, or a refused descope; a
+                                                       #     classifier stop (p47-12: rescope the brief or defer)
     "restore, recut or defer",                         # H6  at Integration with no pr: (repair § 4, or § 3c's merge)
                                                        # H8  the PR branch is gone
     "fix the note's pr: or defer",                     # H7  a pr: the engine refuses, on a way back that launches on it
@@ -2958,10 +2959,11 @@ HUMAN_FIX_ACTS = (
 )
 # The fixed openings the engine, its prompts and the lead write for a code-writing task's own run. None of them spends a
 # budget (a dead call, merge-task's exit 1, a dead agent, an allowance block (p46-3: its retry class is quota, so
-# `autoRetryClass: quota` cools it down free), a plan divergence, the engine's two fallbacks, the lead's own invalid
-# round-budget row, execute § 3), so a run that starts with one never raises max_iterations: only the implementer's or
-# reviser's own paragraph does.
+# `autoRetryClass: quota` cools it down free), a classifier stop (p47-12: set aside for a person, cause 9a), a plan
+# divergence, the engine's two fallbacks, the lead's own invalid round-budget row, execute § 3), so a run that starts with
+# one never raises max_iterations: only the implementer's or reviser's own paragraph does.
 NO_BUDGET_OPENINGS = ("workflow call failed:", "merge-task:", "transient infrastructure failure", "allowance refusal",
+                      "classifier stop",
                       "plan-divergence:", "agent returned neither verified nor blocked", "workflow stage threw",
                       "invalid round budget:")
 PLAN_BUDGET_OPENINGS = ("plan not approved after", "plan round budget exhausted")
@@ -3064,6 +3066,10 @@ def auto_retry_verdict(path, note, inp, rollout_note, now, max_rounds_flag=None,
       8. plan-blocked after an automatic descope (a descope marker and no `descope_armed:`): H5 `decide scope or defer`;
       9. a refused descope recorded for this block (_descope_refusal, never while `descope_armed:` stands: the armed
          descope's hand-back is its way back): H5 with the record as its detail;
+     9a. a classifier stop (p47-12, reconcile-rollout.py _classifier_block: the engine's classifierDiagnosis, a safety
+         classifier stopped one of the call's agents): H5 `decide scope or defer` (its first line), handBack true. Another
+         run on the same brief meets the same classifier, so it is never re-entered unchanged and spends no budget:
+         Lachy rescopes the brief (a `## Repair input`) and hands it back, or defers it;
      10. autoRevise under the resolved max_review_rounds: null (step 1.2's seeded revise), or H7 when `prUrlError` is
          non-empty (step 1.2 launches nothing on it);
      11. set aside at Integration with no pr:: H6 `restore, recut or defer` (repair § 4's restore, or § 3c's PR-less merge
@@ -3250,6 +3256,10 @@ def _verdict(path, note, inp, rollout_note, now, answer, skip_needs=False, takes
     if refusal is not None:
         return no(f"descope refused at Plan-blocked feedback run {refusal[0]}: Lachy decides the scope",
                   fix("decide scope or defer", refusal[1], True))
+    if status == "blocked" and rr._classifier_block(rr._blocker_summary(note)):
+        stop = rr._reason_of(rr._blocker_summary(note))[1].strip().split("\n", 1)[0].strip()
+        return no("classifier stop: a safety classifier stopped an agent, and the same brief meets the same classifier: "
+                  "Lachy rescopes the brief or defers it", fix("decide scope or defer", stop, True))
     budget = rr._retry_budget(note, rollout_note)
     k = budget["maxReviewRounds"]["value"] if budget["maxReviewRounds"] else None
     if k is not None and _revise_shaped(inp) and inp["lastRound"] < k:

@@ -170,7 +170,11 @@ Considered:
   where the engine reruns the dead Fable dispatch once on Opus and runs the rest of the call's Fable dispatches on
   Opus; only when that Opus rerun dies too is the row an allowance block (`allowance refusal`), which retries as a
   quota block, or, under a usage limit the lead's Session knows of, takes execute § 4.5's Lost-call resume as a
-  transient row does.)*
+  transient row does.)* *(Amended 2026-11-24 by thread-skill-p47-12: a safety classifier's stop is neither
+  infra nor agent-fixable. The engine reads it off the agent's own block, ends the call there with no in-call retry,
+  and writes a `blocked` row opening `classifier stop at <stage>`; the automatic retry spends nothing on it and never
+  re-enters it, since the same brief meets the same classifier: it waits for a person, H5 `decide scope or defer`
+  (Watch ef8ad104, where five planner stops read as plan-rejected were each re-entered).)*
 - **The idle-slots label during a cool-down.** `next` is stateless and never reads the verdict, so while a
   set-aside task waits out a cool-down with nothing queued, the idle-slots reason is `awaiting-hand-back`; a
   Retro tells the two apart by the `auto-retry` event before the restart that ends the span (run_record.py's

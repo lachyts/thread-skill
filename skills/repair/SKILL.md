@@ -277,7 +277,7 @@ reads `inputs`' verdict. A set-aside at its run or at Integration that § 2 does
 reaches repair because its automatic retry is over (`needsHuman` is set, or its take-out failed three times), or
 because its `humanFix` names another cause that is his: a note the verdict cannot read (a malformed counter or
 `auto_retry_at`, no feedback fingerprint), an unresolved budget, a declined merge, a gone branch, a merge-task text a
-human must clear, the same stop twice running at Integration, a merge setting left for him (H13), a `prUrlError`, an at-Integration set-aside with no `pr:` (**PR CLOSED / branch missing**) or a code-writing
+human must clear, the same stop twice running at Integration, a merge setting left for him (H13), a `prUrlError`, an at-Integration set-aside with no `pr:` (**PR CLOSED / branch missing**), a classifier stop (below) or a code-writing
 review with no `pr:`. Either way it is input-gated (§ 3b), and the ask quotes `humanFix` (its act and its detail). A non-empty
 `autoRetryError` is an invalid round-budget stamp: its `humanFix` is H12 `fix the round budget`. Report it; the fix is
 the stamp it names, on Lachy's word; once the stamp reads valid the verdict falls through to the lead's own retry or to
@@ -290,7 +290,10 @@ execute § 4.5 *Lost call* first resumes such a transient row once from its own 
 the dead call's row, reaches this class. One exception (ADR 0079 d7, p46-3): when the agent it kills was asked Fable
 and its Opus rerun dies too, the row opens `allowance refusal`, an allowance block, which retries as a quota block
 (`autoRetryClass: quota`: the quota cool-downs, no budget spent; it is **retry (automatic)**, never his); under a usage
-limit the lead's Session knows of, *Lost call* resumes it first, as it does a transient row.
+limit the lead's Session knows of, *Lost call* resumes it first, as it does a transient row. A classifier stop (its row
+opens `classifier stop at <stage>`, p47-12: a safety classifier stopped an agent) is never **retry (automatic)**: the
+same brief meets the same classifier, so its `humanFix` reads `decide scope or defer`, asked at § 3b, and his rescoped
+brief, a `## Repair input` then `hand-back`, is the later dispatch.
 
 **Classed before the answer.** § 2 classes each task on the state § 1's diagnosis read. A § 3b answer changes what
 `inputs` reads (an answered block reads `answered for this block …`, its `humanFix` the answer's own), and the

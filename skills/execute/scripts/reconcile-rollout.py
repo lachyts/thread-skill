@@ -1665,8 +1665,9 @@ kind read off the note by _note_reason, failed a `workflow call failed:` reason,
 reason, an integrate row for a review-blocked note whose current Integration log line is `rejected`): gate-pending ->
 gate; an integrate row (review-blocked included) -> integrate; lead kind integration -> integrate; lead kind own
 on a note that read review (merge-task exit 1) -> integrate; lead kind revise-stopped -> review; a dead own call ->
-implement; plan-blocked -> plan; review-blocked -> review; an engine-blocked revise marker -> review; other
-engine-blocked -> implement; review with no PR -> review. `verify` is unused here. stage is where the task stopped;
+implement; a classifier stop (p47-12, _classifier_stage: an engine-blocked row whose own reason opens
+`classifier stop at <stage>`) -> that stage; plan-blocked -> plan; review-blocked -> review; an engine-blocked revise
+marker -> review; other engine-blocked -> implement; review with no PR -> review. `verify` is unused here. stage is where the task stopped;
 setAsideAt (_queue_state's run | integration | gate) is where it re-enters, so merge-task's exit 1 reads stage
 integrate, setAsideAt run.
 reasonClass, first match: quota; call-failed (`workflow call failed:` with the note in_progress before, or the
@@ -1684,7 +1685,9 @@ head while no run on it is in flight, a renamed job; a stop that retries as infr
 merge-task (a reason starting `merge-task`, and exit 4's `base moved` / `head moved after
 Integration`); declined; prepare (any other lead integration reason); revise-stopped; allowance (p46-3: the engine's
 ALLOWANCE_DIAGNOSIS, a diagnosis whose own reason opens ALLOWANCE_MARK, _allowance_block: an allowance block that
-retries as quota and writes no quota-stall); transient (the engine's TRANSIENT_DIAGNOSIS); then gate (gate-pending); needs-human (p16-3: the row's own needsHuman is a non-empty
+retries as quota and writes no quota-stall); classifier (p47-12: the engine's classifierDiagnosis, a diagnosis whose own
+reason opens CLASSIFIER_MARK, _classifier_block: a safety classifier stopped an agent, set aside with no automatic
+retry); transient (the engine's TRANSIENT_DIAGNOSIS); then gate (gate-pending); needs-human (p16-3: the row's own needsHuman is a non-empty
 string, never the note's `## Needs you`, so a lead row, or an integrate row, which carries null, never reads it,
 except an integrate row's security set-aside, which carries the security scan's question (p39-8); a
 question is no round run out, so it must not reach plan-rejected or review-rounds, the classes the Reflection raises
@@ -2205,7 +2208,9 @@ Status mapping (workflow status -> note writes), per execute/SKILL.md §6:
                     `fellBack`. Absent or null stamps nothing; any other shape is one ERROR (exit 1) that stamps
                     nothing, the rest of the row landing. A blocked row whose diagnosis's own reason opens
                     ALLOWANCE_MARK (_allowance_block: its Opus rerun died too) is written as any blocked row, under
-                    "## Blocker diagnosis", reasonClass allowance, and writes no quota-stall.
+                    "## Blocker diagnosis", reasonClass allowance, and writes no quota-stall. So is a classifier
+                    stop (p47-12, _classifier_block: its own reason opens CLASSIFIER_MARK), reasonClass classifier,
+                    its set-aside stage the one the diagnosis names (_classifier_stage), a plan-stage stop's included.
 
 Accumulated feedback (p6-4): the run sections keep every run, never only the first. Each run is a block
 
@@ -10397,6 +10402,12 @@ TRANSIENT_MARK = "transient infrastructure failure"           # the engine's TRA
 # The engine's ALLOWANCE_DIAGNOSIS opening (p46-3, ADR 0079 d7): a Fable dispatch died twice and its Opus rerun died too,
 # an allowance block. Its reasonClass is allowance, and it retries as a quota block (_retry_class).
 ALLOWANCE_MARK = "allowance refusal"
+# The engine's classifier stop opening (p47-12; task.workflow.js's CLASSIFIER_MARK and classifierDiagnosis): a safety
+# classifier stopped one of the call's agents, which the call ended on with no retry. Its diagnosis's own reason opens
+# `classifier stop at <stage> (<label>)`; its reasonClass is classifier, its stage that <stage> (_classifier_stage), and
+# the automatic retry sets it aside for a person (lead-integrate.py's verdict).
+CLASSIFIER_MARK = "classifier stop"
+CLASSIFIER_STAGE_RE = re.compile(r"classifier stop at (plan|implement|review)\b")
 REVISE_MARK = "revise: rejected at integration re-review"     # the engine's REVISE_MARKER opening, lowercased
 OWN_RUN_PREFIX = "own run: "                                  # stageDiagnosis's escape (lead-integrate.py)
 
@@ -11604,6 +11615,8 @@ def _set_aside_stage(note_status, integ, lead, prior, failed, diag, pr) -> str:
         return "review"
     if lead == "own" and failed:
         return "implement"
+    if note_status == "blocked" and _classifier_stage(diag):
+        return _classifier_stage(diag)
     if note_status == "plan-blocked":
         return "plan"
     if note_status == "review-blocked":
@@ -11664,6 +11677,8 @@ def _reason_class(note_status, integ, lead, prior, failed, reason, diag, pr, ask
         return "revise-stopped"
     if _allowance_block(diag):
         return "allowance"
+    if _classifier_block(diag):
+        return "classifier"
     if TRANSIENT_MARK in diag:
         return "transient"
     if note_status == GATE_PENDING_STATUS:
@@ -13856,6 +13871,25 @@ def _allowance_block(text) -> bool:
     return _reason_of(text)[1].strip().lower().startswith(ALLOWANCE_MARK)
 
 
+def _classifier_block(text) -> bool:
+    """Whether a block is the engine's classifier stop (p47-12): its own reason (_reason_of) opens with CLASSIFIER_MARK,
+    stripped and lowercased, as classifierDiagnosis does; a seeded revise's is its `revise stopped:` line. A block that
+    names the mark anywhere else is the agent's own. Read by _reason_class (reasonClass classifier), _retry_class
+    (agent, whatever the agent's quoted words say) and lead-integrate.py's verdict (no automatic retry: H5 `decide scope
+    or defer`)."""
+    return _reason_of(text)[1].strip().lower().startswith(CLASSIFIER_MARK)
+
+
+def _classifier_stage(text):
+    """The stage a classifier stop names (plan, implement or review: `classifier stop at <stage>`), or None when the block
+    is no classifier stop (_classifier_block) or names none. _set_aside_stage reads it, so the set-aside records where
+    the classifier stopped, a plan-stage stop included, whose note reads `blocked`."""
+    if not _classifier_block(text):
+        return None
+    m = CLASSIFIER_STAGE_RE.match(_reason_of(text)[1].strip().lower())
+    return m.group(1) if m else None
+
+
 # The lead's own Integration set-asides that are the environment's, never the task's (ADR 0048, p29-7; execute § 4.5
 # step 3's exit 8 and step 4's signal row): an origin outage, or a merge-task killed twice. Each cools down as infra.
 # merge-task's exit-8 text stays `agent` (ADR 0033's tested contract), except while GitHub settles a PR's mergeability
@@ -13920,7 +13954,9 @@ def _retry_class(note) -> str:
     (MERGE_TASK_EXIT8_OPENING) carrying MERGE_TASK_SETTLING_MARK, merge-task's exit-4 settings set-asides
     (SETTINGS_OPENINGS: no-runner and unreported-context, ADR 0080), or a legacy own-run `merge-task` reason that is a
     _merge_task_infra_stop) or `agent` (everything else: an agent can act on its feedback; every other exit-8 text
-    included)."""
+    included; and, p47-12, the engine's classifier stop (_classifier_block), checked before TRANSIENT_MARK, since its
+    diagnosis quotes the agent's own words: no class retries it, lead-integrate.py's verdict sets it aside for a
+    person first)."""
     kind, reason = _note_reason(note)
     first = reason.split("\n", 1)[0].strip()
     if first.lower().startswith(CALL_FAILED_PREFIX):
@@ -13939,6 +13975,8 @@ def _retry_class(note) -> str:
     summary = _blocker_summary(note)
     if _allowance_block(summary):
         return "quota"
+    if _classifier_block(summary):
+        return "agent"
     return "infra" if TRANSIENT_MARK in summary else "agent"
 
 

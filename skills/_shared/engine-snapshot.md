@@ -233,7 +233,10 @@ d7) come only from snapshots that have them: a row's `allowance` and its `ran` e
 engine at p46-3 or later), the note's `fell_back:` stamp (its `reconcile`), a role-call line's `refused` (its
 `fold-journals`) and the `fable-share` Run record lines (its `mark-started` and `record-entry`). An older reader ignores
 each: an unknown row key, an unknown note line, an optional field, a kind it never reads. The fallback itself is
-engine-side, inside one call, and inert while no ladder names Fable (task p46-7 writes the first that does). The task note's `unreachable: true` stamp and
+engine-side, inside one call, and inert while no ladder names Fable (task p46-7 writes the first that does). The classifier
+stop (p47-12) is engine-side too: only an engine at p47-12 or later writes a row opening `classifier stop at <stage>`, and
+only a `reconcile` and an `inputs` at p47-12 or later read it as reasonClass `classifier` and set it aside for him; an
+older one reads it as a plain blocked row, an agent block the automatic retry re-enters, as before. The task note's `unreachable: true` stamp and
 its `## Felt check` lines (p52-2, ADR 0081 d3; vault-grammar § Felt check) are written by a `reconcile` at p52-2 or later
 only; an older engine ignores both, so its tasks take a single master review and no check. `felt-check` and
 `unfinished-rollout.py needs-you` read them from any root at p52-2 or later (`felt-check` is guard-exempt: it writes

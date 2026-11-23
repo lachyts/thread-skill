@@ -951,3 +951,46 @@ test('allowance refusal: the diagnosis opens with the mark and holds no word a t
     assert.ok(!E.ALLOWANCE_DIAGNOSIS.toLowerCase().includes(word), `no ${word}`)
   }
 })
+
+// ---- classifier stop (p47-12, Watch ef8ad104) ---------------------------------------------------------------------
+// An agent a safety classifier stopped returns its own block in its own words. When those words open by naming the
+// classifier and the stop, the call ends at that dispatch: no climb, no second pass, no plan revise, no further round,
+// `blocked` (never plan-blocked) with a diagnosis naming the stage and the dispatch. A block that names a classifier
+// later in its text is the agent's own, on today's path.
+const STOPPED = 'A safety classifier stopped this round partway through, and the rest of that response was withheld.'
+test('classifier stop: the call ends at the stopped dispatch, blocked with its stage, never retried, climbed or plan-blocked', async (t) => {
+  const S = 'proj-clf'
+  const ladder = ladderFrom(t, BUILT_IN_RUNGS)
+  const gated = { scope: 'cross-cutting', planGate: true }
+  const stopPlan = { ready: false, blocked: true, blockerCause: STOPPED, plan: '' }
+  const stopImpl = { ...ralphBlocked, blockerDiagnosis: STOPPED }
+  for (const [name, task, script, stage, last] of [
+    ['the planner', gated, { [`plan:${S}`]: stopPlan }, 'plan', `plan:${S}`],
+    ['the plan judge', gated, { [`plan:${S}`]: plan, [`plan-judge:${S} r1`]: changes(STOPPED) }, 'plan', `plan-judge:${S} r1`],
+    ['the implementer', {}, { [`implement:${S}`]: stopImpl }, 'implement', `implement:${S}`],
+    ['the investigator', { scope: 'read-only' }, { [`investigate:${S}`]: stopImpl }, 'implement', `investigate:${S}`],
+    ['the reviser', {}, { ...fightOf(S), [`revise:${S} r2`]: stopImpl }, 'review', `revise:${S} r2`],
+  ]) {
+    const r = await run(mkArgs(mkTask(S, task), { ladder }), script)
+    clean(r)
+    assert.equal(r.row.status, 'blocked', name)
+    assert.ok(r.row.blockerDiagnosis.startsWith(`classifier stop at ${stage} (${last}) — `), `${name}: ${r.row.blockerDiagnosis}`)
+    assert.ok(r.row.blockerDiagnosis.endsWith(`The agent said: ${STOPPED}`), name)
+    assert.equal(r.labels.at(-1), last, `${name}: nothing runs after the stop`)
+    assert.equal(r.labels.filter((l) => l === last).length, 1, `${name}: the stopped dispatch is never retried`)
+    assert.ok(!r.row.climbs.some((c) => c.stage === stage && stage !== 'review'), `${name}: no climb on the stop`)
+  }
+  // The controls, each the agent's own block on today's path: a planner block that names the classifier mid-text (retried,
+  // plan-blocked), and a builder block that opens with the engine's mark but names no classifier stopping it (a red on a
+  // task about this rule: climbed and retried).
+  for (const [name, task, script, want] of [
+    ['mid-text', gated, { [`plan:${S}`]: { ...stopPlan, blockerCause: `first pass: ${STOPPED}` }, [`plan:${S}@opus-xhigh`]: noPlan },
+      ['plan-blocked', [`plan:${S}`, `plan:${S}@opus-xhigh`]]],
+    ['the bare mark', {}, { [`implement:${S}`]: { ...ralphBlocked, blockerDiagnosis: 'classifier stop tests fail in engine-ladder' },
+      [`implement:${S}@opus-xhigh`]: ralphBlocked }, ['blocked', [`implement:${S}`, `implement:${S}@opus-xhigh`]]],
+  ]) {
+    const own = await run(mkArgs(mkTask(S, task), { ladder }), script)
+    clean(own)
+    assert.deepEqual([own.row.status, own.labels], want, name)
+  }
+})
