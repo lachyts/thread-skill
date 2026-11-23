@@ -13874,8 +13874,9 @@ def _allowance_block(text) -> bool:
 def _classifier_block(text) -> bool:
     """Whether a block is the engine's classifier stop (p47-12): its own reason (_reason_of) opens with CLASSIFIER_MARK,
     stripped and lowercased, as classifierDiagnosis does; a seeded revise's is its `revise stopped:` line. A block that
-    names the mark anywhere else is the agent's own. Read by _reason_class (reasonClass classifier) and
-    lead-integrate.py's verdict (no automatic retry: H5 `decide scope or defer`)."""
+    names the mark anywhere else is the agent's own. Read by _reason_class (reasonClass classifier), _retry_class
+    (agent, whatever the agent's quoted words say) and lead-integrate.py's verdict (no automatic retry: H5 `decide scope
+    or defer`)."""
     return _reason_of(text)[1].strip().lower().startswith(CLASSIFIER_MARK)
 
 
@@ -13953,7 +13954,9 @@ def _retry_class(note) -> str:
     (MERGE_TASK_EXIT8_OPENING) carrying MERGE_TASK_SETTLING_MARK, merge-task's exit-4 settings set-asides
     (SETTINGS_OPENINGS: no-runner and unreported-context, ADR 0080), or a legacy own-run `merge-task` reason that is a
     _merge_task_infra_stop) or `agent` (everything else: an agent can act on its feedback; every other exit-8 text
-    included)."""
+    included; and, p47-12, the engine's classifier stop (_classifier_block), checked before TRANSIENT_MARK, since its
+    diagnosis quotes the agent's own words: no class retries it, lead-integrate.py's verdict sets it aside for a
+    person first)."""
     kind, reason = _note_reason(note)
     first = reason.split("\n", 1)[0].strip()
     if first.lower().startswith(CALL_FAILED_PREFIX):
@@ -13972,6 +13975,8 @@ def _retry_class(note) -> str:
     summary = _blocker_summary(note)
     if _allowance_block(summary):
         return "quota"
+    if _classifier_block(summary):
+        return "agent"
     return "infra" if TRANSIENT_MARK in summary else "agent"
 
 
