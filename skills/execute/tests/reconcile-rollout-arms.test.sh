@@ -17,8 +17,9 @@
 #      master-review line carries no arm, and a dead Fable first reviewer's rerun on the rung is fellBack.
 #   P  (p46-3, ADR 0079 decision 6) the paced share: each draw is the role's Fable ceiling (the [share] value) times
 #      skills/execute/scripts/fable_pace.py's pace for the caller's Login (CLAUDE_CONFIG_DIR's basename, login-a here)
-#      in the quota store, and writes one fable-share Run record line; a missing or stale store, or no session, draws
-#      Opus with its why and one WARN, never a stop; a spent window draws Opus with no why; the lead's draw is paced too;
+#      in the quota store, and writes one fable-share Run record line; a missing store, or no session, draws Opus with
+#      its why and one WARN, never a stop (every other why, a stale store's included, is tests/fable-pace.test.mjs's);
+#      a spent window draws Opus with no why; the lead's draw is paced too;
 #      --dry-run and a later dispatch's none stamp write no line. The M and R cases run at pace 1 (Fable 0, general 50).
 #   A  (p46-3, ADR 0079 d7) a row's allowance: a valid one stamps `fell_back:`, a malformed one is an ERROR that stamps
 #      nothing; an allowance block writes `## Blocker diagnosis`, never plan feedback; status shows fellBack only on an
@@ -367,7 +368,6 @@ pcase() {  # pcase <n> <why> <setup>: a fresh task drawn at master-review = 1 un
     "$(grep -c "^WARN: fable share: $2: every role draws Opus$" "$TMP/err")" "$rc"
 }
 ok "$(pcase 2 'no store' 'rm -f "$STORE"')" "arms: master-review=opus builder=none|no store 0.0 {'master-review': 0.0} True False|1|0" "P2: a missing store draws Opus, its why on the line, one WARN, exit 0"
-ok "$(pcase 3 'stale (fable fetched 3h 0m ago)' 'quota 0 50 10800')" "arms: master-review=opus builder=none|stale (fable fetched 3h 0m ago) 0.0 {'master-review': 0.0} True False|1|0" "P3: a stale store draws Opus"
 ok "$(pcase 4 'no Login' 'quota 0 50; unset CLAUDE_CODE_SESSION_ID')" "arms: master-review=opus builder=none|no Login 0.0 {'master-review': 0.0} False False|1|0" "P4: no session: no Login, Opus, no login on the line"
 ok "$(pcase 5 'x' 'quota 100 40')" "arms: master-review=opus builder=none|None 0.0 {'master-review': 0.0} True True|0|0" "P5: a spent Fable window draws Opus with no why"
 quota 0 50

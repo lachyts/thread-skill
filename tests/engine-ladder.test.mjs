@@ -923,7 +923,9 @@ test('allowance refusal: an Opus rerun that dies too is the allowance block at e
   }
 })
 
-test('allowance refusal: a redirected death and an Opus death with no Fable stay transient, and a ladder with no Fable adds no key', async (t) => {
+// An Opus death with no Fable asked (today's transient block, plan-blocked at the plan stage) is
+// skills/execute/tests/prompt-invariants.test.mjs's converge checks, which run on a ladder with no Fable.
+test('allowance refusal: a redirected death stays transient, and a ladder with no Fable adds no key', async (t) => {
   const { TRANSIENT_DIAGNOSIS } = loadEngine(['TRANSIENT_DIAGNOSIS'])
   const S = 'proj-allowguard'
   // The Fable arm's implementer falls back and lands on Opus; the redirected reviser then dies twice on Opus.
@@ -932,20 +934,8 @@ test('allowance refusal: a redirected death and an Opus death with no Fable stay
   clean(red)
   assert.deepEqual([red.row.status, red.row.blockerDiagnosis], ['blocked', TRANSIENT_DIAGNOSIS], 'a redirected death is transient')
   assert.deepEqual(red.labels.slice(-2), [`revise:${S} r2`, `revise:${S} r2`], 'retried once under its own label, never rerun again')
-  // No Fable asked: an Opus death is today's transient block, and plan-blocked at the plan stage.
-  const ladder = ladderFrom(t, BUILT_IN_RUNGS)
-  for (const [name, task, script, status] of [
-    ['implement', {}, { [`implement:${S}`]: null }, 'blocked'],
-    ['plan', { scope: 'cross-cutting', planGate: true }, { [`plan:${S}`]: null }, 'plan-blocked'],
-  ]) {
-    const r = await run(mkArgs(mkTask(S, task), { ladder }), script)
-    clean(r)
-    assert.deepEqual([r.row.status, r.row.blockerDiagnosis], [status, TRANSIENT_DIAGNOSIS], name)
-    assert.ok(!('allowance' in r.row), name)
-    assert.deepEqual(r.labels, [r.labels[0], r.labels[0]], `${name}: no on-rung rerun`)
-  }
   // A clean run on a ladder that names no Fable carries no allowance, asked or fellBack key.
-  const plain = await run(mkArgs(mkTask(S), { ladder }), fightOf(S))
+  const plain = await run(mkArgs(mkTask(S), { ladder: ladderFrom(t, BUILT_IN_RUNGS) }), fightOf(S))
   clean(plain)
   assert.ok(!('allowance' in plain.row))
   assert.ok(plain.row.ran.every((x) => !('asked' in x) && !('fellBack' in x)))
