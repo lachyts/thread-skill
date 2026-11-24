@@ -11,9 +11,10 @@
 #   cannot be written   H9 wiring and floor   H10 unknown keys survive
 #   B1 the raise   B3 no file   B6 decoys   B7 the transcript   B8 not the lead   B9 --dry-run   B10 skips, usage and
 #   the guard   B11 a mark before the first lead-entry   B12 a mark while another session led   B13 undated marks
-#   B14 a stop keeps the order owed   B15 the hook's deferral is ordered at the first tick   B16 the over-count WARN
-#   B17 the held room stop   B18 an invalid told   B19 a file of another version
-#   N1-N4 next's key   J1 the journal dir's two error strings (rebuilt on the shared transcript lookup).
+#   B14 a stop keeps the order owed, and the entry that ends it takes it   B15 the hook's deferral no entry followed is
+#   ordered at the first tick   B16 the over-count WARN   B17 the held room stop   B18 an invalid told   B19 a file of
+#   another version   N1-N4 next's key
+# (bind-run's journal dir, rebuilt on the shared transcript lookup, is reconcile-rollout-record.test.sh's.)
 # This suite reads the record, so it keeps its own THREAD_EVENTS_DIR and ignores THREAD_TEST_EVENTS_DIR.
 set -uo pipefail
 export TZ=UTC PYTHONDONTWRITEBYTECODE=1
@@ -40,7 +41,7 @@ export THREAD_MACHINE_TIMES='{}'
 export THREAD_HEAT_LEVEL=0
 CD="$HOME/.config/thread/compactions"
 PJ="$HOME/.claude/projects"
-SK=SKILL; SKF="skills/execute/$SK.md"   # the skill file's path, its name built from two words (fast-tier check k)
+SKF="skills/execute/SKILL.md"           # the skill file's path in the hook's line and a temp snapshot (never read here)
 T0=2026-10-26T10:00:00Z                # every case's first lead-entry
 LATER=2026-10-26T20:00:00Z             # the verb's --now where no room stop is read
 
@@ -242,9 +243,9 @@ ok "$(python3 - "$PLUGIN/hooks/hooks.json" <<'PY'
 import json, sys
 e = json.load(open(sys.argv[1]))["hooks"]["SessionStart"]
 h = e[0]["hooks"]
-print(json.dumps([len(e), e[0]["matcher"], len(h), h[0]["type"], h[0]["command"], h[0]["timeout"] <= 10, "onFailure" in h[0]]))
+print(json.dumps([h[0]["type"], h[0]["timeout"] <= 10, "onFailure" in h[0]]))
 PY
-)" '[1, "compact", 1, "command", "python3 \"${CLAUDE_PLUGIN_ROOT}/hooks/rollout-compaction.py\"", true, false]' "H9: one SessionStart entry, matcher compact, the one command, a timeout of 10 s or less, no onFailure"
+)" '["command", true, false]' "H9: the SessionStart hook is a command with a timeout of 10 s or less and no onFailure (engine-snapshot.test.mjs pins its matcher and command)"
 ok "$(python3 -c 'import ast, sys; ast.parse(open(sys.argv[1]).read(), sys.argv[1], feature_version=(3, 9)); print("ok")' "$HOOK" 2>&1)" ok "H9: the hook parses as python 3.9"
 pyc() { [ -d "$PLUGIN/hooks/__pycache__" ] && printf h; [ -d "$HERE/../scripts/__pycache__" ] && printf s; echo; }
 was=$(pyc)
@@ -339,25 +340,41 @@ J=$(cv b13 --now "$LATER"); rc=$?
 ok "$rc|$(q "$J" '[d["marks"], d["undated"], d["outside"], d["count"]]')|$(warns)" "0|[1,3,0,1]|1" "B13: marks 1, undated 3 (none, unparseable, naive), one WARN line, exit 0"
 has "$(cat "$TMP/cv.err")" "WARN: compactions: $(N b13): 3 compaction mark(s) of s-b13 with no usable timestamp: never counted" "B13: the WARN names them"
 
-echo "== B14. a stop keeps the order owed; the first tick after it gives it"
-P1='{"version": 1, "rollout": "x", "session": "x", "count": 1, "corrected": 0, "told": 1, "at": "2026-10-26T10:30:00Z", "by": "hook"}'
-# owedrow <case> <stop> <command that ends the stop>
+echo "== B14. a stop keeps the order owed; the entry that ends it takes it, else the first tick after it gives it"
+P0='{"version": 1, "rollout": "x", "session": "x", "count": 1, "corrected": 0, "told": 0, "at": "2026-10-26T10:30:00Z", "by": "hook"}'   # the hook's deferral: its stop line was printed at 10:30
+P1='{"version": 1, "rollout": "x", "session": "x", "count": 1, "corrected": 0, "told": 1, "at": "2026-10-26T10:30:00Z", "by": "hook"}'   # nothing owed yet: the verb's raise makes the deferral
+# owedrow <case> <stop> <who deferred: hook | verb> <command that ends the stop> <want reenter> <what the row shows>
+# The entries are written at the wall clock, after P0's `at`, but for the one row that dates its own.
 owedrow() {
-  plant "$1" "$P1"; tx "$1" "$(mark 2026-10-26T11:00:00Z "s-$1")" "$(mark 2026-10-26T12:00:00Z "s-$1")"
+  local n=1 by=hook wrote=false
+  if [ "$3" = hook ]; then plant "$1" "$P0"; tx "$1" "$(mark 2026-10-26T10:30:00Z "s-$1")"
+  else n=2 by=heartbeat wrote=true; plant "$1" "$P1"; tx "$1" "$(mark 2026-10-26T11:00:00Z "s-$1")" "$(mark 2026-10-26T12:00:00Z "s-$1")"; fi
   J=$(cv "$1")
-  ok "$(q "$J" '[d["count"], d["told"], d["owed"], d["reenter"], d["stop"], d["written"]]')|$(cf "$1" '[d["count"], d["told"]]')" "[2,1,1,false,\"$2\",true]|[2,1]" "B14 $2: count 2, told 1, owed 1 (an integer), reenter false, written"
-  eval "$3" >/dev/null
+  ok "$(q "$J" '[d["count"], d["told"], d["owed"], d["reenter"], d["stop"], d["written"]]')|$(cf "$1" '[d["count"], d["told"], d["by"]]')" "[$n,$((n - 1)),1,false,\"$2\",$wrote]|[$n,$((n - 1)),\"$by\"]" "B14 $1: under the $2: owed 1 (an integer), reenter false, told kept"
+  eval "$4" >/dev/null
   J=$(cv "$1")
-  ok "$(q "$J" '[d["count"], d["told"], d["owed"], d["reenter"], d["stop"], d["corrected"]]')" "[2,2,1,true,null,1]" "B14 $2: the stop ended: owed 1, reenter true, told 2, corrected still 1"
+  ok "$(q "$J" '[d["count"], d["told"], d["owed"], d["reenter"], d["stop"], d["written"]]')|$(cf "$1" '[d["told"], d["by"]]')" "[$n,$n,1,$5,null,true]|[$n,\"heartbeat\"]" "B14 $1: $6"
   before=$(sum "$1"); J=$(cv "$1")
-  ok "$(q "$J" '[d["owed"], d["reenter"], d["written"]]')|$(sum "$1")" "[0,false,false]|$before" "B14 $2: a third run: owed 0, bytes unchanged"
+  ok "$(q "$J" '[d["owed"], d["reenter"], d["written"]]')|$(sum "$1")" "[0,false,false]|$before" "B14 $1: the next tick: owed 0, bytes unchanged"
 }
 mkro b14a "paused: 2026-10-26T10:30+00:00"; ent b14a --by stage --session s-b14a --now "$T0"
-owedrow b14a pause 'python3 "$SCRIPT" clear-pause --rollout "$V/$(N b14a).md" --tasks-dir "$V"'
+owedrow b14a pause hook 'ent b14a --by lachy --session s-b14a; python3 "$SCRIPT" clear-pause --rollout "$V/$(N b14a).md" --tasks-dir "$V"' false \
+  "his Reinstate's entry took the hook's order: told 1 written, reenter false, no second read"
 lead b14e; begin b14e
-owedrow b14e room-stop 'python3 "$SB" end --rollout "$V/$(N b14e).md"'
+owedrow b14e room-stop hook 'ent b14e --by stage --session s-b14e; python3 "$SB" end --rollout "$V/$(N b14e).md"' false \
+  "the Stage's resume took it: reenter false"
 lead b14h; halt b14h
-owedrow b14h halt 'ent b14h --by heartbeat --session s-b14h'
+owedrow b14h halt hook 'ent b14h --by lachy --session s-b14h' false "his own /thread:execute closed the halt and took it: reenter false"
+lead b14t; halt b14t
+owedrow b14t halt hook 'ent b14t --by heartbeat --session s-b14t' true \
+  "a halt clause (1) cannot see: (2b)'s own entry closes it, a heartbeat entry takes nothing, and that same tick orders"
+mkro b14s "paused: 2026-10-26T10:30+00:00"; ent b14s --by stage --session s-b14s --now "$T0"
+owedrow b14s pause hook 'ent b14s --by lachy --session s-b14s --now 2026-10-26T10:30:00.900Z; python3 "$SCRIPT" clear-pause --rollout "$V/$(N b14s).md" --tasks-dir "$V"' true \
+  "an entry in the hook's own second is not after it: still ordered"
+mkro b14v "paused: 2026-10-26T10:30+00:00"; ent b14v --by stage --session s-b14v --now "$T0"
+owedrow b14v pause verb 'ent b14v --by lachy --session s-b14v; python3 "$SCRIPT" clear-pause --rollout "$V/$(N b14v).md" --tasks-dir "$V"' true \
+  "the verb's own deferral printed no line, so his Reinstate's entry takes nothing: ordered, corrected 1"
+ok "$(cf b14v 'd["corrected"]')" 1 "B14 b14v: corrected still 1"
 mkro b14c "pause_requested: true"; ent b14c --by stage --session s-b14c --now "$T0"
 plant b14c "$P1"; tx b14c "$(mark 2026-10-26T11:00:00Z s-b14c)" "$(mark 2026-10-26T12:00:00Z s-b14c)"
 J=$(cv b14c --now "$LATER"); ok "$(q "$J" '[d["reenter"], d["stop"], d["told"]]')" "[true,null,2]" "B14: a soft pause's drain: reenter true at once"
@@ -365,7 +382,7 @@ mkro b14n "paused: 2026-10-26T10:30+00:00"; ent b14n --by stage --session s-b14n
 plant b14n '{"version": 1, "count": 3, "told": 1}'
 J=$(cv b14n --now "$LATER"); ok "$(q "$J" '[d["owed"], d["reenter"], d["stop"], d["written"]]')" '[2,false,"pause",false]' "B14: count 3, told 1 under a pause: owed 2, nothing to write"
 
-echo "== B15. the hook's deferral is ordered at the first tick, with or without a transcript"
+echo "== B15. the hook's deferral no entry followed (the lead's own is dated before it) is ordered at the first tick, with or without a transcript"
 for c in b15a b15b; do
   lead "$c"; begin "$c"; hook "$(pay "s-$c")" >/dev/null; python3 "$SB" end --rollout "$V/$(N "$c").md" >/dev/null
 done
@@ -419,18 +436,5 @@ for bad in 'garbage' '{"version": 2, "count": 9}'; do
   J=$(CLAUDE_CODE_SESSION_ID=s-n1 nxt n1); rc=$?
   ok "$rc|$(q "$J" 'd["compactions"]')|$(grep -c '^WARN: compactions:' "$TMP/nx.err")" '0|{"session":"s-n1","count":0,"file":"unreadable"}|1' "N3: $bad: count 0, file unreadable, one WARN, exit 0"
 done
-
-echo "== J1. bind-run's journal dir, rebuilt on the shared transcript lookup, keeps its two error strings"
-lead j1
-printf -- '---\ntags: [task]\nstatus: in_progress\nrollout: "[[%s]]"\n---\n\n## Notes\n' "$(N j1)" > "$V/jt.md"
-br() { python3 "$SCRIPT" bind-run --tasks jt --run-id wf_j1 --call task --tasks-dir "$V" --dry-run 2>&1; echo "rc=$?"; }
-ok "$(br)" "ERROR: bind-run: jt: CLAUDE_CODE_SESSION_ID is not set (pass --journal-dir <abs>); nothing written
-rc=1" "J1: no session id"
-mkdir -p "$PJ/p" "$PJ/q"; : > "$PJ/p/s-j1.jsonl"; : > "$PJ/q/s-j1.jsonl"
-ok "$(CLAUDE_CODE_SESSION_ID=s-j1 br)" "ERROR: bind-run: jt: 2 transcripts match $HOME/.claude/projects/*/s-j1.jsonl, not one (pass --journal-dir <abs>); nothing written
-rc=1" "J1: two matching transcripts"
-rm -f "$PJ/q/s-j1.jsonl"
-ok "$(CLAUDE_CODE_SESSION_ID=s-j1 br)" "jt: run-bound wf_j1 call=task journalDir=$PJ/p/s-j1/workflows (dry-run)
-rc=0" "J1: one transcript names the journal dir"
 
 [ "$fail" -eq 0 ] && echo "ALL PASS" || { echo "SOME FAILED"; exit 1; }

@@ -69,7 +69,7 @@ The count of two and the hand-over stay p55-5's: nothing routes on the count yet
 - **The count file.** `~/.config/thread/compactions/<rollout stem>/<session id>.json`, `{version: 1, rollout, session,
   count, corrected, told, at, by}`, one per (rollout, session), written through a temp file and a rename. `corrected`
   is how many the backstop added, `by` the last writer (`hook` or `heartbeat`), and `told` how many counted
-  compactions have had their re-entry ordered with no stop standing. It is cross-version state (engine-snapshot.md §
+  compactions have had their re-entry ordered with no stop standing, or taken at the entry that ended the stop. It is cross-version state (engine-snapshot.md §
   Cross-version state) and only widens: a reader takes `count` only under `version: 1`, a writer rewrites the object
   it read, and a file of another version is never overwritten.
 - **The unit.** A compaction of the session while it was the rollout's lead. The hook reads that when it fires (the
@@ -80,8 +80,18 @@ The count of two and the hand-over stay p55-5's: nothing routes on the count yet
   lead session, counted on disk (ADR 0085).` and names the engine root's `skills/execute/SKILL.md` to read as a file.
   With no stop standing it orders the re-entry at § 1 before the next launch, and the hook writes `told = count`.
   Under his pause, a standing room stop or an open halt the line says to start nothing now and to take the entry that
-  ends the stop from § 1 of that text; the count rises and `told` stays, so the order is deferred, never dropped, and
-  the first tick after the stop gives it. A soft pause's drain and an Engine catch-up's pause are no stop.
+  ends the stop from § 1 of that text; the count rises and `told` stays, so the order is deferred, never dropped. A
+  soft pause's drain and an Engine catch-up's pause are no stop.
+- **A deferred order is given once.** The entry that ends the stop takes the order when it is the session's own,
+  its `--by` is not `heartbeat` and it is dated after the hook's write (the file's `by: hook` and `at`): the first
+  tick after it writes `told = count` and reads `reenter: false`, so the skill file is read once. Otherwise that
+  tick gives the order: for a deferral the backstop made itself (it raised the count, so no line was printed) and
+  for one no such entry followed.
+- **A halt at the heartbeat.** Clause (1) stops a tick at the halted line it can see. When a compaction cut that
+  line, clause (2b)'s `record-entry --by heartbeat` closes the open halt just before (2e) runs, so (2e) reads no
+  stop and orders the deferred re-entry at that same tick. No guard is added: clause (7) would re-enter such a
+  rollout from the summary anyway, and the order makes that re-entry read its rules first. The verb's `halt` stop
+  therefore holds for the hook, and for the verb only where no entry ran between the halt and the call.
 - **The gate rule.** A compaction's re-entry is no entry point: it runs § 1.5's `resolve`, § 2's lines and
   `record-entry --by heartbeat`, § 2.5 and § 2.6, and never § 2.7 or § 2.8, so a local default branch ahead of origin
   never halts an unattended run at a compaction. An entry someone else opens after a compaction under a stop keeps its
@@ -90,10 +100,10 @@ The count of two and the hand-over stay p55-5's: nothing routes on the count yet
   with, and that a `--gated` run stays gated. The mode itself is on no disk (no stamp and no Run record line carries
   it), so after a compaction it lives only in the summary: a residual, which a stamp for the mode would close.
 - **The backstop.** The heartbeat's clause (2e) runs `reconcile-rollout.py compactions` after (2b)'s `record-entry`.
-  It raises the count to the transcript's marks and never lowers it, and its `reenter: true` (owed above zero and no
-  stop standing) orders the re-entry, naming the file to read. A mark with no usable timestamp is never counted and is
-  reported `undated`; a count above the marks is left as it is, with one `WARN: compactions:` line each tick, the only
-  signal of a compaction counted that was not the lead's.
+  It raises the count to the transcript's marks and never lowers it, and its `reenter: true` (owed above zero, no
+  stop standing and no entry that took the order) orders the re-entry, naming the file to read. A mark with no usable
+  timestamp is never counted and is reported `undated`; a count above the marks is left as it is, with one
+  `WARN: compactions:` line each tick, the only signal of a compaction counted that was not the lead's.
 - **`next`.** Its JSON carries `compactions: {session, count, file}` right after `startCleared`: the caller's
   session's count for the rollout. No step routes on it; p55-5 is its first consumer.
 - **Residuals.** Codex fires no hook and keeps no `~/.claude/projects` transcript, so a session-driven Codex lead's
@@ -101,7 +111,12 @@ The count of two and the hand-over stay p55-5's: nothing routes on the count yet
   `<project>-rollout` note is counted and ordered by clause (2e) alone. A lead on a snapshot older than this change
   gets the hook's count and line but has no clause (2e). And with no stop standing the hook writes `told = count` on
   the strength of its print: a line the harness then fails to deliver, or one the lead reads and does not follow,
-  leaves nothing owed on disk, and no test reaches the harness's own delivery.
+  leaves nothing owed on disk, and no test reaches the harness's own delivery. The heartbeat's lapse re-entry out of
+  a room stop is `--by heartbeat`, which a tick's own liveness line is too, so it never takes a deferred order:
+  after a compaction under a room stop that lapses, the lead reads the skill file at the lapse re-entry (the hook's
+  line) and once more at the next tick's order, a second read of a 453 KB file (about 110k tokens) that brings the
+  next compaction closer. An entry that takes the order does so on its Run record line alone: nothing checks that
+  the lead read the file at it.
 
 ## Context
 

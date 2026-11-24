@@ -7,9 +7,10 @@
 // goes on while a Reinstate's still halts, the serial bullet, § 4.5 step 5's arm, the heartbeat's exception and (2d), and
 // § Pausing's abort before his stamp; tests/engine-catch-up.test.sh pins the mechanics. The mechanics are pinned by tests/engine-snapshot.test.sh.
 // A compaction (ADR 0085 d3 and d4, p55-4): § 1.5's *After a compaction* bullet (the gate rule, the three stops that defer,
-// what `told` keeps owed, the `--gated` sentence), the heartbeat's clause (2e), § 2.7, § 2.8, *Cold resume* and Room stop
-// item 9 naming the re-entry, the Codex residual, the `--by` row, engine-snapshot.md's count-file paragraph and the
-// hook's entry in hooks/hooks.json; skills/execute/tests/reconcile-rollout-compactions.test.sh pins the mechanics.
+// what `told` keeps owed, the `--gated` sentence), clause (2e)'s place in the heartbeat (execute-run-record.test.mjs's B2
+// pins its text), § 2.7, § 2.8, *Cold resume* and Room stop item 9 naming the re-entry, the Codex residual, the `--by`
+// row, engine-snapshot.md's count-file paragraph and the hook's entry in hooks/hooks.json;
+// skills/execute/tests/reconcile-rollout-compactions.test.sh pins the mechanics.
 //
 // Same shape as tests/contracts/execute-signed-gate.test.mjs: every rule lives in one function, check(texts), which
 // returns named failures, so the real tree and the controls run through identical logic; each control swaps one
@@ -214,24 +215,20 @@ function check(t) {
     !collapse(t.adr.split('\n').find((l) => l.startsWith('Status:')) ?? '').includes('*(Amended by ADR 0084 d5, 2026-11-18, p54-14: the one mid-run move, an Engine catch-up')) fail('catch-up')
 
   // compaction (ADR 0085 d3 and d4, p55-4): § 1.5's bullet says what the hook does, the gate rule, the stops that defer
-  // and what stays owed; clause (2e) sits between (2d) and (3), names the file to read and keeps the run's flags; § 2.7,
+  // and what stays owed; clause (2e) sits between (2d) and (3) (its text is execute-run-record.test.mjs's B2); § 2.7,
   // § 2.8, Cold resume and Room stop item 9 name the re-entry; the Codex residual; the --by row; the doc's count-file
   // paragraph (told, the unit); hooks.json's one SessionStart entry.
   const after = collapse(ex.split('\n').find((l) => l.startsWith('- **After a compaction.** (ADR 0085 d3 and d4)')) ?? '')
   const i2d = hb.indexOf('(2d) Run')
   const i2e = hb.indexOf('(2e) Run')
   const i3 = hb.indexOf('(3) Lost calls')
-  const c2e = i2e >= 0 && i3 > i2e ? hb.slice(i2e, i3) : ''
   const COMPACTION = [
     [after, 'The plugin\'s SessionStart hook (`hooks/rollout-compaction.py`, matcher `compact`) counts each compaction of the session the Run record\'s latest `lead-entry` names'],
     [after, 'read `<root>/skills/execute/SKILL.md` as a file, whatever `prose.identical` said'],
     [after, 'The re-entry continues this run with the flags it was started with: a `--gated` run stays gated.'],
     [after, "**The gate rule:** a compaction's re-entry, ordered by the hook's line or by heartbeat clause (2e), is no entry point. It runs this section's `resolve`, § 2's lines and `record-entry --by heartbeat`, § 2.5 and § 2.6; it does not run § 2.7 or § 2.8."],
     [after, '**Under a stop the re-entry is owed, never dropped.** While his pause stands (a `paused:` stamp, or an open `paused` line in the Run record), a room stop stands (§ Room stop) or a halt is open, the compaction is still counted, the line says to start nothing now'],
-    [after, "The count file's `told` records how many counted compactions have had their re-entry ordered with no stop standing, so what is owed survives the stop"],
-    [c2e, 'reconcile-rollout.py compactions --rollout <the rollout note\'s path> || true`'],
-    [c2e, 'read `${CLAUDE_PLUGIN_ROOT}/skills/execute/SKILL.md` as a file and re-enter /thread:execute [[<rollout-slug>]] at § 1 of that text'],
-    [c2e, 'continuing this run with the flags it was started with (a `--gated` run stays gated; its entry `--by heartbeat`; no entry point: § 2.7 and § 2.8 do not run)'],
+    [after, "The count file's `told` records how many counted compactions have had their re-entry ordered with no stop standing, or taken at the entry that ended the stop, so what is owed survives the stop"],
     [collapse(section(ex, /^### 2\.7\. /) ?? ''), "A compaction's re-entry (§ 1.5 *After a compaction*) is no entry point either, so § 2.7 does not run on it; an entry someone else opens after a compaction keeps its own rule here."],
     [collapse(section(ex, /^### 2\.8\. /) ?? ''), 'never on a heartbeat, driver, compaction re-entry (§ 1.5 *After a compaction*), completion notification'],
     [s45, "(§ 2.7's entry rule; the heartbeat re-entry and a compaction's re-entry do not)"],
@@ -245,7 +242,7 @@ function check(t) {
   let starts = null
   try { starts = JSON.parse(t.hooks).hooks.SessionStart } catch { starts = null }
   const hook = Array.isArray(starts) && starts.length === 1 ? starts[0] : null
-  if (COMPACTION.some(([hay, needle]) => !hay.includes(needle)) || !(i2d >= 0 && i2d < i2e) ||
+  if (COMPACTION.some(([hay, needle]) => !hay.includes(needle)) || !(i2d >= 0 && i2d < i2e && i2e < i3) ||
     hook?.matcher !== 'compact' || hook.hooks?.length !== 1 ||
     hook.hooks[0].command !== 'python3 "${CLAUDE_PLUGIN_ROOT}/hooks/rollout-compaction.py"') fail('compaction')
 
@@ -396,8 +393,6 @@ test('control: each pinned sentence of a compaction\'s re-entry, removed in turn
     ['execute', 'is no entry point. It runs this section\'s `resolve`', 'is an entry point. It runs this section\'s `resolve`', 'the gate rule'],
     ['execute', '**Under a stop the re-entry is owed, never dropped.**', '**Under a stop the re-entry is dropped.**', 'the deferral'],
     ['execute', 'The count file\'s `told` records how many', 'The count file records how many', 'what is owed'],
-    ['execute', 'read `${CLAUDE_PLUGIN_ROOT}/skills/execute/SKILL.md` as a file and re-enter', 're-enter', '(2e) names no file'],
-    ['execute', '(a `--gated` run stays gated; its entry `--by heartbeat`', '(its entry `--by heartbeat`', '(2e) drops the --gated phrase'],
     ['execute', 'either, so § 2.7 does not run on it;', 'either;', '§ 2.7'],
     ['execute', 'compaction re-entry (§ 1.5 *After a compaction*), completion', 'completion', '§ 2.8'],
     ['execute', 'the heartbeat re-entry and a compaction\'s re-entry do not', 'the heartbeat re-entry does not', 'Cold resume'],

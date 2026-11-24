@@ -610,9 +610,11 @@ Subcommands:
               latest `lead-entry` names, it raises the count to the compaction marks the session's transcript holds
               from its time as this rollout's lead, never lowers it, and prints one JSON line whose `reenter: true`
               orders the lead back to execute § 1 (the skill text was cut and not re-read); under his pause, a
-              standing room stop or an open halt the order stays owed (`told`) until the stop ends. cmd_compactions'
-              docstring is the one copy of the unit, the undated rule, the three stops, `told`, `owed` and the WARN
-              lines. Guarded (not GUARD_EXEMPT). Exit 0 a reading, 1 no rollout note, 2 usage and the guard.
+              standing room stop or an open halt the order stays owed (`told`) until the stop ends, and an entry
+              that took the hook's deferred order (any `--by` but heartbeat, after the hook's write) discharges it
+              with no second order. cmd_compactions' docstring is the one copy of the unit, the undated rule, the
+              three stops, `told`, `owed`, the entry that takes a deferred order and the WARN lines. Guarded (not
+              GUARD_EXEMPT). Exit 0 a reading, 1 no rollout note, 2 usage and the guard.
 
   defer       Pop task(s) out of a rollout, back to open backlog: clears `rollout:`/`owner:`, a legacy `wave:`
               and the `started:`/`merged:`/`integrating:`/`ready:`/`gates_signed:`/`descope_armed:`/`handed_back:` stamps
@@ -5377,10 +5379,11 @@ LEASE_WARN = "lease: warning:"                                 # the one stderr 
 # ~/.config/thread/compactions/<rollout stem>/<session id>.json under the home dir at call time, one file per (rollout,
 # session): {version: 1, rollout, session, count, corrected, told, at (UTC Z), by ("hook" | "heartbeat")}. count: the
 # session's compactions while it was this rollout's lead; corrected: how many the backstop added; told: how many have
-# had their § 1 re-entry ordered with no stop standing. A cross-version contract (engine-snapshot.md § Cross-version
-# state): the plugin's compaction hook writes it from the Primary checkout while the lead's `compactions` verb and
-# `next` read it from the rollout's Engine snapshot, so it only widens (a reader takes `count` only under `version: 1`,
-# a writer rewrites the object it read, and a file of another version is never overwritten).
+# had their § 1 re-entry ordered with no stop standing, or taken at an entry that followed the hook's deferral
+# (cmd_compactions). A cross-version contract (engine-snapshot.md § Cross-version state): the plugin's compaction hook
+# writes it from the Primary checkout while the lead's `compactions` verb and `next` read it from the rollout's Engine
+# snapshot, so it only widens (a reader takes `count` only under `version: 1`, a writer rewrites the object it read,
+# and a file of another version is never overwritten).
 COMPACTIONS_DIR_REL = ".config/thread/compactions"
 COMPACTIONS_VERSION = 1
 COMPACTIONS_MAX_BYTES = 4 * 1024
@@ -12785,7 +12788,9 @@ def _compaction_stop(note, lines, now):
       "room-stop"  a room stop stands as step-boundary.py `stands` reads it (_room_standing with the Stage's reading
                    as a callable, so the Stage is read only for a held start line past the 6 h bound).
       "halt"       the last open stop after the last lead-entry (_stop_state's `open`) has cause `halt`. Any other
-                   open stop keeps the order now: a § 1 entry is what resumes it."""
+                   open stop keeps the order now: a § 1 entry is what resumes it. Any lead-entry closes a halt, the
+                   tick's own (2b) line too, so the verb at the heartbeat never reads this one (cmd_compactions'
+                   *A halt at the heartbeat*)."""
     if _pause_stands(note, lines)[0] and not (_catching_up(note) or _open_pause_mode(lines) == CATCH_UP):
         return "pause"
     if _room_standing(_last_room_stop(note), now, alive=lambda t: _stage_alive(t)[0]) == 0:
@@ -12855,11 +12860,12 @@ def lead_compactions(sessions, now=None):
     a legacy undated note is clause (2e)'s alone) and that _ledger_skip does not skip, and matches when the Run
     record's latest `lead-entry` names a candidate session (_stop_state's `session`). For a match it reads the stop
     (_compaction_stop) and the root (_compaction_root) first, then writes: with no stop `count += 1, told = count`;
-    under a stop `count += 1` and `told` as it was, so the deferred order stays owed on disk for the verb's first tick
-    after the stop. A count file of another version is not written and its line reads `?`; a write that fails says so
-    in the line. The directory listing sits under one try and each note under its own: a note or record that raises is
-    skipped and the others are still read. It runs from the hook's root for a rollout on any snapshot, passes no
-    Engine snapshot guard and writes only the count file, a cross-version store. Never raises."""
+    under a stop `count += 1` and `told` as it was, so the deferred order stays owed on disk for the entry that ends
+    the stop, or else the verb's first tick after it (cmd_compactions). A count file of another version is not written
+    and its line reads `?`; a write that fails says so in the line. The directory listing sits under one try and each
+    note under its own: a note or record that raises is skipped and the others are still read. It runs from the hook's
+    root for a rollout on any snapshot, passes no Engine snapshot guard and writes only the count file, a cross-version
+    store. Never raises."""
     out = []
     try:
         now = now or datetime.now().astimezone()
@@ -12901,6 +12907,26 @@ def lead_compactions(sessions, now=None):
     return out
 
 
+def _deferral_taken(lines, session, data) -> bool:
+    """Whether the hook's deferred order was taken at an entry (cmd_compactions' *The entry that takes it*): the count
+    file's last writer is the hook (`by: "hook"`, so its line was printed) and the Run record holds a `lead-entry` of
+    `session` whose `by` is not `heartbeat`, dated after the file's `at`. Both are compared to the second, the
+    precision `at` carries, so an entry in the hook's own second is not after it. A file with no usable `at` is
+    never taken."""
+    if not isinstance(data, dict) or data.get("by") != "hook":
+        return False
+    at = _away_stamp(data.get("at"))[0]
+    if at is None:
+        return False
+    for d in lines or ():
+        if d.get("kind") != "lead-entry" or d.get("session") != session or d.get("by") == "heartbeat":
+            continue
+        ts = _rec_ts(d)
+        if ts is not None and ts.replace(microsecond=0) > at.replace(microsecond=0):
+            return True
+    return False
+
+
 def cmd_compactions(args) -> int:
     """The compaction count's backstop (p55-4, ADR 0085 d3 and d4; execute § 1.5 *After a compaction*), run by the
     heartbeat's clause (2e) after (2b)'s record-entry. This docstring is the one copy of its rules.
@@ -12915,11 +12941,25 @@ def cmd_compactions(args) -> int:
         transcript, _session_transcript), else the count on disk. `corrected` grows by what the raise added. The count
         only rises.
       - `owed` is an integer: count after the raise minus `told` as read, the re-entries owed going into this call.
-        `told` is how many counted compactions have had their § 1 re-entry ordered with no stop standing; a missing or
-        invalid one reads 0.
-      - `reenter` is a boolean: owed > 0 and no stop stands (_compaction_stop's three: his pause, a standing room
-        stop, an open halt). When true this call writes `told = count`. Under a stop it raises the count and leaves
-        `told`, so the order survives the stop and the first tick after it gives it.
+        `told` is how many counted compactions have had their § 1 re-entry ordered with no stop standing, or taken at
+        an entry (below); a missing or invalid one reads 0.
+      - `reenter` is a boolean: owed > 0, no stop stands (_compaction_stop's three: his pause, a standing room
+        stop, an open halt) and no entry took the order. When true this call writes `told = count`. Under a stop it
+        raises the count and leaves `told`, so the order survives the stop.
+      - The entry that takes it (_deferral_taken). Under a stop the hook's line told whoever opens the entry that
+        ends the stop to read the skill file first and take that entry from § 1. So with owed > 0 and no stop
+        standing, when the hook made the deferral (the file's `by` is "hook" and this call raises no count) and a
+        `lead-entry` of this session whose `by` is not `heartbeat` is dated after the file's `at`, that entry was the
+        re-entry: this call writes `told = count` and prints `reenter: false` (owed > 0 with `stop: null`), so the
+        file is not read a second time. The tick still orders a deferral this verb made itself (it raised the count,
+        so no line was printed) and one no such entry followed. A `--by heartbeat` entry never takes it: a tick's
+        own liveness line is one too, so the heartbeat's lapse re-entry out of a room stop is ordered once more at
+        its next tick.
+      - A halt at the heartbeat. Clause (1) stops the tick at a halted line it can see. When a compaction cut that
+        line, (2b)'s `record-entry --by heartbeat` runs just before this verb and its lead-entry closes the open
+        halt, so (2e) never reads `stop: "halt"` there: it reads `stop: null`, and a deferred order is given at that
+        same tick (clause (7) would re-enter such a rollout from the summary anyway). The `halt` stop holds for the
+        hook, and for this verb only where no entry ran between the halt and the call.
       - It writes when `count` or `told` changed, `by: "heartbeat"`; --dry-run writes nothing. A count file of
         another version is never written and nothing is ordered from it; garbage is replaced as if no file.
     It prints one JSON line: {rollout, session, lead, count, was (the count before this call), told (after it; on
@@ -12995,8 +13035,11 @@ def cmd_compactions(args) -> int:
     count = max(disk, n_marks) if marks is not None else disk
     corrected += count - disk
     owed = count - told_read
-    reenter = owed > 0 and stop is None
-    told = count if reenter else told_read
+    due = owed > 0 and stop is None
+    # The hook's deferral, taken at the entry its line named: discharged here, never ordered a second time.
+    taken = due and count == disk and _deferral_taken(lines, session, data)
+    reenter = due and not taken
+    told = count if due else told_read
     written, failed = False, False
     if (count != disk or told != told_read) and not args.dry_run:
         unsaved = _compactions_write(ro, session, data, count, told, corrected, now, "heartbeat")

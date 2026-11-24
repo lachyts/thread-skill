@@ -204,8 +204,10 @@ rollout, session, count, corrected, told, at, by}`. `count` is the session's com
 lead: the Run record's latest `lead-entry` named the session when the hook fired, and the backstop counts a
 transcript's compaction mark only when its time falls in a span that opens at a `lead-entry` of the session and closes
 at the next `lead-entry` of anything else. `corrected` is how many the backstop added; `told` is how many counted
-compactions have had their § 1 re-entry ordered with no stop standing, and a missing or invalid `told` reads 0; `by`
-is the last writer, `hook` or `heartbeat`. The hook (hooks/rollout-compaction.py, through `reconcile-rollout.py`'s
+compactions have had their § 1 re-entry ordered with no stop standing, or taken at the entry that ended the stop
+(an entry of the session dated after a hook's write, any `--by` but `heartbeat`), and
+a missing or invalid `told` reads 0; `by` is the last writer, `hook` or `heartbeat`, and `at` its time (UTC, to the
+second): the two tell the verb that the hook's stop line was printed, and when. The hook (hooks/rollout-compaction.py, through `reconcile-rollout.py`'s
 `lead_compactions`) writes the file from the Primary checkout; the lead's `compactions` verb writes it, and `next`
 reads it, from the rollout's Engine snapshot. It only widens: a reader takes `count` only from an object with
 `version: 1` and an integer `count`, a writer rewrites the object it read, so a key it does not know survives, and a
