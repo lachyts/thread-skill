@@ -57,6 +57,12 @@
 #   (iii) re-verifies a pushed M on an unmoved base   C61c its tree trouble   C61d it never skips; a red or green verdict
 #   gives none   C62 --after shared-green only after the Mac's green   C63 the Run record: V's suite-started before
 #   GitHub's check ends, suite-ended after   C64 mac's transitions   C65 the holder check: only this task's own run holds.
+#   C66–C67 (p55-2, ADR 0085 d7) one command builds a launch's whole args: C66 `call` prints the integrate call's whole
+#   args after an own run merged main (headSha is ANCHOR_RECIPE's anchor, never the PR head), the engine dispatches it
+#   as printed, a trailing / on --repo, the baseline block, round budgets by level (a task's is budgetError, H12 after
+#   its row; a rollout's is exit 2), the refusals; C67 `call --revise` prints a seeded revise's whole args (task.resume
+#   from inputs and the note's plan, the note's arms and unreachable stamps, touched, unreachable_paths), the engine
+#   takes it, its budgetError row keeps the revise, and a note not at resumeAt revise is exit 2.
 #   The Run record (p29-10, ADR 0051): S1–S8 verify --rollout's suite lines (green, red, timeout, race, completion,
 #   noslot, none without --rollout, a TERM's stopped line after the rc and outcome files, a TERM in suite-started's vault
 #   walk never swallowed); M1–M6 base-moved (a rollout's merge from the record or its note, a peer's push, the Inert
@@ -141,7 +147,7 @@ fx() {
   WT="$R/.claude/worktrees/$SLUG"
   g -C "$R" worktree add -q "$WT" -b "$BR" "origin/$BR" >/dev/null 2>&1
   V="$F/vault"; mkdir -p "$V"
-  printf -- '---\ntags: [task, rollout]\nstatus: open\nprotocol_version: 5\nparallel_ceiling: 2\n---\n\nProject root: `%s`\n\n## Queue\n\n- [[%s]]\n' "$R" "$SLUG" > "$V/ro.md"
+  printf -- '---\ntags: [task, rollout]\nstatus: open\nprotocol_version: 5\nparallel_ceiling: 2\nverifier: "true"\n---\n\nProject root: `%s`\n\n## Queue\n\n- [[%s]]\n' "$R" "$SLUG" > "$V/ro.md"
   printf -- '---\ntags: [task]\nstatus: review\nscope: cross-cutting\nrollout: "[[ro]]"\npr: %s\nready: 2026-10-02T11:00+00:00\nintegrating: 2026-10-02T11:30+00:00\nreview_rounds_used: 1\n---\n\n## Notes\n\nt5\n' "$PR" > "$V/$SLUG.md"
 }
 # main <file> <content> [subject]: a commit on origin's master from p; B is the new tip.
@@ -2480,7 +2486,13 @@ ok "$rc" 2 "C56d: push under a PATH with no git → exit 2"; has "$E" "lead-inte
 # The 2026-10-26 Watch (6d994757): the lead typed a headSha other than prepare's anchor, and the integrator's anchor STOP
 # fired twice on one task. `call` builds the integrate call's integration from prepare's record; the engine holds its
 # headSha and taskBase to the `prepared` pair, so a retyped sha is refused before anything dispatches.
-call() { CJ=$(python3 "$LI" call --repo "$R" --slug "$SLUG" --note "$V/$SLUG.md" "$@" 2>"$F/call.err"); crc=$?; }
+# call [args…]: `call` for $SLUG (an argument given again, --repo say, wins). Its HOME is CHOME, else an empty dir of the
+# fixture's own: every call reads the rollout settings and the ladder (p55-2), and run.sh's shared HOME holds a refused
+# rollouts.toml.
+call() {
+  local h="${CHOME:-$F/chome}"; mkdir -p "$h"
+  CJ=$(HOME="$h" python3 "$LI" call --repo "$R" --slug "$SLUG" --note "$V/$SLUG.md" "$@" 2>"$F/call.err"); crc=$?
+}
 # eargs <integration-json>: a mode-'integrate' call for $SLUG with that integration, unchanged.
 eargs() {
   python3 - "$1" <<'PY'
@@ -2511,7 +2523,7 @@ ok "$(j "$(cat "$REC")" '[d["anchor"], d["taskBase"], d["mainSha"], d["route"]]'
   "C58: prepare writes its printed verdict as the record"
 call
 ok "$crc" 0 "C58: call on the trouble route exits 0"
-CI=$(j "$CJ" 'd["integration"]')
+CI=$(j "$CJ" 'd["args"]["integration"]')
 ok "$(j "$CI" '[d["headSha"], d["taskBase"], d["mainSha"], d["prepared"]]')" \
   "$(j "$J" '[d["anchor"], d["taskBase"], d["mainSha"], {"anchor": d["anchor"], "taskBase": d["taskBase"]}]')" \
   "C58: headSha is prepare's anchor, with its taskBase, mainSha and the prepared pair"
@@ -2559,15 +2571,15 @@ ok "$crc" 2 "C58v: the verify route with no --after → exit 2"
 python3 "$LI" mac --repo "$R" --slug "$SLUG" --head "$M" --state pending >/dev/null
 python3 "$LI" mac --repo "$R" --slug "$SLUG" --head "$M" --state green >/dev/null
 call --after shared-green
-ok "$crc|$(j "$CJ" '[d["integration"]["trouble"], d["integration"]["leadMerge"]]')" \
+ok "$crc|$(j "$CJ" '[d["args"]["integration"]["trouble"], d["args"]["integration"]["leadMerge"]]')" \
   "0|[[\"shared-file\"],{\"mergeCommit\":\"$M\",\"headSha\":\"$M\",\"baseSha\":\"$B\",\"verified\":true}]" "C58v: --after shared-green → trouble [shared-file], leadMerge (M, M, mainSha)"
-ok "$(j "$CJ" 'd["integration"]["headSha"]')" "$(j "$J" 'd["anchor"]')" "C58v: … its headSha still prepare's anchor, never M"
-out=$(R="$R" SLUG="$SLUG" edispatch "$(R="$R" SLUG="$SLUG" eargs "$(j "$CJ" 'd["integration"]')")")
+ok "$(j "$CJ" 'd["args"]["integration"]["headSha"]')" "$(j "$J" 'd["anchor"]')" "C58v: … its headSha still prepare's anchor, never M"
+out=$(R="$R" SLUG="$SLUG" edispatch "$(R="$R" SLUG="$SLUG" eargs "$(j "$CJ" 'd["args"]["integration"]')")")
 ok "$out" "dispatched 1" "C58v: the engine takes the shared-green integration unchanged"
 call --after red
-ok "$crc|$(j "$CJ" '[d["integration"]["trouble"], "leadMerge" in d["integration"]]')" '0|[["red","shared-file"],false]' "C58v: --after red → trouble [red, shared-file], no leadMerge"
+ok "$crc|$(j "$CJ" '[d["args"]["integration"]["trouble"], "leadMerge" in d["args"]["integration"]]')" '0|[["red","shared-file"],false]' "C58v: --after red → trouble [red, shared-file], no leadMerge"
 call --after push-refused
-ok "$crc|$(j "$CJ" 'd["integration"]["trouble"]')" '0|[]' "C58v: --after push-refused → trouble []"
+ok "$crc|$(j "$CJ" 'd["args"]["integration"]["trouble"]')" '0|[]' "C58v: --after push-refused → trouble []"
 
 # a merge route launches no integrate call; an exit-8 prepare leaves no record
 fx c58m
@@ -2628,7 +2640,7 @@ ok "$rc|$(macf 'd["state"]')" "1|pending" "C60: T's 1 on GitHub's red leaves the
 vlaunch false; wait "$vp"
 mac red "$M" "rc $(cat "$(VO).rc")"
 call --after red
-ok "$(cat "$(VO).rc")|$mrc|$crc|$(j "$CJ" 'd["integration"]["trouble"]')" '1|0|0|["red"]' "C60: V red → mac red → call --after red → trouble [red]"
+ok "$(cat "$(VO).rc")|$mrc|$crc|$(j "$CJ" 'd["args"]["integration"]["trouble"]')" '1|0|0|["red"]' "C60: V red → mac red → call --after red → trouble [red]"
 ok "$(git --git-dir "$MT_SRV" rev-parse "refs/heads/$BR")" "$M" "C60: M stays on origin's branch"
 python3 "$LI" undo --repo "$R" --slug "$SLUG" --merge "$M" --to "$H0" >/dev/null 2>&1
 ok "$?" 1 "C60: undo refuses the pushed M (the red route has no undo)"
@@ -2725,7 +2737,7 @@ ok "$crc" 2 "C62: --after shared-green while the verdict reads pending → exit 
 has "$(cat "$F/call.err")" "--after shared-green needs the Mac verdict green for M ($M), not pending for $M" "C62: … named"
 mac green "$M"
 call --after shared-green
-ok "$crc|$(j "$CJ" 'd["integration"]["leadMerge"]["verified"]')" "0|true" "C62: after mac green, leadMerge.verified is true"
+ok "$crc|$(j "$CJ" 'd["args"]["integration"]["leadMerge"]["verified"]')" "0|true" "C62: after mac green, leadMerge.verified is true"
 
 # C63: the Run record shows the Mac's suite running while GitHub's check ends: V's suite-started is in before T's
 # required checks end, and suite-ended only after. T's sleep stub (first on its PATH) acts at T's Mac gate, once.
@@ -2809,6 +2821,128 @@ nohold() {  # nohold <pid-file suffix> <what> [args…]: a live sleeper with tho
 nohold .pid "a live pid whose command names neither script"
 nohold .merge-task.pid "another task's merge-task" merge-task.sh --mac "$R/.claude/integration/other.mac.json"
 nohold .pid "a verify of another task whose path starts with this one's" lead-integrate.py verify --out "$R/.claude/integration/$SLUG-b"
+
+# ======== C66 (p55-2, ADR 0085 d7): one command builds the integrate call's whole args =============================
+# The 17 Nov 2026 incident: a lead rebuilt p54-6's Integration launch from a compaction summary and passed the PR head
+# as headSha. `call` prints the launch's whole args, read from disk only; the engine takes the object as printed.
+fx c66
+main m.txt "theirs"
+onbranch merge --no-ff --no-edit -m "agent merged main" origin/master
+H=$(git --git-dir "$MT_SRV" rev-parse "refs/heads/$BR")
+prep
+ok "$prc|$(j "$J" 'd["route"]')|$(j "$J" 'd["trouble"]')|$(j "$J" 'd["default"]')" "0|trouble|[]|master" "C66: the own run merged main → trouble [], the record keeps --default"
+call
+A=$(j "$CJ" 'd["args"]')
+RECIPE=$(node --input-type=module -e "import { loadEngine } from './tests/lib/engine.mjs'; process.stdout.write(loadEngine(['ANCHOR_RECIPE']).ANCHOR_RECIPE)")
+RA=$(WT="$R" BR="$BR" D=origin/master H="$H" bash -c "$RECIPE" | sed -n 's/^anchor //p')
+ok "$crc|$(j "$A" 'd["integration"]["headSha"]')|$RA|$H0" "0|$H0|$H0|$H0" "C66: headSha is the sha ANCHOR_RECIPE prints, run here: the task's own head H0"
+ok "$([ "$H" != "$H0" ] && [ "$(j "$A" 'd["integration"]["headSha"]')" != "$H" ] && echo never-H)" never-H "C66: … never the PR head H, the own run's merge on top of H0"
+ok "$(j "$A" 'd["integration"]["prepared"]')" "$(j "$J" '{"anchor": d["anchor"], "taskBase": d["taskBase"]}')" "C66: prepared is prepare's anchor and taskBase"
+ok "$(j "$A" '[d["mode"], d["defaultBranch"], d["rolloutSlug"], d["repoPath"], d["verifier"], d["task"]["slug"], d["task"]["taskPath"]]')" \
+  "[\"integrate\",\"master\",\"ro\",\"$R\",\"true\",\"$SLUG\",\"$V/$SLUG.md\"]" "C66: mode, defaultBranch, rolloutSlug, repoPath, verifier and the task, all from disk"
+ok "$(j "$A" '[k for k in ("progress", "gatePricer", "touched", "unreachablePaths", "securityCheck", "knownBaselineFailures") if k in d] + [k for k in ("arms", "unreachable", "resume") if k in d["task"]]')" \
+  '[]' "C66: no progress, gatePricer, touched, unreachablePaths, securityCheck or baseline; no task.arms, unreachable or resume"
+ok "$(R="$R" SLUG="$SLUG" edispatch "$A")" "dispatched 1" "C66: the engine takes call's args as printed (no args refusal; it dispatches)"
+VT=$(HOME="$F/chome" python3 "$RR" verify-timeout --rollout "$V/ro.md")
+LD=$(HOME="$F/chome" python3 "$root/skills/_shared/scripts/ladder.py")
+ok "$(j "$A" 'd["verifySlot"]')|$(j "$A" 'd["ladder"]')|$(j "$VT" '"securityCheck" in d')" "$(j "$VT" 'd["verifySlot"]')|$(j "$LD" 'd')|false" \
+  "C66: verifySlot is verify-timeout's under the same HOME, ladder is ladder.py's stdout; no securityCheck in either"
+call --repo "$R/"
+ok "$crc|$(j "$CJ" '[d["args"]["repoPath"], d["args"]["integration"]["worktreePath"]]')" "0|[\"$R\",\"$WT\"]" "C66: --repo with a trailing / → repoPath and the tree in prepare's spelling"
+ok "$(R="$R" SLUG="$SLUG" edispatch "$(j "$CJ" 'd["args"]')")" "dispatched 1" "C66: … and that object dispatches too"
+# the rollout's ## Known baseline failures: every non-blank line once the template's comment goes; `none` or no block: no key
+cp "$V/ro.md" "$F/ro.keep"
+printf '\n## Known baseline failures\n\n<!-- Machine-readable: one line per failing test: `- <test_id> — <one-line reason>`.\n     Write `none` when clean `main` is fully green. -->\n- test_a — env\ntest_b — flaky dns\n' >> "$V/ro.md"
+call; ok "$crc|$(j "$CJ" 'd["args"]["knownBaselineFailures"]')" '0|["test_a — env","test_b — flaky dns"]' "C66: the baseline block → its two entries, the bare line kept"
+cp "$F/ro.keep" "$V/ro.md"; printf '\n## Known baseline failures\n\n<!-- one line per failing test -->\nnone\n' >> "$V/ro.md"
+call; ok "$crc|$(j "$CJ" '"knownBaselineFailures" in d["args"]')" "0|false" "C66: a block reading none → no key"
+cp "$F/ro.keep" "$V/ro.md"
+# round budgets by level: a task's invalid stamp is budgetError (exit 0, args null); a rollout's is exit 2
+cp "$V/$SLUG.md" "$F/t.keep"
+setkey "$V/$SLUG.md" max_iterations 0
+call
+BE=$(j "$CJ" 'd["budgetError"]')
+ok "$crc|$(j "$CJ" 'd["args"]')|$BE" "0|null|invalid round budget: max_iterations on [[$SLUG]] must be an integer >= 1, got '0'" "C66: max_iterations: 0 on the task → exit 0, args null, budgetError"
+printf '%s' "$BE" | python3 "$LI" set-aside --note "$V/$SLUG.md" --kind integration | python3 "$RR" reconcile --result - --tasks-dir "$V" >/dev/null
+ok "$(j "$(HOME="$F/chome" inp "$SLUG")" 'd["humanFix"]["act"]')" "fix the round budget" "C66: its Integration row → humanFix H12"
+setkey "$V/$SLUG.md" max_iterations 3
+ok "$(j "$(HOME="$F/chome" inp "$SLUG")" 'd["autoRetryError"]')" "null" "C66: … and once the stamp reads 3, no autoRetryError"
+cp "$F/t.keep" "$V/$SLUG.md"
+setkey "$V/ro.md" max_plan_rounds 0
+call
+ok "$crc|$CJ" "2|" "C66: max_plan_rounds: 0 on the rollout, none on the task → exit 2, nothing printed"
+has "$(cat "$F/call.err")" "invalid round budget: max_plan_rounds on [[ro]] must be an integer >= 1, got '0'" "C66: … naming [[ro]]"
+setkey "$V/$SLUG.md" max_plan_rounds 2
+call
+ok "$crc|$(j "$CJ" 'd["args"]["task"]["maxPlanRounds"]')" "0|2" "C66: a valid task stamp over an invalid rollout one → the task's value"
+cp "$F/t.keep" "$V/$SLUG.md"; cp "$F/ro.keep" "$V/ro.md"
+# refusals: each exit 2, nothing printed
+refusal() {  # refusal <label> <stderr part>: the last call exited 2 with nothing on stdout and its line on stderr
+  ok "$crc|$CJ" "2|" "$1 → exit 2, nothing printed"; has "$(cat "$F/call.err")" "$2" "$1: … named"
+}
+python3 -c 'import sys; p, a, b = sys.argv[1:]; t = open(p).read(); open(p, "w").write(t.replace(a, b))' "$V/ro.md" "Project root: \`$R\`" "Project root: \`$F/p\`"
+call; refusal "C66: a --repo that is not the rollout's Project root" "is not [[ro]]'s Project root"
+cp "$F/ro.keep" "$V/ro.md"; grep -v '^verifier:' "$F/ro.keep" > "$V/ro.md"
+call; refusal "C66: a rollout with no verifier:" "[[ro]] has no verifier:"
+cp "$F/ro.keep" "$V/ro.md"
+mkdir -p "$F/badhome/.config/thread"; printf '[defaults]\nparallel_ceiling = 0\n' > "$F/badhome/.config/thread/rollouts.toml"
+CHOME="$F/badhome" call; refusal "C66: a refused rollouts.toml" "rollout settings refused:"
+REC="$R/.claude/integration/$SLUG.prepare.json"
+python3 - "$REC" <<'PY'
+import json, sys
+d = json.load(open(sys.argv[1])); d.pop("default"); json.dump(d, open(sys.argv[1], "w"))
+PY
+call; ok "$crc|$(j "$CJ" 'd["args"]["defaultBranch"]')" "0|master" "C66: a record with no default → origin answers master"
+git -C "$R" remote set-url origin "$F/nowhere.git"
+call; refusal "C66: a record with no default while origin does not answer" "origin's default branch for $R did not resolve"
+git -C "$R" remote set-url origin "$MT_SRV"
+setkey "$V/$SLUG.md" pr not-a-pr
+call
+ok "$crc|$(j "$CJ" 'd["args"]')|$([ -n "$(j "$CJ" 'd["prUrlError"]')" ] && echo set)" "0|null|set" "C66: pr: not-a-pr → exit 0, args null, prUrlError"
+
+# ======== C67 (p55-2, ADR 0085 d7): call --revise builds a seeded revise's whole args ================================
+# The seeded revise had the same gap: the lead built task.resume from inputs and plan by hand. `call --revise` prints the
+# whole args from the note (inputs' read and its ## Approved plan) with no prepare record. ifx's GitHub origin lets the
+# repo table of a rollouts.toml name this repo.
+ifx c67
+call --revise
+refusal "C67: --revise on a note at resumeAt own" "reads resumeAt own, not revise"
+call --revise --after red
+ok "$crc|$CJ" "2|" "C67: --revise with --after → usage, exit 2"; has "$(cat "$F/call.err")" "--revise takes no --row or --after" "C67: … named"
+setkey "$V/$SLUG.md" pr "$(p1pr "$SLUG")"
+rec "$(erow "$(p1args "$SLUG" 3)" "$(judge_changes "$SLUG" 2)")"
+printf '\n## Approved plan\n\nThe last approved plan, kept as a record for Integration.\n\n> C67 PLAN\n> - step one\n' >> "$V/$SLUG.md"
+I=$(inp "$SLUG" --repo "$R")
+ok "$(j "$I" '[d["resumeAt"], d["lastRound"] > 0]')" '["revise",true]' "C67: a rejected Integration → resumeAt revise"
+call --revise
+A=$(j "$CJ" 'd["args"]')
+ok "$crc|$(j "$A" 'd["task"]["resume"]')" \
+  "0|$(j "$I" '{"stage": "revise", "prUrl": d["prUrl"], "branch": d["branch"], "worktreePath": "'"$WT"'", "reviewHistory": d["history"], "reviewRoundsUsed": d["lastRound"], "plan": "C67 PLAN\n- step one"}')" \
+  "C67: task.resume is inputs' PR, branch and history, the computed tree, the last round and the note's plan"
+ok "$(j "$A" '["mode" in d, d["defaultBranch"], [k for k in ("touched", "unreachablePaths") if k in d], [k for k in ("arms", "unreachable") if k in d["task"]]]')" \
+  '[false,"master",[],[]]' "C67: no mode; defaultBranch from origin; no touched, unreachablePaths, arms or unreachable without their stamps"
+ok "$(node --input-type=module -e "
+  import { loadEngine, runTask } from './tests/lib/engine.mjs'
+  const a = JSON.parse(process.argv[1])
+  const r = await runTask(a, async () => { throw new Error('stub: stop at the first dispatch') })
+  process.stdout.write(JSON.stringify([loadEngine(['resumeArgsError']).resumeArgsError(a), (r.calls[0] || {}).label || '']))
+" "$A")" "[\"\",\"revise:$SLUG r$(( $(j "$I" 'd["lastRound"]') + 1 ))\"]" "C67: resumeArgsError passes, and the engine's first dispatch is the seeded revise"
+call --revise --repo "$R/"
+ok "$crc|$(j "$CJ" '[d["args"]["repoPath"], d["args"]["task"]["resume"]["worktreePath"]]')" "0|[\"$R\",\"$WT\"]" "C67: --repo with a trailing / → repoPath and the tree in prepare's spelling"
+cp "$V/$SLUG.md" "$F/t.keep"; cp "$V/ro.md" "$F/ro.keep"
+setkey "$V/$SLUG.md" arms "master-review=opus builder=none"; setkey "$V/$SLUG.md" unreachable true
+setkey "$V/ro.md" touched 'tests/test_{module}.py'
+mkdir -p "$F/uhome/.config/thread"; printf 'schema = 7\n\n[repo."o/r"]\nunreachable_paths = ["skills/codex/**"]\n' > "$F/uhome/.config/thread/rollouts.toml"
+CHOME="$F/uhome" call --revise
+ok "$crc|$(j "$CJ" '[d["args"]["task"]["arms"], d["args"]["task"]["unreachable"], d["args"]["touched"], d["args"]["unreachablePaths"]]')" \
+  '0|[{"master-review":"opus","builder":"none"},true,"tests/test_{module}.py",["skills/codex/**"]]' "C67: the note's arms and unreachable, the rollout's touched and the repo's unreachable_paths"
+cp "$F/t.keep" "$V/$SLUG.md"; cp "$F/ro.keep" "$V/ro.md"
+setkey "$V/$SLUG.md" max_plan_rounds abc
+call --revise
+BE=$(j "$CJ" 'd["budgetError"]')
+ok "$crc|$(j "$CJ" 'd["args"]')|$BE" "0|null|invalid round budget: max_plan_rounds on [[$SLUG]] must be an integer >= 1, got 'abc'" "C67: max_plan_rounds: abc → exit 0, args null, budgetError"
+printf '%s' "$BE" | python3 "$LI" set-aside --note "$V/$SLUG.md" --kind revise-stopped | python3 "$RR" reconcile --result - --tasks-dir "$V" >/dev/null
+ok "$(j "$(HOME="$F/chome" inp "$SLUG" --repo "$R")" '[d["resumeAt"], d["humanFix"]["act"]]')" '["revise","fix the round budget"]' "C67: its revise-stopped row keeps resumeAt revise; humanFix H12"
 
 echo; [ "$fail" -eq 0 ] && echo "lead-integrate: ALL PASS" || echo "lead-integrate: SOME FAILED"
 exit "$fail"

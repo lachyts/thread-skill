@@ -13,6 +13,13 @@ Waiting list. Leaves ADR 0043, ADR 0057 and handoff's
 **Invocation gate.** as they are. Extends ADR 0030 decision 5's drain, and gives `paused_for:` a third value beside
 `sign-off` (ADR 0034) and `catch-up` (ADR 0084 d5).
 
+Built so far: item 7, by p55-2 (`thread-skill-p55-2-one-command-builds-an-integrate-calls-whole-args`).
+`lead-integrate.py call` prints an integrate call's whole args, and `call --revise` a seeded revise's, each read from disk
+only (the rollout note, the task note, prepare's record, the ladder file and the rollout settings), and execute § 4.5
+names it as the only way to build either launch. A task-level round-budget stamp that is not an integer >= 1 is `call`'s
+`budgetError` (exit 0, `args: null`, the lead's own set-aside row, ADR 0048); a fault of the rollout or the machine is its
+exit 2. `call` joins the Engine snapshot guard, since its args carry paths built from its own root.
+
 ## Context
 
 One lead session (`22a01d17`) led `thread-skill-rollout-2026-11-12` from 12 Nov 11:16 to 17 Nov 22:31 AEDT: five and a
@@ -157,7 +164,9 @@ wrong, and he can overturn any. The numbers carry on from the Decision's two rul
    current snapshot, and no more: an Args refusal halts the whole rollout (execute § 7,
    `state=halted reason="engine refused the args of [[<slug>]]"`, kept under *Threatens every task*), so a lead that
    rebuilds the call from a summary still stops the queue. What p55-2 builds is the rest: § 4's args, the task object,
-   the ladder and `mode: 'integrate'`.
+   the ladder and `mode: 'integrate'`. Built by p55-2: the whole args are now `call`'s, printed as one `args` object the
+   lead passes verbatim, and a seeded revise's whole args are `call --revise`'s, its `task.resume` and plan included
+   (execute § 4.5 steps 3 and 1.2). A task's own call is still built by the lead (§ 4).
 8. **A stop the lead caused is a Lead error.** It is redone from the values the engine names, with no retry spent and
    never a set-aside; and a set-aside's reason is always the engine's own text, never the lead's summary. Why: ruling
    2, and the retry rule read a lead's summary as a human's. *In the code:* the lead types a set-aside's reason today

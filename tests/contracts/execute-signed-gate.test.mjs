@@ -114,15 +114,15 @@ function checkSignedGate(skill, context = realContext) {
   // engine goes on past each newly signed gate; the one sanctioned exception, because it never reaches a
   // prompt; never rebuild args from the note (a climb's rung: stamp, a ladder edit), and the resume keeps its call's
   // own ladder; § 4's ORIGINAL-args sentence and the Don't name it. Step 1.3
-  // passes mark-started's progress line to a fresh call only: a resume (Lost call, the signed-gate resume)
-  // re-passes the args of the call it resumes.
+  // passes mark-started's progress line to a task's own call only (a seeded revise takes `call --revise`'s args, p55-2):
+  // a resume (Lost call, the signed-gate resume) re-passes the args of the call it resumes.
   const call = 'Workflow({ scriptPath: <the handle\'s scriptPath>, args: <the handle\'s args, with task.approvedGates set from the note\'s ## Approved gates>, resumeFromRunId: <the handle\'s runId> })'
   if (!resume.includes(call) || !before(resume, "after §4.5 step 1.3's restart sequence", `${SHA} again`) ||
     !before(resume, `${SHA} again (a sha other than the handle's, or no file, is *Can no longer resume*)`, 'resumeFromRunId') ||
     /then the § 4 stamps|then `mark-started`|then § 4's git-env check/.test(resume) ||
     !resume.includes('Every agent up to the stop replays from cache') || !resume.includes('implements the plan the human signed') ||
     !resume.includes('once for each signed gate it has not yet passed at that site') || /re-dispatches it once/.test(resume) ||
-    !sub13.includes("For a fresh call (a start, or a restart's seeded revise or own call) mark-started's `progress:` line becomes the args `progress`") ||
+    !sub13.includes("For a task's own call (a start, or a restart's own call) mark-started's `progress:` line becomes the args `progress`") ||
     !sub13.includes("A resume is exempt: *Lost call* and § 3.7's signed-gate resume re-pass the args of the call they resume (the handle's, for a signed gate), so its `progress:` line is shown to the user, not passed") ||
     /\(its `progress:` line becomes the args `progress`\)/.test(sub13) ||
     !resume.includes('`task.approvedGates` is the **one sanctioned exception**') || !resume.includes('never reaches a prompt') ||

@@ -548,6 +548,11 @@ refused "lead-integrate prepare" gt1 g1
 ok "$(git -C "$T/target" rev-parse HEAD)|$(git -C "$T/target" rev-list --merges --count HEAD)" "$th|0" "G1: … the task tree's HEAD unchanged, no merge"
 echo "own reason" | python3 "$P/skills/execute/scripts/lead-integrate.py" set-aside --note "$TASKS/gt1.md" --kind own > "$T/out" 2> "$T/err"; rc=$?
 err=$(cat "$T/err"); refused "lead-integrate set-aside" gt1; ok "$(cat "$T/out")" "" "G1: … set-aside printed no row"
+# call (p55-2): its args carry paths built from its own root, so both forms are guarded
+py "$P" skills/execute/scripts/lead-integrate.py call --repo "$T/target" --slug gt1 --note "$TASKS/gt1.md"
+refused "lead-integrate call" gt1; ok "$(cat "$T/out")" "" "G1: … call printed no args"
+py "$P" skills/execute/scripts/lead-integrate.py call --revise --repo "$T/target" --slug gt1 --note "$TASKS/gt1.md"
+refused "lead-integrate call --revise" gt1; ok "$(cat "$T/out")" "" "G1: … call --revise printed no args"
 # merge-settings.py (ADR 0080): free, restore and dismiss are guarded; rows is a read, exempt (G2)
 py "$P" skills/execute/scripts/merge-settings.py free --note "$TASKS/gt1.md" --repo "$T/target" --tasks-dir "$TASKS"
 refused "merge-settings free" gt1 g1
