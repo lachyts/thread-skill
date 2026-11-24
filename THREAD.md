@@ -10,6 +10,15 @@ scope: Build + maintain the thread:* plugin — continuity verbs + the rollout q
 
 ## Where we are
 
+**2026-11-24 (orient): Thread Skill was reshuffled into Phases 55 to 58 and [[thread-skill-rollout-2026-11-24]] (45 tasks) is scheduled; handed [[thread-skill-rollout-2026-11-24]] to a fresh lead (Stage session "Lead the Thread Skill rollout of 24 Nov", task_4de25d36; launch doc landed by #472). Fable is switched on in rollouts.**
+- **Reshuffle.** Four new phases: P55 a rollout's lead hands over by itself (five tasks; p55-1 writes ADR 0085), P56 a sign-off is asked before its work is queued (five new tasks plus the metered key and the spend gate with no amount), P57 the record reads true (six), P58 the suite stays lean and steady (twelve). P47 gained four, P54 three, P48 and P46 one each. Ten tasks new, 29 renamed into phases, nine dropped as already done, four merged, three grill tasks closed into the tasks they became.
+- **His three rulings.** A landing stuck on a real failure: "File a fix task" (p47-20, amends ADR 0078 d2). Who edits the operator settings he has ruled on: "Agents make any ruled edit" (p56-5, reverses ADR 0063 d1 for ruled declarations). Fable in rollouts: "Switch it on now".
+- **Operator files changed here.** `~/.config/thread/rollouts.toml` gained `schema = 5` and `test_logins = ["dummy"]` (the old file is `rollouts.toml.before-2026-11-24` beside it). `~/.config/thread/ladder.toml` was written: Fable plans on both Opus rungs, a third rung `fable-high`, `[share]` 0.5 for master-review, builder, investigator and lead. The lead's own arm drew `opus`.
+- **Decided for him** (in the task notes): the lead hands over at its second compaction; ADR 0085 is written by p55-1 inside the rollout, so no grill doc held the schedule; the two circling grills needed no new rule (the 22 Nov Reflection traced nine of eleven items to an unsigned gate or his own visits); each Fable ceiling starts at 0.5; the two legacy retirements go ahead (no live note uses either).
+- **Left out of the rollout.** [[thread-skill-p39-13-fresh-review-landing-loop-review-follow-ups]] (graded session lane) and [[thread-skill-p46-9-the-weekly-reflection-reads-fresh-reviews-arms]] each wait on a Fresh Review task that is filed, not started (Resume instructions). [[thread-skill-p30-2-a-review-stop-is-the-agents-to-resolve]] is work in the fresh-review skill's repo. [[thread-skill-p36-8-launch-markers-use-repo-relative-paths]] and [[thread-skill-p36-11-structure-audit-exempts-chain-copies]] are in the workspaces repo and were not scheduled. [[thread-skill-grill-master-review-on-stateful-logic]] waits for the Fable review arm's first reading.
+- **Filed.** [[thread-skill-flake-live-checkout-lc8-red-in-a-full-fast-tier-run]]; [[chorus-the-stage-opens-a-handed-over-rollouts-fresh-lead]] (the Stage's half of P55).
+- **Not proving.** The refresh job reads `prove: 14 carried, 0 proven` 13 days after Phase 45 merged; [[thread-skill-prove-phase-45-fixes]] and [[thread-skill-followup-prove-the-fixes-of-phases-47-48-and-51]] are open.
+
 **2026-11-24: [[thread-skill-rollout-2026-11-12]] is complete, 80 of 80 merged, completion verify green at `7b9acea`, archived. Nothing runs under this thread now.**
 - **The second lead's stretch** (17 to 24 Nov, Stage session "thread 2", snapshot `302490ba440a` throughout). It took the rollout from 51 to 80. It halted `stuck` on 21 Nov at 77 of 81 with three tasks set aside for Lachy, and sat two and a half days until he ran `/thread:repair` on 23 Nov.
 - **His three answers at repair (23 Nov).** p39-19's spend gate signed (cap US$110, asked only because the month's standing approvals would have reached US$231 against the US$200 line; the evals cost US$83.57). p46-3's credential gate signed. p49-2 taken out and closed `dropped`, superseded by #422 and #430 (six planners had said so).
@@ -862,6 +871,8 @@ scheduled 2026-07-15.
 
 - **ADRs 0079 to 0081 (2026-11-12, #380, amended by #382).** 0079: Fable plans every plan the engine drafts and is the top rung; the master review, hard builds, the investigator and the lead run in measured arms by a draw fixed by the task's name; the Fable share is paced per Login. 0080: a stuck rollout may change a merge or CI setting that cannot be met, on a repo he owns, with its undo logged. 0081: an Unreachable surface takes a doubled master review and lands with a Felt check open. CONTEXT.md gained **Role**, **Arm**, **Fable share**, **Shaping session**, **Unreachable surface** and **Felt check**.
 
+- **Reshuffle of 2026-11-24 (orient).** Phases 55 to 58 and [[thread-skill-rollout-2026-11-24]]. His rulings: a stuck landing files a fix task; agents write any operator-settings declaration he has ruled on; Fable on in rollouts now. ADR 0085 (the lead hand-over, at the second compaction, through the Waiting list) is p55-1's to write; P56's tasks amend ADRs 0034, 0056 and 0063 in place.
+
 ## Open questions / decisions pending
 
 - **Close has no route after the budget** (raised in three review rounds of #271, filed in [[fresh-review-landing-loop-review-follow-ups]]): a CI fix, an unconfirmed round 3 or a finding Lachy's call drops can be decided but not landed through close, and the Counting window counts dev-time rounds a later session runs after a hold. A design pass, probably with an ADR 0065 amendment.
@@ -1266,7 +1277,20 @@ scheduled 2026-07-15.
 - **A docs-only PR's review rounds block only on the named test**: the checker files every prose finding (clause `none`), so three rounds on #413 gave 45 findings and one blocking. Apply the filed doc findings before the chain's last round, so that round reads the corrected text (as #382 did for ADRs 0079 to 0081); a body edit to a task note on a live rollout goes through the engine's `Note` (`.scratch/p54/patch-notes.py`), never a plain write. (2026-11-16.)
 - **A join makes its tasks startable at once**, before a docs PR they cite has merged: point each task note at the docs branch (`git show origin/<branch>:<path>`) before the join. (2026-11-16.)
 
+- **A serial Leg never reads the ladder file, and the 10 Nov engine refuses the new one.** Snapshot `c6b300474de6` exits 2 on `[share]` and `plan` (`unknown top-level key`). [[quote-videos-rollout-2026-11-10]] and [[giflab-rollout-2026-11-10]] still name it; `leg.py` and `legs.md` there never name the ladder, so neither halts, but `/thread:status` on either prints the refusal until the chain is re-scheduled. `engine-snapshot.py resolve` reads both `move.due: false` ("only a stopped close moves a chain"). (2026-11-24.)
+- **"Write the ladder only when no rollout is mid-plan" can no longer hold estate-wide**: some project's rollout is always running. What makes a write safe is that a call keeps the ladder it read at its start, the rung names a task may hold still exist, and arms are drawn only at a task's first dispatch. (2026-11-24, p46-7.)
+- **Schedule's baseline run on clean master is the full fast tier (about 20 minutes), and it can go red on a flake**: `tests/live-checkout.test.sh` LC8 failed inside it and passes alone. The reader named no test, so the baseline stayed `none`. (2026-11-24.)
+- **A flake task keeps `followup-flake-<id>` in its filename when it is phased**: the Flake log finds its note by the glob `*-followup-flake-<id>*.md`, so `thread-skill-p58-1-followup-flake-…` still matches and a rename without it would file a second note. (2026-11-24.)
+- **A one-task schedule for a Fresh Review task stops at § 0**: [[Fresh Review Skill]] has `repos:` and no `Local:` line, and `~/.agents` has no rollout clone yet. (2026-11-24.)
+
 ## Resume instructions
+
+**From 2026-11-24 (orient: Phases 55 to 58 scheduled):** handed [[thread-skill-rollout-2026-11-24]] to a fresh lead (Stage task_4de25d36); `/thread:status [[thread-skill-rollout-2026-11-24]]` reads where it is. This supersedes steps 1, 2, 3 and 5 of the completion block below.
+1. **Next task for this thread:** [[thread-skill-p46-7-switch-fables-arms-on-once-the-lock-is-edited]], its last step: read the rollout's Run record for the first plan call on Fable and the first `arms:` stamps, and the weekly Reflection after it for the first reading.
+2. **Waits nobody builds.** [[fresh-review-skill-p2-1-rounds-record-arm-and-model]] is filed, not started (p46-9 waits on it), and [[fresh-review-skill-followup-a-landing-overtime-round-past-the-third]] is filed, not started (p39-13 waits on it). Their schedule stopped at § 0: no `Local:` line on [[Fresh Review Skill]]. On his "start it": add the line, then `/thread:schedule --tasks` both, which asks him once about a rollout clone of `~/.agents`.
+3. **The workspaces tasks:** `/thread:schedule --tasks thread-skill-p36-8-launch-markers-use-repo-relative-paths,thread-skill-p36-11-structure-audit-exempts-chain-copies`.
+4. **Once p56-5 and p56-6 are live:** declare Chorus's two voice keys as metered keys through `rollout-settings.py declare` (his 23 Nov words are the ruling).
+5. **His, for a sitting he chooses:** [[thread-skill-decisions-2026-11-16]] at Thursday's Reflection Routine; [[thread-skill-estate-chores-after-p12]] (PR #292 and nine leftover worktrees are on its list); the two chains on the 10 Nov engine.
 
 **From 2026-11-24 (the rollout's completion):** nothing runs under this thread. This supersedes the 18 November block's steps 2 and 3 and every earlier line that says [[thread-skill-rollout-2026-11-12]] is running.
 1. **Next task for this thread:** [[thread-skill-grill-a-rollout-lead-hands-over-before-compaction-costs]], filed, not started (a Fable hand session; both of Lachy's questions are settled in the note). The two 23 Nov entries under Known quirks are evidence for it.
@@ -1339,6 +1363,8 @@ The in-place checkout `~/repos/tools/thread-skill` is still held behind origin/m
 4. `/thread:reflect [[thread-skill-rollout-2026-10-19]]` is on offer; the next weekly Reflection is due 2026-10-24.
 
 ## Session log
+
+- 2026-11-24 (close, orient): reshuffled into Phases 55 to 58 (10 new tasks, 29 renames, 9 drops, 4 merges); his rulings "File a fix task", "Agents make any ruled edit" and "Switch it on now"; `test_logins` declared and `ladder.toml` written; [[thread-skill-rollout-2026-11-24]] (45 tasks) scheduled and handed to a fresh lead
 
 - 2026-11-24 (close, rollout lead): led [[thread-skill-rollout-2026-11-12]] from 51 of 80 to complete; halted on three set-asides 21 Nov, his three answers at `/thread:repair` 23 Nov (two gates signed, p49-2 dropped); p39-19, p46-3 and p47-12 landed (#468 to #470); completion verify green at 7b9acea; Phase 49 closed; archived and scored.
 
