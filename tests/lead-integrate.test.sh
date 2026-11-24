@@ -59,10 +59,11 @@
 #   GitHub's check ends, suite-ended after   C64 mac's transitions   C65 the holder check: only this task's own run holds.
 #   C66–C67 (p55-2, ADR 0085 d7) one command builds a launch's whole args: C66 `call` prints the integrate call's whole
 #   args after an own run merged main (headSha is ANCHOR_RECIPE's anchor, never the PR head), the engine dispatches it
-#   as printed, a trailing / on --repo, the baseline block, round budgets by level (a task's is budgetError, H12 after
-#   its row; a rollout's is exit 2), the refusals; C67 `call --revise` prints a seeded revise's whole args (task.resume
-#   from inputs and the note's plan, the note's arms and unreachable stamps, touched, unreachable_paths), the engine
-#   takes it, its budgetError row keeps the revise, and a note not at resumeAt revise is exit 2.
+#   as printed, a trailing / on --repo, a record with no `default` (origin answers, or exit 2); C67 `call --revise`
+#   prints a seeded revise's whole args (task.resume from inputs and the note's plan, the note's arms and unreachable
+#   stamps, touched, unreachable_paths) and the engine takes it. What needs no real prepare, origin or engine (the
+#   launch args' fields, the baseline block, round budgets by level, the other exit 2s, prUrlError, --revise's own
+#   stops) is skills/execute/tests/lead-integrate-call.test.sh's, in the Fast tier.
 #   The Run record (p29-10, ADR 0051): S1–S8 verify --rollout's suite lines (green, red, timeout, race, completion,
 #   noslot, none without --rollout, a TERM's stopped line after the rc and outcome files, a TERM in suite-started's vault
 #   walk never swallowed); M1–M6 base-moved (a rollout's merge from the record or its note, a peer's push, the Inert
@@ -2843,50 +2844,10 @@ ok "$(j "$A" '[d["mode"], d["defaultBranch"], d["rolloutSlug"], d["repoPath"], d
 ok "$(j "$A" '[k for k in ("progress", "gatePricer", "touched", "unreachablePaths", "securityCheck", "knownBaselineFailures") if k in d] + [k for k in ("arms", "unreachable", "resume") if k in d["task"]]')" \
   '[]' "C66: no progress, gatePricer, touched, unreachablePaths, securityCheck or baseline; no task.arms, unreachable or resume"
 ok "$(R="$R" SLUG="$SLUG" edispatch "$A")" "dispatched 1" "C66: the engine takes call's args as printed (no args refusal; it dispatches)"
-VT=$(HOME="$F/chome" python3 "$RR" verify-timeout --rollout "$V/ro.md")
-LD=$(HOME="$F/chome" python3 "$root/skills/_shared/scripts/ladder.py")
-ok "$(j "$A" 'd["verifySlot"]')|$(j "$A" 'd["ladder"]')|$(j "$VT" '"securityCheck" in d')" "$(j "$VT" 'd["verifySlot"]')|$(j "$LD" 'd')|false" \
-  "C66: verifySlot is verify-timeout's under the same HOME, ladder is ladder.py's stdout; no securityCheck in either"
 call --repo "$R/"
 ok "$crc|$(j "$CJ" '[d["args"]["repoPath"], d["args"]["integration"]["worktreePath"]]')" "0|[\"$R\",\"$WT\"]" "C66: --repo with a trailing / → repoPath and the tree in prepare's spelling"
 ok "$(R="$R" SLUG="$SLUG" edispatch "$(j "$CJ" 'd["args"]')")" "dispatched 1" "C66: … and that object dispatches too"
-# the rollout's ## Known baseline failures: every non-blank line once the template's comment goes; `none` or no block: no key
-cp "$V/ro.md" "$F/ro.keep"
-printf '\n## Known baseline failures\n\n<!-- Machine-readable: one line per failing test: `- <test_id> — <one-line reason>`.\n     Write `none` when clean `main` is fully green. -->\n- test_a — env\ntest_b — flaky dns\n' >> "$V/ro.md"
-call; ok "$crc|$(j "$CJ" 'd["args"]["knownBaselineFailures"]')" '0|["test_a — env","test_b — flaky dns"]' "C66: the baseline block → its two entries, the bare line kept"
-cp "$F/ro.keep" "$V/ro.md"; printf '\n## Known baseline failures\n\n<!-- one line per failing test -->\nnone\n' >> "$V/ro.md"
-call; ok "$crc|$(j "$CJ" '"knownBaselineFailures" in d["args"]')" "0|false" "C66: a block reading none → no key"
-cp "$F/ro.keep" "$V/ro.md"
-# round budgets by level: a task's invalid stamp is budgetError (exit 0, args null); a rollout's is exit 2
-cp "$V/$SLUG.md" "$F/t.keep"
-setkey "$V/$SLUG.md" max_iterations 0
-call
-BE=$(j "$CJ" 'd["budgetError"]')
-ok "$crc|$(j "$CJ" 'd["args"]')|$BE" "0|null|invalid round budget: max_iterations on [[$SLUG]] must be an integer >= 1, got '0'" "C66: max_iterations: 0 on the task → exit 0, args null, budgetError"
-printf '%s' "$BE" | python3 "$LI" set-aside --note "$V/$SLUG.md" --kind integration | python3 "$RR" reconcile --result - --tasks-dir "$V" >/dev/null
-ok "$(j "$(HOME="$F/chome" inp "$SLUG")" 'd["humanFix"]["act"]')" "fix the round budget" "C66: its Integration row → humanFix H12"
-setkey "$V/$SLUG.md" max_iterations 3
-ok "$(j "$(HOME="$F/chome" inp "$SLUG")" 'd["autoRetryError"]')" "null" "C66: … and once the stamp reads 3, no autoRetryError"
-cp "$F/t.keep" "$V/$SLUG.md"
-setkey "$V/ro.md" max_plan_rounds 0
-call
-ok "$crc|$CJ" "2|" "C66: max_plan_rounds: 0 on the rollout, none on the task → exit 2, nothing printed"
-has "$(cat "$F/call.err")" "invalid round budget: max_plan_rounds on [[ro]] must be an integer >= 1, got '0'" "C66: … naming [[ro]]"
-setkey "$V/$SLUG.md" max_plan_rounds 2
-call
-ok "$crc|$(j "$CJ" 'd["args"]["task"]["maxPlanRounds"]')" "0|2" "C66: a valid task stamp over an invalid rollout one → the task's value"
-cp "$F/t.keep" "$V/$SLUG.md"; cp "$F/ro.keep" "$V/ro.md"
-# refusals: each exit 2, nothing printed
-refusal() {  # refusal <label> <stderr part>: the last call exited 2 with nothing on stdout and its line on stderr
-  ok "$crc|$CJ" "2|" "$1 → exit 2, nothing printed"; has "$(cat "$F/call.err")" "$2" "$1: … named"
-}
-python3 -c 'import sys; p, a, b = sys.argv[1:]; t = open(p).read(); open(p, "w").write(t.replace(a, b))' "$V/ro.md" "Project root: \`$R\`" "Project root: \`$F/p\`"
-call; refusal "C66: a --repo that is not the rollout's Project root" "is not [[ro]]'s Project root"
-cp "$F/ro.keep" "$V/ro.md"; grep -v '^verifier:' "$F/ro.keep" > "$V/ro.md"
-call; refusal "C66: a rollout with no verifier:" "[[ro]] has no verifier:"
-cp "$F/ro.keep" "$V/ro.md"
-mkdir -p "$F/badhome/.config/thread"; printf '[defaults]\nparallel_ceiling = 0\n' > "$F/badhome/.config/thread/rollouts.toml"
-CHOME="$F/badhome" call; refusal "C66: a refused rollouts.toml" "rollout settings refused:"
+# the record's `default`: a record without one asks origin, and an origin that does not answer is exit 2
 REC="$R/.claude/integration/$SLUG.prepare.json"
 python3 - "$REC" <<'PY'
 import json, sys
@@ -2894,21 +2855,16 @@ d = json.load(open(sys.argv[1])); d.pop("default"); json.dump(d, open(sys.argv[1
 PY
 call; ok "$crc|$(j "$CJ" 'd["args"]["defaultBranch"]')" "0|master" "C66: a record with no default → origin answers master"
 git -C "$R" remote set-url origin "$F/nowhere.git"
-call; refusal "C66: a record with no default while origin does not answer" "origin's default branch for $R did not resolve"
-git -C "$R" remote set-url origin "$MT_SRV"
-setkey "$V/$SLUG.md" pr not-a-pr
 call
-ok "$crc|$(j "$CJ" 'd["args"]')|$([ -n "$(j "$CJ" 'd["prUrlError"]')" ] && echo set)" "0|null|set" "C66: pr: not-a-pr → exit 0, args null, prUrlError"
+ok "$crc|$CJ" "2|" "C66: a record with no default while origin does not answer → exit 2, nothing printed"
+has "$(cat "$F/call.err")" "origin's default branch for $R did not resolve" "C66: … named"
+git -C "$R" remote set-url origin "$MT_SRV"
 
 # ======== C67 (p55-2, ADR 0085 d7): call --revise builds a seeded revise's whole args ================================
 # The seeded revise had the same gap: the lead built task.resume from inputs and plan by hand. `call --revise` prints the
 # whole args from the note (inputs' read and its ## Approved plan) with no prepare record. ifx's GitHub origin lets the
 # repo table of a rollouts.toml name this repo.
 ifx c67
-call --revise
-refusal "C67: --revise on a note at resumeAt own" "reads resumeAt own, not revise"
-call --revise --after red
-ok "$crc|$CJ" "2|" "C67: --revise with --after → usage, exit 2"; has "$(cat "$F/call.err")" "--revise takes no --row or --after" "C67: … named"
 setkey "$V/$SLUG.md" pr "$(p1pr "$SLUG")"
 rec "$(erow "$(p1args "$SLUG" 3)" "$(judge_changes "$SLUG" 2)")"
 printf '\n## Approved plan\n\nThe last approved plan, kept as a record for Integration.\n\n> C67 PLAN\n> - step one\n' >> "$V/$SLUG.md"
@@ -2929,20 +2885,12 @@ ok "$(node --input-type=module -e "
 " "$A")" "[\"\",\"revise:$SLUG r$(( $(j "$I" 'd["lastRound"]') + 1 ))\"]" "C67: resumeArgsError passes, and the engine's first dispatch is the seeded revise"
 call --revise --repo "$R/"
 ok "$crc|$(j "$CJ" '[d["args"]["repoPath"], d["args"]["task"]["resume"]["worktreePath"]]')" "0|[\"$R\",\"$WT\"]" "C67: --repo with a trailing / → repoPath and the tree in prepare's spelling"
-cp "$V/$SLUG.md" "$F/t.keep"; cp "$V/ro.md" "$F/ro.keep"
 setkey "$V/$SLUG.md" arms "master-review=opus builder=none"; setkey "$V/$SLUG.md" unreachable true
 setkey "$V/ro.md" touched 'tests/test_{module}.py'
 mkdir -p "$F/uhome/.config/thread"; printf 'schema = 7\n\n[repo."o/r"]\nunreachable_paths = ["skills/codex/**"]\n' > "$F/uhome/.config/thread/rollouts.toml"
 CHOME="$F/uhome" call --revise
 ok "$crc|$(j "$CJ" '[d["args"]["task"]["arms"], d["args"]["task"]["unreachable"], d["args"]["touched"], d["args"]["unreachablePaths"]]')" \
   '0|[{"master-review":"opus","builder":"none"},true,"tests/test_{module}.py",["skills/codex/**"]]' "C67: the note's arms and unreachable, the rollout's touched and the repo's unreachable_paths"
-cp "$F/t.keep" "$V/$SLUG.md"; cp "$F/ro.keep" "$V/ro.md"
-setkey "$V/$SLUG.md" max_plan_rounds abc
-call --revise
-BE=$(j "$CJ" 'd["budgetError"]')
-ok "$crc|$(j "$CJ" 'd["args"]')|$BE" "0|null|invalid round budget: max_plan_rounds on [[$SLUG]] must be an integer >= 1, got 'abc'" "C67: max_plan_rounds: abc → exit 0, args null, budgetError"
-printf '%s' "$BE" | python3 "$LI" set-aside --note "$V/$SLUG.md" --kind revise-stopped | python3 "$RR" reconcile --result - --tasks-dir "$V" >/dev/null
-ok "$(j "$(HOME="$F/chome" inp "$SLUG" --repo "$R")" '[d["resumeAt"], d["humanFix"]["act"]]')" '["revise","fix the round budget"]' "C67: its revise-stopped row keeps resumeAt revise; humanFix H12"
 
 echo; [ "$fail" -eq 0 ] && echo "lead-integrate: ALL PASS" || echo "lead-integrate: SOME FAILED"
 exit "$fail"
