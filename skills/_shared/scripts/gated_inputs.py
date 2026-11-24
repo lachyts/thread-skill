@@ -43,9 +43,13 @@ a reading needs it (part 1), with no git and no bytecode.
    thing the run cannot take back: `scratch repo` (`scratch`, at most two words, then repo, repos or repository),
    `gh repo` (`gh repo create` or `delete`), `force-push` (`force push`, `force-push`, `push --force`), `drop table`,
    `to production` (deploy, push, publish, promote, release or migrate, in any form, at most two words, then `to
-   production`) and `delete the` (delete in any form, an optional article, at most two words, then a repo, repository,
-   user, account, bucket or database, plural allowed). The credential and test-Login readings' deny list (parts 4 and
-   5) reads IRREVERSIBLE_WORDS alone, unchanged. Accepted residual: a gate whose note names neither (smart-slider
+   production`), `live publish` (p56-1: publish, deploy or push, in any form, then at most eight words of one clause,
+   then `live` as a word, not `live-`; or `live publish` or `live deploy`, in any form; a clause ends at `,`, `;`,
+   `!`, `?`, a `.` or `:` before a space, or a blank line, so `publish animately.co live` and `publish the site live`
+   hit, and `publish to staging`, `save as draft` and `push the branch, then check the live site` do not) and `delete
+   the` (delete in any form, an optional article, at most two words, then a repo, repository, user, account, bucket or
+   database, plural allowed). The credential and test-Login readings' deny list (parts 4 and 5) reads
+   IRREVERSIBLE_WORDS alone, unchanged. Accepted residual: a gate whose note names neither (smart-slider
    p8-2's staging key, reached only through its dependency's hook) is still first seen at the plan gate; the
    Reflection counts each gate signed mid-run whose note the sweep does hit as a miss (reflect.py's `sweepMiss`).
 
@@ -492,6 +496,10 @@ CREDENTIAL_THINGS = (
     _case(".env", r"(?<![A-Za-z0-9_.])\.env(?![A-Za-z0-9_])"),
     *(_case(s, WS + r"\s+".join(re.escape(p) for p in s.split(" ")) + WE_) for s in SERVICES),
 )
+# The live publish's clause (p56-1): words joined by spaces and at most one line break (a blank line ends it), each
+# word free of clause punctuation, a `.` or `:` inside one (`animately.co`) kept.
+_SEP = r"(?:[ \t]+|[ \t]*\n[ \t]*)"
+_CLAUSE_WORD = r"(?:[^\s.,;:!?]|[.:](?=\S))+"
 IRREVERSIBLE_THINGS = (
     _anycase("scratch repo", WS + r"scratch\s+(?:[A-Za-z0-9-]+\s+){0,2}repo(?:s|sitory|sitories)?" + WE_),
     _anycase("gh repo", WS + r"gh\s+repo\s+(?:create|delete)" + WE_),
@@ -499,6 +507,8 @@ IRREVERSIBLE_THINGS = (
     _anycase("drop table", WS + r"drop\s+table" + WE_),
     _anycase("to production", WS + r"(?:deploy|push|publish|promot|releas|migrat)[a-z]*\s+(?:[A-Za-z0-9-]+\s+){0,2}"
              r"to\s+production" + WE_),
+    _anycase("live publish", WS + r"(?:(?:publish|deploy|push)[a-z]*" + _SEP + r"(?:" + _CLAUSE_WORD + _SEP + r"){0,8}"
+             r"live(?![A-Za-z0-9_-])|live" + _SEP + r"(?:publish|deploy)[a-z]*" + WE_ + r")"),
     _anycase("delete the", WS + r"delet(?:e|es|ed|ing)\s+(?:(?:a|an|the|its|that)\s+)?(?:[A-Za-z0-9-]+\s+){0,2}"
              r"(?:repo|repository|user|account|bucket|database)s?" + WE_),
 )

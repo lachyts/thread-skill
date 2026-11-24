@@ -491,6 +491,23 @@ test('p51-3: each credential and irreversible thing flags by its word; near miss
   })
 })
 
+// p56-1: the four chains' unsigned gates (seo-rollout-2026-11-16-3, website-re-design-rollout-2026-11-10, -11-16-2 and
+// -11-17), each verbatim from its note less its `irreversible: ` prefix: a live Webflow publish no word read.
+test('p56-1: a live publish flags as `live publish`; a publish to staging, a preview or a draft stays quiet', () => {
+  const flag = [
+    'publish the /tools/change-speed-gif rewrite for the button screen (/app/speed) live to animately.co via Webflow: drop smart frame removal, the file-size readout, edit history/undo, the desktop runtime readout and side-by-side compare from the visible copy and the FAQPage JSON-LD, and drop \'smart frame removal\' from the meta and OG description',
+    'publish animately.co live to ship the footer Icons8 attribution restyle and the .s2-sub mobile gutter fix (Webflow has no staging on this site, so any publish is live)',
+    'switch the Body (All Pages) font on animately.co from Montserrat to Inter, remove Montserrat from the WebFont.load call, and publish the site live (every publish on this site is live and also ships any other unpublished Designer changes)',
+    'publish animately.co live to test whether includeInSitemap: false on a throwaway, non-ranking page also renders noindex (no staging: any publish ships every pending edit)',
+    'a live publish of this title/meta',
+  ]
+  const quiet = ['publish to staging', 'save as draft', 'publish a preview link', 'push the branch, then check the live site',
+    'push the commit and live-reload', 'a deploy to staging.\n\nThe live site stays']
+  const got = py([...flag, ...quiet].map((text) => ({ op: 'sweep_text', text })))
+  flag.forEach((text, i) => assert.deepEqual(words(got[i].irreversible), ['live publish'], text))
+  quiet.forEach((text, i) => assert.deepEqual(got[flag.length + i].irreversible, [], text))
+})
+
 test('p51-3: the credential readings still deny only the old irreversible words, never the things the sweep reads', () => {
   const cls = { file: '~/.env.local', keys: [{ name: 'STRIPE_SECRET', prefix: 'sk_test_' }] }
   const [scratch, wipe] = py([
