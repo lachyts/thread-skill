@@ -94,7 +94,10 @@ keyed by the record's own values where one fits:
 - other (unranked, never a Watch): pause, pause-drain, dependency, solo, queue-tail, hold-last-start, hold-pr, revise,
   hold-surface (a surface wait, P41-3), catch-up and catch-up-drain (an Engine catch-up's pause and its drain's idle
   Slots, p54-14: the engine's own move, never his pause; the catch-up pause is subtracted wherever his is, as one `own`,
-  and only its add is split out of `pause`).
+  and only its add is split out of `pause`), hand-over and hand-over-drain (a Lead hand-over's pause, from its `paused`
+  line of mode hand-over to the `resumed` its fresh lead's Reinstate writes, and its drain's idle Slots, p55-5: the
+  engine's own, never his pause and never a stall; subtracted wherever his is, as one `own`, its add split out of
+  `pause`, both held to the window as every pause is).
 
 A suite runs from its suite-started to its suite-ended (or its seconds before a suite-ended with no start); one with no
 end is priced 0 and counted (`suite-unfinished`). Completion suites belong to no class. Which records are read: every
@@ -540,12 +543,15 @@ def measure(slug, lines, since, until, is_live):
 
     own = win([(p["start"], p["end"]) for p in sc.pauses if p["mode"] != "sign-off"])
     signoff = win([(p["start"], p["end"]) for p in sc.pauses if p["mode"] == "sign-off"])
-    # p54-14: an Engine catch-up's pause stays in `own` for every subtraction below; only its add is its own cause.
+    # p54-14: an Engine catch-up's pause stays in `own` for every subtraction below; only its add is its own cause. So
+    # does a Lead hand-over's (p55-5).
     catchup = win([(p["start"], p["end"]) for p in sc.pauses if p["mode"] == "catch-up"])
-    his = subtract(own, catchup)
+    handover = win([(p["start"], p["end"]) for p in sc.pauses if p["mode"] == "hand-over"])
+    his = subtract(subtract(own, catchup), handover)
     m.add("other", "pause", his)
     m.lead("pause", his)
     m.add("other", "catch-up", catchup)
+    m.add("other", "hand-over", handover)
 
     def clean(iv):
         return subtract(win(iv), own)

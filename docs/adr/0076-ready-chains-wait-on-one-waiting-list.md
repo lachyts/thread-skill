@@ -49,6 +49,11 @@ room stop marked is the exception: that Leg is parked until the Stage's re-send,
 stands until that re-send's `begin` (every other lease write keeps it). A take-over is still never listed by repair
 (`leg.py restarted --listed` refuses an open Leg).)*
 
+*(Amended by ADR 0085 d5, 2026-11-25, p55-5: a parallel note whose lead handed over (`paused:` with `paused_for:
+hand-over` and `start: unattended`, a Project root, and no fresh lead's `lead-entry` since its `paused` line) is on the
+list too, as its own row kind: `unfinished-rollout.py waiting`'s `leads`, never a `waiting` row, since the Stage starts
+every `waiting` row as a Leg. Opening a `leads` row is the Stage's (ADR 0085 d11).)*
+
 **d4. Orient and orient-all list chains; they never launch a Leg.** Schedule's serial path writes `start: unattended`
 on each chain note it writes for a run Lachy approved. orient-all's Leg items, and a Leg's handoff to the next Leg,
 stamp the note instead of calling `create_thread`. Parallel rollouts keep one lead each, started as today.
@@ -60,6 +65,11 @@ is pasted: a chain is listed or has a paste-ready prompt, never both. A Leg's ha
 (`leg.py handed --listed`). A manual hand-over stays off the list, reversing P44-1's reading that it was on it, until
 repair lists it; repair rejoins a fixed or held chain with `leg.py restarted --listed` (d6). A Leg closed with a
 handoff counts as its chain's session (`closing Leg N`) until its hand-over is written.)*
+
+*(Amended by ADR 0085 d5, 2026-11-25, p55-5: "Parallel rollouts keep one lead each, started as today" holds until a
+parallel lead hands over at its second compaction: its own `reconcile-rollout.py stamp-start --hand-over` lists the
+paused note for a fresh lead on the Stage, and off the Stage `hand-over --manual` prints one needs-you start line. Its
+next lead is started from the list, as a chain's next Leg is.)*
 
 **d5. He sees it as one quiet line.** The Stage shows one line (how many chains wait, which is next, how much room),
 which opens into the ordered list with a click: no notification, no card per chain, no command to run (Lachy, 2026-11-08:
@@ -94,6 +104,7 @@ the list and listed in its rollout note for a sitting he chooses (P41: a single 
    a terminal still sees the same answer. (technical)
 3. A held front chain is passed over, never waited on. (priorities: get as much running as possible)
 4. Parallel rollouts stay out of the list: each is one lead, which already starts tasks only as Capacity allows.
-   (technical)
+   (technical) *(Amended by ADR 0085 d5, 2026-11-25, p55-5: a parallel rollout whose lead handed over waits on the
+   list for its fresh lead, as `waiting`'s `leads`; a running one still stays out of it.)*
 5. Today's stuck chains wait for this build rather than being restarted by hand now, since a manual restart opens the
    same herd of sessions; the idle Leg sessions are closed first, which frees memory and lets Capacity rise. (technical)

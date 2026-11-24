@@ -122,6 +122,24 @@ test('L1 (p54-14): the soft pause re-moded catch-up moves its 0.5 h to other.cat
   assert.equal(ledgerCli(h2, LSINCE, LUNTIL).row.other['catch-up'] ?? 0, 0, 'a catch-up pause before since adds nothing')
 })
 
+test('L1 (p55-5): the soft pause re-moded hand-over moves its 0.5 h to other.hand-over, every class unchanged; a hand-over-drain marker is other; one before since adds nothing', (t) => {
+  const h = setup(t)
+  fixture(h, {
+    'l-holds': FIXTURE['l-holds'].map((e) => (e[1] === 'paused' ? [e[0], 'paused', null, { mode: 'hand-over' }] : e)),
+    'l-caps': FIXTURE['l-caps'].map((e) => (e[1] === 'idle-slots' && e[3].reason === 'hold-trickle' ? [e[0], e[1], e[2], idle('hand-over-drain')] : e)),
+  })
+  const b = ledgerCli(h, LSINCE, LUNTIL)
+  assert.deepEqual([b.row.other['hand-over'], b.row.other['hand-over-drain'], b.row.other.pause ?? 0], [0.5, 1, 0],
+    'a Lead hand-over and its drain are the engine\'s own, never his pause and never a stall')
+  assert.deepEqual(b.row.rollouts['lane-bound'], [['l-lane', 2], ['l-holds', 1.5]], 'still subtracted from the lane, as his pause is')
+  assert.deepEqual(b.row.hours, { stalls: 29.25, 'quota-bound': 1, load: 2.25, 'lane-bound': 3.5, rework: 1.5, 'plan-rejected': 1 },
+    'every class unchanged but the hour the drain marker took out of stalls')
+  const h2 = setup(t)
+  emitAll(h2, 'l-early', [[T('04', '00:00'), 'paused', null, { mode: 'hand-over' }], [T('04', '02:00'), 'resumed', null, {}]])
+  done(h2, 'l-early')
+  assert.equal(ledgerCli(h2, LSINCE, LUNTIL).row.other['hand-over'] ?? 0, 0, 'a hand-over pause before since adds nothing')
+})
+
 test('L1 controls (p36-7): the hold-heat stretch re-marked hold-quota (the quota hold) moves its 1 h from load to quota-bound', (t) => {
   const h = setup(t)
   fixture(h, { 'l-caps': FIXTURE['l-caps'].map((e) => (e[1] === 'idle-slots' && e[3].reason === 'hold-heat' ? [e[0], e[1], e[2], idle('hold-quota')] : e)) })

@@ -80,6 +80,9 @@
 #           chain with the take-over prompt (P36-15); WL11 a parallel rollout in a surface wait (P41-3); WL12 what it
 #           reads after a begin wait (P41-3): a successor of a started hand-over still off the list, its place counted;
 #           WL15 LEG_LEASE_LAPSE checked at load (RR_NAMES)
+#   LH1-LH4 a Lead hand-over (p55-5, ADR 0085 d5): `waiting`'s `leads` row (and what it never lists), `needs-you`'s
+#           hand-over item (a manual one at once, a listed or drained one at 45 min), a fresh lead's entry that opens it
+#           (the handing session's never does), and the state line `handing over since`, its Project root kept
 #   NY1-NY12 `needs-you` (p48-1): every open needs-you item as one list: each gate kind verbatim, a spend gate the
 #           standing approval signs never listed (its limit and month line read as approve-gates --standing reads them),
 #           a gate-pending task with no gate listed as one item (fail closed), a set-aside only a person moves on (a
@@ -2957,7 +2960,7 @@ capf 4
 wl
 ok "$rc|$(wj '[w["slug"] for w in d["waiting"]]')" "0|['wf', 'wb', 'wa']" "WL1: stamped chains with no Leg wait in order_key's order (one that has begun, then estate rank 1, 2)"
 ok "$(wj '[w["rank"] for w in d["waiting"]]')|$(wj '[w["held_by"] for w in d["waiting"]]')" "[1, 2, 3]|[None, None, None]" "WL1: … each its place on the list, none held"
-ok "$(wj 'list(d)')" "['room', 'running', 'cap', 'waiting', 'next']" "WL1: … the JSON's keys, in order"
+ok "$(wj 'list(d)')" "['room', 'running', 'cap', 'waiting', 'next', 'leads']" "WL1: … the JSON's keys, in order"
 ok "$(wj 'd["running"]')|$(wj 'd["cap"]')|$(wj 'd["room"]')" "2|{'n': 4, 'by': 'capacity', 'why': None}|2" \
   "WL1: an open Leg and a started hand-over each hold a place: Capacity 4, 2 running, room 2"
 ok "$(wj 'd["next"]')" "wf" "WL1: … and next is the first chain on the list"
@@ -3619,6 +3622,74 @@ ok "$(rows)" "$(printf '%s\n%s' \
 ok "$(nyj 'd["items"][0]["detail"]')" "python3 -B $RR felt-check --task u1 --tasks-dir $T --passed|--failed \"<what you saw>\"" \
   "NY14: … its detail is the exact command: this tree's reconcile-rollout.py, the tasks dir read"
 ok "$(nyj 'd["items"][0]["project"]')" "Demo" "NY14: … with its project"
+
+# ── LH1-LH4 (p55-5, ADR 0085 d5): a Lead hand-over: `waiting`'s `leads` row, `needs-you`'s hand-over item, the state
+# line and the Project root it keeps. Every state goes through the engine's own writers: next at a planted count of 2
+# drains and stamps paused:, stamp-start --hand-over lists it, hand-over --manual hands it over off the Stage.
+scen lh1
+HN=2026-11-08T09:00:00Z
+# handover <slug> <session> [listed|manual|drained] [--gated]: a parallel rollout of one open task, handed over by <session>
+handover() {
+  local ro=$1 sid=$2 how=${3:-listed}; shift 3 2>/dev/null || shift $#
+  mkro "$ro.md" "$R" "$DEMO"; mkt "$ro-t.md" "$ro" open "$DEMO"
+  mkdir -p "$EH/.config/thread/compactions/$ro"; printf '{"version": 1, "count": 2, "told": 2}\n' > "$EH/.config/thread/compactions/$ro/$sid.json"
+  HOME="$EH" CLAUDE_CODE_SESSION_ID=$sid python3 "$RR" record-entry --rollout "$T/$ro.md" --by stage --now 2026-11-08T08:00:00Z >/dev/null
+  HOME="$EH" CLAUDE_CODE_SESSION_ID=$sid python3 "$RR" next --rollout "$T/$ro.md" --tasks-dir "$T" --running "" --now "$HN" >/dev/null 2>&1
+  case $how in
+    listed) python3 "$RR" stamp-start --hand-over --rollout "$T/$ro.md" --tasks-dir "$T" --now 2026-11-08T09:01:00Z "$@" >/dev/null ;;
+    manual) python3 "$RR" hand-over --manual --rollout "$T/$ro.md" --tasks-dir "$T" --now 2026-11-08T09:01:00Z "$@" >/dev/null ;;
+  esac
+}
+entry() { HOME="$EH" CLAUDE_CODE_SESSION_ID=$2 python3 "$RR" record-entry --rollout "$T/$1.md" --by "${3:-stage}" --now 2026-11-08T09:30:00Z >/dev/null; }
+handover ro-h s-a listed
+wl
+ok "$rc|$(wj 'list(d)')" "0|['room', 'running', 'cap', 'waiting', 'next', 'leads']" "LH1: waiting's keys: leads after next"
+ok "$(wj 'd["leads"]')" "[{'slug': 'ro-h', 'cwd': '$R', 'title': 'Lead hand-over: ro-h', 'prompt': '/thread:execute [[ro-h]]', 'harness': 'claude', 'since': '2026-11-08T09:00+00:00'}]" \
+  "LH1: a listed hand-over is a leads row: its Project root, title, prompt, harness and paused:"
+with=$(wj '{k: v for k, v in d.items() if k != "leads"}')
+mkdir -p "$S/aside"; mv "$T/ro-h.md" "$S/aside/"
+wl
+ok "$(wj '{k: v for k, v in d.items() if k != "leads"}')|$(wj 'd["leads"]')" "$with|[]" "LH1: room, running, cap, waiting and next equal the same vault without it"
+mv "$S/aside/ro-h.md" "$T/"
+for v in "paused_for -|his pause" "paused_for sign-off|a sign-off pause" "paused_for catch-up|a catch-up" "status done|a done note" \
+         'superseded_by "[[ro-x]]"|a superseded note'; do
+  kv=${v%%|*}; k=${kv%% *}; val=${kv#* }; cp "$T/ro-h.md" "$S/ro-h.keep"
+  fmset ro-h.md "$k" "$val"; wl
+  ok "$(wj 'd["leads"]')" "[]" "LH1: not listed under ${v#*|}"
+  cp "$S/ro-h.keep" "$T/ro-h.md"
+done
+handover ro-m s-m manual --gated
+handover ro-d s-d drained
+wl
+ok "$(wj '[r["slug"] for r in d["leads"]]')" "['ro-h']" "LH1: a manual hand-over and a drained, unhanded one are no leads row"
+entry ro-h s-a heartbeat
+wl
+ok "$(wj '[r["slug"] for r in d["leads"]]')" "['ro-h']" "LH1: the handing session's own entry leaves it listed"
+# LH2: needs-you's hand-over item: a manual one at once; a listed one and a drained one once paused: is 45 min old
+nyt() { HOME="$EH" python3 "$CHECK" needs-you --tasks-dir "$T" --now "$1" --gh-bin "$S/bin/gh" > "$S.out" 2> "$S.err"; rc=$?; out=$(cat "$S.out"); }
+hrows() { nyj '"\n".join("|".join(str(i[k]) for k in ("kind","source","rollout","task","act","detail")) for i in d["items"] if i["source"] == "hand-over")'; }
+nyt 2026-11-08T09:44:00Z
+ok "$rc|$(hrows)" "0|hands-on|hand-over|ro-m|None|start a fresh lead in a new session: /thread:execute [[ro-m]] --gated|manual" \
+  "LH2: at 44 min only the manual one is listed, at once, its act carrying --gated"
+ok "$(nyj '[i["text"] for i in d["items"] if i["source"] == "hand-over"]')" "['lead handed over at 2026-11-08T09:00+00:00 (compactions): no fresh lead yet']" \
+  "LH2: … its text the paused: stamp and the cause"
+nyt 2026-11-08T09:46:00Z
+ok "$(hrows)" "$(printf '%s\n%s\n%s' \
+  "hands-on|hand-over|ro-d|None|start a fresh lead in a new session: /thread:execute [[ro-d]]|drained, never handed" \
+  "hands-on|hand-over|ro-h|None|start a fresh lead in a new session: /thread:execute [[ro-h]]|listed on the Waiting list, unopened for 46 min" \
+  "hands-on|hand-over|ro-m|None|start a fresh lead in a new session: /thread:execute [[ro-m]] --gated|manual")" \
+  "LH2: at 46 min the listed and the drained ones too, in rollout order"
+ok "$(nyj 'd["count"]')" 3 "LH2: … counted"
+# LH3: a fresh lead's entry opens it: off the leads and the needs-you list; the handing session's (LH1) did not
+entry ro-h s-b
+wl
+ok "$(wj 'd["leads"]')" "[]" "LH3: a fresh lead's entry drops the leads row"
+nyt 2026-11-08T09:46:00Z
+ok "$(nyj '[i["rollout"] for i in d["items"] if i["source"] == "hand-over"]')" "['ro-d', 'ro-m']" "LH3: … and its needs-you item"
+# LH4: the state line and the Project root it keeps: a serial chain on its root is refused, naming it handing over
+chs --surface "repo:$R" --project Other
+ok "$rc" 3 "LH4: a serial check on a handing-over rollout's Project root refuses (it keeps its root)"
+has "$err" "[[ro-d]] (Demo; handing over since 2026-11-08T09:00+00:00) is an unfinished parallel rollout" "LH4: … its state line handing over since its paused:"
 
 echo
 if [ "$fail" -eq 0 ]; then echo "unfinished-rollout: ALL PASS"; else echo "unfinished-rollout: FAILED"; fi

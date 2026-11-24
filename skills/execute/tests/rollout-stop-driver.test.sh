@@ -221,6 +221,22 @@ mkro hq
 python3 "$RRPY" emit --rollout hq --kind paused --json '{"mode":"soft"}' --ts 2026-10-26T10:30:00Z
 run_driver_msg "$(halted hq "paused at user request")" "$T" s15
 [ "$(halts hq)" = 0 ] && ok "halt record: none while the record's pause is open (no stamp)" || fail "halt record: a halt under an open record pause"
+# p55-5: a Lead hand-over's closing lines (execute § 4.5 step 5's `hand-over` arm). Off the Stage its halted line under
+# the hand-over's paused: records no halt; its arm's waiting line idles; on the Stage its done line is let through and
+# clears the driver state (STATUS_RE unedited: all three already match).
+mkro hh "paused: 2026-10-26T10:30+00:00" "paused_for: hand-over"
+run_driver_msg "ROLLOUT-STATUS: hh merged=0/2 running=0 state=halted reason=\"lead hand-over: start a fresh lead with /thread:execute [[hh]]\"" "$T" s15
+[ -z "$OUT" ] && [ "$(halts hh)" = 0 ] && ok "hand-over: the manual halted line under its paused: is let through, no halt recorded" \
+  || fail "hand-over: the manual halted line: out=[$OUT] halts=$(halts hh)"
+run_driver_msg 'ROLLOUT-STATUS: hh merged=0/2 running=1 state=waiting reason="lead hand-over: 1 still in flight"' "$T" s16
+[ -z "$OUT" ] && ok "hand-over: the arm's waiting line idles" || fail "hand-over: the waiting line: $OUT"
+run_driver_msg 'ROLLOUT-STATUS: hh merged=0/2 running=1 state=running' "$T" s16
+run_driver_msg 'ROLLOUT-STATUS: hh merged=0/2 running=0 state=done reason="handed over: listed on the Waiting list for a fresh lead"' "$T" s16
+python3 -c "
+import json,sys
+d=json.load(open('$ROLLOUT_DRIVER_STATE_DIR/s16.json'))
+sys.exit(1 if 'hh' in d else 0)
+" && [ -z "$OUT" ] && ok "hand-over: the listed done line is let through and clears the driver state" || fail "hand-over: the done line: out=[$OUT] state=$(cat "$ROLLOUT_DRIVER_STATE_DIR/s16.json")"
 mkro hs "shape: serial"
 run_driver_msg "ROLLOUT-STATUS: hs merged=1/3 running=0 state=halted reason=\"leg stopped: the chain's next task is blocked\"" "$T" s15
 [ "$(halts hs)" = 0 ] && ok "halt record: none for a serial rollout's Leg" || fail "halt record: a Leg's halt was recorded"

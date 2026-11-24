@@ -70,7 +70,22 @@ Subcommands:
               and, once drained, `catch-up: moving`: drained, it keeps `paused_for`, records `paused` mode catch-up
               and halts "catch-up"; past CATCH_UP_DRAIN_MINUTES since its open line with work still running, it first
               removes both stamps, appends the `bound` line, records `catch-up` outcome bound and goes on unpaused in
-              the same call (in memory only on --dry-run). `startUnattended` reports the rollout start stamp
+              the same call (in memory only on --dry-run). A Lead hand-over (`paused_for: hand-over`, p55-5;
+              `hand-over` below) starts here and is the same drain: off --dry-run, at the caller's count of
+              LEAD_HANDOVER_COMPACTIONS or a `lead-error` line of its session that hands over (_hand_over_cause), with
+              no pause of any kind standing and an unlanded in-N row, it stamps `pause_requested` and `paused_for:
+              hand-over`, appends the `draining` line and records `hand-over` outcome drain; its hold reasons read
+              `hand-over: draining (a Lead hand-over)`, then `hand-over: waiting for a fresh lead`; drained, it keeps
+              `paused_for`, records `paused` mode hand-over and halts "hand-over". Under cause lead-error an awaiting
+              row and an `integrating` row whose lane the Run record shows free are held (`handOver.held`, in neither
+              `awaitingIntegration` nor `integrating`). Past HAND_OVER_DRAIN_MINUTES since its `draining` line with work
+              in flight (a live slug, the record's lane holder, or before `paused:` a row the drain waits on) it stamps
+              `paused:`, appends one `bound after` line, records `hand-over` outcome bound and a hard stop
+              (_record_hard_stop) and halts "hand-over" at once. A drain another session started (both sessions valid
+              and different) is lifted (`lifted (another session leads)`, outcome not-handed) and the call goes on as
+              the caller's own; one with every in-N row merged is lifted too (`lifted (nothing left to hand)`). None of
+              it on --dry-run. While the hand-over's `paused:` stands the start stamp is kept (startCleared false).
+              `handOver` follows `compactions` (_hand_over_output). `startUnattended` reports the rollout start stamp
               (`start: unattended`, vault grammar § Rollout start stamp) and every call off --dry-run that gets past
               its refusals removes it (`startCleared`), so a running rollout clears it and the Chorus Stage never
               starts a second lead; a refusal leaves it. `compactions` ({session, count, file}; p55-4, ADR 0085 d4)
@@ -108,7 +123,9 @@ Subcommands:
               and "regenerate", set whenever an approved queue's verdict regenerates and no git-env trip, `mainRed`
               entry or `laneHold` entry stands (each halts first, ADR 0046), ahead of every other verdict, "empty"
               included. So the order is superseded > git-env (whole) > race (main red) > regenerate > git-env (lane)
-              > race (lane) > lane > paused > empty > complete/done > held > awaiting-sign-off > stuck. `git-env`
+              > race (lane) > lane > paused > empty > complete/done > held > awaiting-sign-off > stuck; a Lead
+              hand-over's `paused:` (p55-5) reads "hand-over" right after race (main red), ahead of regenerate and
+              every other verdict, whatever runs or holds the lane. `git-env`
               (lane), `race`, `lane`, `stuck` and a task-scope `held` are the lead's to act on only after execute
               § 4.5 step 1.5's wait clauses, because `next` cannot see step 1.2's cool-downs or its cap-held
               revises; a `pause_requested` behind a lane verdict never drains while the note keeps `integrating:`.
@@ -238,7 +255,9 @@ Subcommands:
               `--start resume` prints nothing (a resume re-passes its call's own args).
 
   mark-integrating Stamp `integrating: <time>` on a `review` note with a `pr:` as its Integration begins
-              (the first wins): the durable signal /thread:status reads. The origin lane (ADR 0064 d5): one
+              (the first wins): the durable signal /thread:status reads. Under a Lead hand-over of cause lead-error
+              (p55-5) a task that does not hold the Run record's lane is refused: one `HAND-OVER:` line on stderr,
+              nothing written, exit 5 (_hand_over_shuts_lane, cmd_mark_integrating's docstring). The origin lane (ADR 0064 d5): one
               Integration at a time per GitHub origin across rollouts, passed in turn. Outside any lock it reads each
               note's rollout, its Project root and that root's origin (ORIGIN_SLUG_RE, owner/name lower-cased, GIT_*
               scrubbed, memoised), and each candidate's; then, under the machine-wide ORIGIN_LANE_LOCK (outermost),
@@ -556,8 +575,11 @@ Subcommands:
               a stop its own launch caused, which it redoes with no set-aside and no retry spent. One `lead-error` line
               {site, n, bound, over?, session?, call?, evidence?}: n is this lead session's count (--session, else
               CLAUDE_CODE_SESSION_ID; none on both sides counts together) of the task's lines, or of the rollout's
-              taskless ones with no --tasks, plus one; `over: true` from LEAD_ERROR_BOUND (3) on, where the lead takes
-              the site's old route instead of a redo. Prints one JSON line {rollout, task, site, n, bound, over, total}
+              taskless ones with no --tasks, plus one; `over: true` from LEAD_ERROR_BOUND (3) on, with `handOver` (p55-5):
+              true while the task's total over every session (this line included) is below LEAD_ERROR_HANDOVER_TOTAL
+              (6), where the lead hands over (`next` reads the line as the cause, `hand-over` below), false from it on,
+              where the lead takes the site's old route instead of a redo. Prints one JSON line {rollout, task, site, n,
+              bound, over, handOver, total}
               (total: every session's count, this one included). Site merge-step is no choice: reconcile writes it
               (below), so a lead cannot name its own set-aside away. Exit 1, one ERROR line and nothing written: no
               rollout note, a Run record that cannot be read, or a line the writer did not write (the lead then takes
@@ -584,7 +606,8 @@ Subcommands:
               record does not hold yet, as inferred `stopped` lines, then exactly one `lead-entry` {by,
               session?, stop?} (cmd_record_entry holds the rule: the gap stop, first match a standing pause (`stop:
               catch-up` when it is an Engine catch-up's, by the note's `paused_for` or the open `paused` line's mode;
-              `--by catch-up` is the lead's own self-Reinstate at one, p54-14), the open
+              `--by catch-up` is the lead's own self-Reinstate at one, p54-14; `stop: hand-over` when it is a Lead
+              hand-over's the same way, p55-5: the fresh lead's Reinstate), the open
               stop, --cause, a boot after the latest live line, a session change but on --by heartbeat, --by
               watchdog; every boot or sleep before it written first). --session defaults to CLAUDE_CODE_SESSION_ID.
               The Mac's evidence is machine_times: kern.boottime, kern.waketime, and `pmset -g log` at most once per
@@ -893,7 +916,13 @@ Subcommands:
               once it runs; it superseded [[<prior>]] when <pr> merged`. Refuses (exit 1, one `ERROR: stamp-start:`
               line, nothing written): not found, incomplete (so it runs after step 7.5, which closes the prior),
               closed, superseded, paused or pause-requested, not never started, a valued `started_unattended:`, or no
-              `supersedes:`.
+              `supersedes:`. `--hand-over [--gated] [--now T]` (p55-5, execute § 4.5 step 5's `hand-over` arm, ahead of
+              every refusal above): a Lead hand-over's listing on the Chorus Stage (_hand_over_finish): under the
+              hand-over's `paused:` it stamps `start: unattended`, appends `hand-over: listed[ (gated)]`, records
+              `hand-over` outcome handed (listed true) and prints `ROLLOUT-STATUS: <slug> merged=<K>/<N> running=0
+              state=done reason="handed over: listed on the Waiting list for a fresh lead"`; refused (exit 1) for a
+              serial, closed or superseded note, one with no hand-over `paused:` and one with no open hand-over; inside
+              the open hand-over the first finish logged wins (a repeat writes nothing and prints its lines again).
               `--backlog` (ADR 0071): the Backlog orient's decided start (skills/orient/backlog.md § B8) on a parallel
               note its forks wrote. It drops only the `supersedes:` refusal and adds one: a rollout-scope `hold_until`
               (readable or not) is refused, `… carries hold_until <pr>: a held queue starts on Lachy's word`. Its undo
@@ -1055,7 +1084,10 @@ Subcommands:
               it writes nothing, prints `STILL-AWAITING: [[<slug>]]: <gate>` for each pending gate and exits 3, so
               a reinstate with a gate still unsigned never re-runs the sign-off form. Every other pause clears as
               before. First, the backstop (p54-14): an open `## Catch-up log` line is closed `not moved at <g12>:
-              cleared at a Reinstate`, so no later adopt takes the catch-up branch.
+              cleared at a Reinstate`, so no later adopt takes the catch-up branch. A Lead hand-over (p55-5,
+              `paused_for: hand-over` with either stamp): the handing session (the open hand-over's `session`,
+              _same_session) is refused first, nothing written, one `HAND-OVER-OWED: [[<slug>]]: …` line, exit 4; any
+              other caller clears, appending `hand-over: taken by session <id | none>`. --now stamps that line.
 
   await-sign-off  `--rollout <note>` (ADR 0034; execute § 4.5 step 5's sign-off form): the rollout finished
               everything else and only gates wait on Lachy, so it stays open, paused. Read-only check first: the
@@ -1289,7 +1321,11 @@ Subcommands:
                  `paused` even beside an unacked Lane hold: status's LANE HOLD headline carries that ack). Read before
                  both, an Engine catch-up's `paused:` (`paused_for: catch-up`, p54-14: the lead's own turn makes its
                  move) is judged by silence at stall-after, else waiting `catch-up` (`an Engine catch-up: moving onto
-                 the Green tip since <stamp>`).
+                 the Green tip since <stamp>`). Read before all of these, a Lead hand-over's `paused:` (p55-5,
+                 _handing_over with `paused:`): not finished, or finished and opened by a fresh lead (_hand_over_opened),
+                 it is a lead's own next turn, judged by silence at stall-after, else waiting `hand-over`; listed and
+                 unopened, waiting `hand-over` with `until` its `paused:` + HAND_OVER_UNOPENED_MINUTES, then waiting
+                 `you`; manual and unopened, waiting `you` at once. Its drain (no `paused:` yet) reads as work below.
               4. A room stop under its bound (_room_stop_stands): waiting `room-stop`, `until` its stamp + 6 h.
               5. Never started (never_started) and no `lead-entry`: waiting `not-started`.
               6. `next --dry-run` in-process through _parser() (no --running: every in_progress note is live), its
@@ -1338,8 +1374,9 @@ Subcommands:
                   120), else the silence test at 120: regenerate is judged before the stall-after test and in its
                   place, whatever else is in W (a running task included), because the Approved-queue route runs as one
                   foreground turn with no life sign; then the silence test at stall-after; otherwise moving.
-              12. With no W: (a) `next`'s `halt: catch-up` (an Engine catch-up drained, p54-14: the lead's next turn
-                  moves it) is judged by silence at stall-after, else waiting `catch-up`; an open ("merge", task) hold
+              12. With no W: (a) `next`'s `halt: hand-over` (a Lead hand-over drained, p55-5: the lead's next turn
+                  finishes it) and `halt: catch-up` (an Engine catch-up drained, p54-14: the lead's next turn
+                  moves it) are judged by silence at stall-after, else waiting `hand-over` or `catch-up`; an open ("merge", task) hold
                   on an integrating task, released only by the lead's own
                   tick, is judged by silence at stall-after, else waiting `merge-hold`; (a′) a `surfaceWait` whose `held`
                   is non-empty with `halt` null (P41-3: the lead's heartbeat re-runs the Surface re-check at each tick,
@@ -1353,7 +1390,8 @@ Subcommands:
                   with H's reason, else `next`'s verdict worded as execute § 7 words it.
               Which waits silence judges (SILENCE_JUDGED, bound to status's list by a contract test; moving_verdict
               returns each through by_silence, which refuses a cause the list leaves out): `merge-hold`,
-              `regenerating`, `surface-wait`, `leg-wait` (the Leg lease's silence, 1a) and `catch-up` (3 and 12a), and
+              `regenerating`, `surface-wait`, `leg-wait` (the Leg lease's silence, 1a), `catch-up` (3 and 12a) and
+              `hand-over` (3 and 12a, p55-5), and
               every reading with work; `room-stop` by its 6 h bound; the waits of 12(b) by their
               own condition; never `paused`, `sign-off`, `not-started` or `you`. A wait the verdict fails to name
               changes only `waiting`'s cause, never moving or stalled.
@@ -1377,6 +1415,26 @@ Subcommands:
               refuses it; carry refuses it as --from; the `regenerate` trigger gate reads its `paused:` as running and
               the `when: paused` gate as not paused; clear-pause closes its open line; the status JSON's `pausedFor`
               reads `catch-up`.
+
+  hand-over   `--rollout <note> (--manual [--gated] | --abort --why W) [--tasks-dir D] [--now ISO] [--dry-run]` (p55-5;
+              ADR 0085 d3, d5, d6 and d9; execute § 4.5 *Lead hand-over*): a Lead hand-over's own writes beside `next`'s
+              and `stamp-start --hand-over`'s. `--manual`: the finish off the Stage (_hand_over_finish): under the
+              hand-over's `paused:` it appends `hand-over: manual[ (gated)]`, stamps nothing, records `hand-over`
+              outcome handed (listed false) and prints the needs-you line `[[<slug>]] lead hand-over: start a fresh lead
+              in a new session with /thread:execute [[<slug>]]` and `ROLLOUT-STATUS: <slug> merged=<K>/<N> running=0
+              state=halted reason="lead hand-over: start a fresh lead with /thread:execute [[<slug>]]"`, with `--gated`
+              appended to the command when given; its refusals and its first-finish rule are stamp-start --hand-over's.
+              `--abort --why W` (his pause takes over, execute § Pausing; cmd_hand_over holds the rule). Guarded (not
+              GUARD_EXEMPT). Exits: 0, 1 a refusal or an unreadable note, 2 usage and the guard.
+              The open hand-over and its identity: _hand_over_open reads the `## Pause log` from its last `draining`
+              line (its grammar, the one copy, above HAND_OVER_DRAINING_RE); two sessions are the same only when both
+              are valid ids and equal (_same_session). The readings of its stamps elsewhere (_handing_over:
+              `paused_for: hand-over` with `pause_requested` or `paused:`; with neither it is dangling and none):
+              `next` drains, bounds, lifts and halts it (above); `moving` judges it (step 3 and 12a); record-entry's gap
+              stop is `hand-over`; join never refuses it; carry refuses it as --from; the trigger gates read its
+              `paused:` as running and not paused; `catch-up` names it; clear-pause refuses the handing session (exit
+              4); `mark-integrating` refuses a task that does not hold the Run record's lane under cause lead-error
+              (exit 5, `HAND-OVER:`); the status JSON's `pausedFor` reads `hand-over`.
 
   master-runs  `--rollout <note> [--tasks-dir D] [--gh-bin gh] [--now ISO] [--dry-run]` (p54-7; ADR 0084 Decided for you
               3, 11 and 13; execute § 4.5 *Master's full suite*): read master's `full suite` runs, make the newest red run's
@@ -1634,7 +1692,8 @@ integrate call's reconciled `integrated` row and the merge; a hand-back restamps
                     a merge-hold close and lane-freed release=halt, and none of this list's other events; at the
                     bound, the line then the row's own set-aside events; a replay none, or a cut first pass's
                     lane-freed when none followed its line.
-  lead-error        (p55-3) lead-error {site, n, bound, over?, session?, call?, evidence?}, unless --dry-run.
+  lead-error        (p55-3) lead-error {site, n, bound, over?, handOver? (p55-5, beside over), session?, call?, evidence?},
+                    unless --dry-run.
   hand-back         (p21-2) race-decided {mark, by=hand-back} when a `RACE decided:` line lifted the task's hold
                     (_record_decision: once per task per record); then handed-back {via, arm}: via, first match,
                     descope (a `descope_armed:` stamp standing, read before the transition), answer (--answer, a live
@@ -1672,7 +1731,11 @@ integrate call's reconciled `integrated` row and the merge; a hand-back restamps
                     note, a merge-hold close and lane-freed halt for a lane holder; then carried {from, to}
                     (the writer appends it to both files).
   next              (not --dry-run) paused mode=soft when it stamps `paused:` (mode=catch-up under an Engine catch-up,
-                    and catch-up {from, fixes, release?, drainMinutes, shape, outcome: bound} at its bound);
+                    and catch-up {from, fixes, release?, drainMinutes, shape, outcome: bound} at its bound; mode=hand-over
+                    under a Lead hand-over, p55-5, whose own lines are hand-over {outcome: drain, cause, session?, count}
+                    at its start, hand-over {outcome: bound, cause, session?, drainMinutes} at its bound, with paused
+                    mode=hand-over when that stamps `paused:` and slot-freed outcome=stopped per in_progress task and
+                    lane-freed release=halt, and hand-over {outcome: not-handed, why} when it lifts a drain);
                     idle-slots {reason, free,
                     settings} when free = ceiling - (slotsInUse + starts) > 0 and halt is not complete,
                     done or empty (free stays the ceiling's, never the Trickle's, the Away cap's or the Heat
@@ -1687,7 +1750,7 @@ integrate call's reconciled `integrated` row and the merge; a hand-back restamps
                     stands and no stop is open, and the Mac's last wake is later than the last lead-entry and the
                     latest recorded wake.
   clear-pause       when it removes `paused:`: paused mode=hard at the stamp when the record has no open pause
-                    (a hard pause whose record-pause never ran), then resumed. Removing only
+                    (a hard pause whose record-pause never ran; mode=hand-over under a Lead hand-over), then resumed. Removing only
                     pause_requested records nothing; a refusal (STILL-AWAITING) records nothing.
   await-sign-off    paused mode=sign-off when it stamps, unless the record shows a pause open.
   completion-verify (--run) completion-verify {result, rc, sha, attempt, log, followup?}: one per recorded run, a
@@ -1695,6 +1758,10 @@ integrate call's reconciled `integrated` row and the merge; a hand-back restamps
   catch-up          (p54-14) --abort: resumed when it removes the stamps and the record's open paused line is the
                     catch-up's, then, with an open line, catch-up {from, fixes, release?, shape, outcome: not-moved,
                     why}; engine-snapshot.py adopt writes the moved line.
+  stamp-start       (p55-5) --hand-over: hand-over {outcome: handed, listed: true, session?, gated?} when it lists.
+  hand-over         (p55-5) --manual: hand-over {outcome: handed, listed: false, session?, gated?}; --abort: resumed when
+                    it removes the stamps and the record's open paused line is the hand-over's, then, with an open
+                    hand-over, hand-over {outcome: not-handed, why}.
   master-runs       (p54-7) master-run {repo, outcome, sha, at, …} per decided key, in the reserved master-runs.jsonl
                     (task null; the rollout a provenance stamp), after its task and its join; nothing on --dry-run.
   prove             none: its writes are proof stamps and landings the next queue read sees; mark-done's landing events
@@ -1744,7 +1811,8 @@ Integration conflict, `integration: conflict unresolved in …`), integration-re
 else integration-set-aside; else blocked.
 idle-slots reason, first match ("queued" is queued and not starting this call): a whole-rollout gitEnvHold entry (a
 bare checkout; a lane trip holds no Slot) -> hold-git-env; mainRed (a RACE revert that did not land) -> hold-race;
-paused or pauseRequested under `paused_for: catch-up` (an Engine catch-up's drain, p54-14) -> catch-up-drain; paused or
+paused or pauseRequested under `paused_for: hand-over` (a Lead hand-over's drain, p55-5) -> hand-over-drain; paused or
+pauseRequested under `paused_for: catch-up` (an Engine catch-up's drain, p54-14) -> catch-up-drain; paused or
 pauseRequested -> pause-drain; any `surface wait:` hold (a surface wait, P41-3: `next` launches nothing until
 the rollout's own Surface re-check passes) -> hold-surface; any `heat:` hold (the Heat hold; only ever a queued row) ->
 hold-heat; any
@@ -2302,6 +2370,9 @@ from any root, unguarded. `due` writes nothing; `fire` writes only the `fired:` 
 `catch-up` (p54-14) is guarded: it runs from the rollout's own snapshot, and its `paused_for: catch-up` and
 `## Catch-up log` (the log's grammar is engine-snapshot.py's header) are cross-version state that only an engine
 carrying the Engine catch-up writes and reads (engine-snapshot.md § Cross-version state).
+`hand-over` (p55-5) is guarded too, as is `stamp-start --hand-over`: both run from the rollout's own snapshot, whose
+`next` wrote the `paused_for: hand-over` and the `## Pause log` lines they read (engine-snapshot.md § Cross-version
+state).
 """
 
 import argparse
@@ -2399,6 +2470,17 @@ CATCH_UP_SECTION = "## Catch-up log"
 # (lane p90 60 min over 925 holdings) can push a drain past it: it then lands on the old snapshot through the bound
 # path, and its catch-up is taken at the next moment with nothing running.
 CATCH_UP_DRAIN_MINUTES = 160
+# The Lead hand-over (ADR 0085 d3, d5, d6 and d9, p55-5; the module docstring's `hand-over`): at its second compaction
+# (LEAD_HANDOVER_COMPACTIONS, named in execute SKILL.md, no setting) a parallel rollout's lead drains, as a soft pause
+# marked `paused_for: hand-over` does, and hands the queue to a fresh lead. Its drain's bound is the catch-up's number on
+# the catch-up's basis; HAND_OVER_UNOPENED_MINUTES is the lease lapse `moving`'s stall-after is built on (LEASE_LAPSE,
+# 45 min), after which a handed-over note no fresh lead opened is a needs-you item. Every line it writes on the
+# `## Pause log` opens `- <stamp> hand-over: ` and holds no wikilink (_hand_over_open, the grammar's one reader).
+HAND_OVER = "hand-over"
+LEAD_HANDOVER_COMPACTIONS = 2
+HAND_OVER_DRAIN_MINUTES = 160
+HAND_OVER_UNOPENED_MINUTES = 45
+HAND_OVER_LINE_RE = re.compile(r"^- (?P<ts>\S+) hand-over: (?P<rest>.+)$")
 PAUSE_LOG_SECTION = "## Pause log"
 # The rollout start stamp (p23-6; skills/_shared/vault-grammar.md § Rollout start stamp): the execute handoff's
 # Start when ready writes a top-level `start: unattended`, the Chorus Stage reads it (the first `start:` line, scalar
@@ -7613,7 +7695,7 @@ def _superseded_output(stem, successor, progress) -> dict:
             "integrating": [], "setAside": [], "raceHold": [], "gitEnvHold": [], "laneHold": [], "mainRed": [],
             "holdUntil": [], "onMerge": None, "supersededBy": successor, "paused": None, "pauseRequested": False,
             "pausedNow": False, "surfaceWait": None, "speedHoldReleased": [], "startUnattended": False,
-            "startCleared": False, "compactions": None,
+            "startCleared": False, "compactions": None, "handOver": None,
             "halt": "superseded",
             "awaitingSignOff": [], "progress": progress}
 
@@ -7908,6 +7990,97 @@ def cmd_next(args) -> int:
             stalled = [r for r in in_progress if r["slug"].lower() not in sw_live]
         sw_awaiting, awaiting = awaiting, []
 
+    # The Lead hand-over (p55-5, ADR 0085 d3, d5, d6 and d9; the module docstring's `hand-over`), before the pause read
+    # below: the lift, the start, the lead-error split and the bound. --dry-run never stamps and never lifts.
+    ho_stem = rollout_path.stem
+    ho_caller = os.environ.get("CLAUDE_CODE_SESSION_ID") or None
+    compactions = _next_compactions(ho_stem)
+    ho = _hand_over_open(rollout_note)
+    handing = _handing_over(rollout_note)
+    # The Run record, parsed only when a hand-over stands (its calls in flight) or a Lead error could be its cause: a
+    # record with no `"handOver":true` line holds no such cause, and the count alone decides at LEAD_HANDOVER_COMPACTIONS.
+    ho_lines = _record_read(ho_stem) if handing or (compactions["count"] < LEAD_HANDOVER_COMPACTIONS
+                                                     and _record_mentions(ho_stem, b'"handOver":true')) else []
+    ho_unlanded = [r for r in rows if r["state"] not in OUTSIDE_N and r["state"] != "merged"]
+    ho_held, ho_bound_paused = [], False
+    # The lift (D8, D16): a drain (no `paused:` yet) that another session started, both sessions known, is lifted and
+    # this call goes on as the caller's own; so is one that ends with every in-N row merged (nothing left to hand). A
+    # null on either side never lifts: the drain runs to its `paused:` and its finish.
+    if handing and not _valued(rollout_note.get("paused")) and not args.dry_run:
+        lift = "nothing left to hand" if not ho_unlanded else \
+            "another session leads" if ho is not None and _session_ok(ho["session"]) and _session_ok(ho_caller) \
+            and ho["session"] != ho_caller else None
+        if lift:
+            rollout_note.remove("pause_requested")
+            rollout_note.remove(PAUSED_FOR_KEY)
+            rollout_note.append_line(PAUSE_LOG_SECTION, f"- {_stamp(now)} hand-over: lifted ({lift})")
+            rollout_note.save()
+            _event(ho_stem, HAND_OVER, None, {"outcome": "not-handed", "why": lift}, args)
+            handing, ho = False, None
+    # The start (D2, D16): the caller's count at LEAD_HANDOVER_COMPACTIONS, or a Lead error at its bound that hands over,
+    # with no pause of any kind standing and an unlanded in-N row to hand: the drain's stamps and its `draining` line in
+    # one save, then the Run record's `hand-over` drain line.
+    ho_cause = _hand_over_cause(compactions, ho_lines, ho_caller)
+    ho_paused_any = _valued(rollout_note.get("paused")) or _truthy_flag(rollout_note.get("pause_requested"))
+    if not handing and ho_cause and not ho_paused_any and ho_unlanded and not args.dry_run:
+        sess = ho_caller if _session_ok(ho_caller) else "none"
+        rollout_note.set("pause_requested", "true", after=("parallel_ceiling", "status"))
+        rollout_note.set(PAUSED_FOR_KEY, HAND_OVER, after=("pause_requested",))
+        rollout_note.append_line(PAUSE_LOG_SECTION, f"- {_stamp(now)} hand-over: draining ({ho_cause}; session {sess}; "
+                                                    f"count {compactions['count']})")
+        rollout_note.save()
+        ev = {"outcome": "drain", "cause": ho_cause, "count": compactions["count"]}
+        if _session_ok(ho_caller):
+            ev["session"] = ho_caller
+        _event(ho_stem, HAND_OVER, None, ev, args)
+        handing, ho = True, _hand_over_open(rollout_note)
+    # The lead-error split (D10): under cause lead-error what is in flight goes on to its end and nothing new begins: an
+    # `integrating` row the Run record's lane does not hold (a refused launch's leftover stamp) and every awaiting row are
+    # held, never in `integrating` or `awaitingIntegration`. An unreadable record keeps every `integrating` row in
+    # flight (fail closed to the bound).
+    if handing and ho is not None and ho["cause"] == "lead-error":
+        rec_ = _record_state(ho_stem)
+        keep = [r for r in integrating if rec_ is None or (rec_["lane"] or "") == r["slug"].lower()]
+        kept_ids = {id(r) for r in keep}
+        ho_held = sorted([r for r in integrating if id(r) not in kept_ids] + awaiting, key=_rank)
+        integrating, awaiting = keep, []
+    # The bound (D3): past HAND_OVER_DRAIN_MINUTES since the open `draining` line with work still in flight (a live
+    # slug, the Run record's lane holder, or, before `paused:`, a row the drain waits on): `paused:` stamped if it is not
+    # there, the `bound after` line (once per hand-over), the Run record's hand-over bound line, and a hard stop's record
+    # (_record_hard_stop). `halt` is then hand-over at once, with `stop` naming what the lead stops.
+    if handing and ho is not None and not ho["bound"] and not args.dry_run:
+        t0_ = _parse_ts(ho["since"])
+        if t0_ is not None and now - t0_ > timedelta(minutes=HAND_OVER_DRAIN_MINUTES):
+            rec_ = _record_state(ho_stem)
+            lane_ = rec_["lane"] if rec_ is not None else None
+            was_paused = _valued(rollout_note.get("paused"))
+            if live or lane_ or (not was_paused and (awaiting or integrating or race_held_lane)):
+                calls_ = {c["task"]: c for c in inflight_calls(ho_lines or [])}
+                by_slug = {r["slug"].lower(): r["slug"] for r in rows}
+
+                def item(slug):
+                    c = calls_.get(slug.lower())
+                    return f"{slug} ({c['runId']})" if c and c.get("runId") else slug
+                tasks_ = [item(r["slug"]) for r in sorted(live, key=_rank)]
+                lane_part = f"; lane {item(by_slug.get(lane_, lane_))}" \
+                    if lane_ and lane_ not in {r["slug"].lower() for r in live} else ""
+                mins = int((now - t0_).total_seconds() // 60)
+                if not was_paused:
+                    rollout_note.set("paused", _stamp(now), after=("pause_requested", "parallel_ceiling", "status"))
+                    rollout_note.remove("pause_requested")
+                rollout_note.append_line(PAUSE_LOG_SECTION, f"- {_stamp(now)} hand-over: bound after {mins} min: "
+                                                            f"stopping {', '.join(tasks_) or HAND_OVER_NO_TASK}{lane_part}")
+                rollout_note.save()
+                if not was_paused:
+                    _event(ho_stem, "paused", None, {"mode": HAND_OVER}, args)
+                    ho_bound_paused = True
+                ev = {"outcome": "bound", "cause": ho["cause"], "drainMinutes": mins}
+                if _session_ok(ho["session"]):
+                    ev["session"] = ho["session"]
+                _event(ho_stem, HAND_OVER, None, ev, args)
+                _record_hard_stop(ho_stem, rollout_path, tasks_dir, args, rec_)
+                ho, ho_lines = _hand_over_open(rollout_note), _record_read(ho_stem)
+
     # An Engine catch-up's drain (p54-14; the module docstring's `catch-up`): past CATCH_UP_DRAIN_MINUTES since its
     # open line with work still running, its stamps go and a `bound` line closes it, before the pause read below, so
     # the rollout goes on unpaused in this same call on its old snapshot (in memory only on --dry-run).
@@ -7934,7 +8107,7 @@ def cmd_next(args) -> int:
 
     paused = _scalar(rollout_note.get("paused")) or None
     pause_requested = _truthy_flag(rollout_note.get("pause_requested"))
-    paused_now = False
+    paused_now = ho_bound_paused   # the hand-over's bound stamped `paused:` in this call
     # The approved queue's verdict (p30-4; vault-grammar § Approved queue): a merged rollout hold on a note carrying
     # `on_merge:` releases as usual, or keeps standing to wait (an Integration in flight, a standing room stop), to
     # regenerate, or to wait on Lachy (an unreadable value). While it stands nothing new integrates either.
@@ -8127,9 +8300,13 @@ def cmd_next(args) -> int:
             rollout_note.remove("pause_requested")
             rollout_note.save(dry_run=args.dry_run)
             paused_now = True
-            # An Engine catch-up keeps its `paused_for: catch-up` (the lead's own move reads it, § 1.5).
-            _event(rollout_path.stem, "paused", None, {"mode": CATCH_UP if catching else "soft"}, args)
-        if catching:
+            # An Engine catch-up keeps its `paused_for: catch-up` (the lead's own move reads it, § 1.5), and a Lead
+            # hand-over its `paused_for: hand-over` (its finish and the fresh lead's Reinstate read it, p55-5).
+            _event(rollout_path.stem, "paused", None,
+                   {"mode": HAND_OVER if handing else CATCH_UP if catching else "soft"}, args)
+        if handing:
+            reason = "hand-over: waiting for a fresh lead" if paused else "hand-over: draining (a Lead hand-over)"
+        elif catching:
             reason = "catch-up: moving" if paused else "catch-up: draining (an Engine catch-up)"
         else:
             reason = "paused" if paused else "pause requested: draining"
@@ -8317,7 +8494,10 @@ def cmd_next(args) -> int:
         used = len(live)
         holds = [(r, ro_reason) for r in stalled + queued]
     if not args.dry_run:
-        start_cleared = _clear_start(rollout_note)
+        # A Lead hand-over's `paused:` keeps `start: unattended` (p55-5 D7): it lists the note on the Waiting list, and a
+        # fresh lead's `next` always follows its clear-pause, so only the spent session's re-entries come here.
+        if not (_handing_over(rollout_note) and _valued(rollout_note.get("paused"))):
+            start_cleared = _clear_start(rollout_note)
         rollout_note.save()
     # A merged rollout hold is removed in a save of its own, after the start stamp's: that save still fails the call
     # (exit 1, the stamp left for the Stage), while a failed clear only warns and the hold still releases for this call.
@@ -8485,6 +8665,10 @@ def cmd_next(args) -> int:
         halt = "git-env"
     elif main_red:
         halt = "race"   # at once: a revert that did not land holds the whole rollout, whatever runs, pauses or holds
+    elif handing and paused:
+        # A Lead hand-over's `paused:` (p55-5 D17): ahead of regenerate and every other verdict, whatever runs, so a spent
+        # lead goes to step 5's `hand-over` arm; the fresh lead's `next` reads the rest after its clear-pause.
+        halt = HAND_OVER
     elif on_merge is not None and on_merge["action"] == "regenerate" and not lane_hold:
         # The approved queue's regenerate (p30-4): ahead of every verdict but git-env and race, `empty` included (an
         # interrupted chain's prior links no task once step 6's carry moved them), so the lead takes execute's route. A
@@ -8523,7 +8707,7 @@ def cmd_next(args) -> int:
         reason = _idle_reason(whole, paused, pause_requested, holds, queued, start, race_hold,
                               by_state.get("set-aside", []), cap_held, last_start_held, ro_held, bool(task_held),
                               heat_held=heat_held, main_red=main_red, quota_held=quota_held,
-                              surface_held=bool(sw_held), catching_up=catching)
+                              surface_held=bool(sw_held), catching_up=catching, handing_over=handing)
         idle = {"reason": reason, "free": free, "settings": _rollout_settings(rollout_note, ceiling)}
         # p53-4: which bound held a cap-held row while the budget admits (ADR 0083 DfL 13's evidence): `count` when the
         # first such row reads the count's line, else the parts the weight found short. The reasons keep their names.
@@ -8617,7 +8801,10 @@ def cmd_next(args) -> int:
         "startUnattended": start_unattended,
         "startCleared": start_cleared,
         # The lead session's compaction count for this rollout (p55-4, ADR 0085 d4): {session, count, file}.
-        "compactions": _next_compactions(rollout_path.stem),
+        "compactions": compactions,
+        # The Lead hand-over (p55-5, ADR 0085 d3, d5, d6 and d9): _hand_over_output's object.
+        "handOver": _hand_over_output(handing, ho, ho_cause, compactions, ho_caller, rollout_note, ho_unlanded,
+                                      ho_paused_any, ho_lines, live, ho_held, args.dry_run, ho_stem),
         "halt": halt,
         "awaitingSignOff": sign_off,
         # The ETA counts notes only (p28-6; away.md § The Trickle), as `status` and every other progress line do.
@@ -9152,8 +9339,10 @@ def cmd_mark_integrating(args) -> int:
     stderr, no note, no lane-taken and no waiting entry of its own written, no decide and no _free_lane; off --dry-run
     it drops that task's own entry from the origin lane's waiting list (_origin_lane_drop_task, under the
     ORIGIN_LANE_LOCK it holds), and exits 5. A note already carrying `integrating:` passes (kept): an Integration
-    already begun goes on. --dry-run reads the same way and writes nothing. Exit 1 for any other refusal, else 5, else
-    4, else 0."""
+    already begun goes on. A Lead hand-over of cause lead-error (p55-5 D10; _hand_over_shuts_lane) refuses a task that
+    does not hold the Run record's lane the same way: one `HAND-OVER:` line on stderr, nothing written, exit 5 (step 3's
+    exit-5 route); the task that holds it (a Base moved re-run of the Integration in the lane) passes. --dry-run reads
+    the same way and writes nothing. Exit 1 for any other refusal, else 5, else 4, else 0."""
     now = _now(args)
     tasks_dir = Path(os.path.expanduser(args.tasks_dir))
     notes = list(_each_note(args))
@@ -9208,6 +9397,13 @@ def cmd_mark_integrating(args) -> int:
                             waiting = new
                     sw_refused = True
                     continue
+            if rollout and _hand_over_shuts_lane(tasks_dir, rollout, slug):
+                # A Lead hand-over of cause lead-error (p55-5 D10): no Integration begins; the one in the lane goes on.
+                print(f"HAND-OVER: [[{slug}]]'s Integration waits: a Lead hand-over of cause lead-error stands on "
+                      f"[[{rollout}]] and the task does not hold its lane; nothing written (execute § 4.5)",
+                      file=sys.stderr)
+                sw_refused = True
+                continue
             if origin is not None:
                 warns = []
                 d = _origin_lane_decide(tasks_dir, rollout, slug, origin, now, wall, waiting, warns)
@@ -9246,6 +9442,24 @@ def cmd_mark_integrating(args) -> int:
             lock.__exit__(None, None, None)
     rc = _finish(args, now)
     return rc if rc else (5 if sw_refused else 4 if refused else 0)
+
+
+def _hand_over_shuts_lane(tasks_dir: Path, rollout, slug) -> bool:
+    """Whether a Lead hand-over of cause lead-error (p55-5 D10) refuses `slug`'s Integration: the rollout note (in
+    tasks_dir) stands under _handing_over with an open hand-over of cause lead-error, and the Run record's lane is not
+    the task's (an unreadable record holds it for none: fail closed). False when the note cannot be read."""
+    path = tasks_dir / f"{rollout}.md"
+    try:
+        note = Note(path) if path.is_file() else None
+    except (OSError, ValueError):
+        note = None
+    if not _handing_over(note):
+        return False
+    ho = _hand_over_open(note)
+    if ho is None or ho["cause"] != "lead-error":
+        return False
+    state = _record_state(rollout)
+    return state is None or (state["lane"] or "") != slug.lower()
 
 
 def cmd_origin_wait(args) -> int:
@@ -10610,6 +10824,19 @@ def _record_read(rollout):
         return None
 
 
+def _record_mentions(rollout, needle: bytes):
+    """Whether the rollout's Run record's raw bytes hold `needle` (a cheap gate before parsing it): False with no file,
+    True when it cannot be read (the parse then says so)."""
+    try:
+        path = _run_record().record_path(rollout)
+        with open(path, "rb") as f:
+            return needle in f.read()
+    except FileNotFoundError:
+        return False
+    except Exception:  # noqa: BLE001 — an unreadable record is parsed (and read None) by the caller
+        return True
+
+
 def _call_entry(task, run):
     out = {"task": task}
     if isinstance(run, dict):
@@ -11078,9 +11305,12 @@ def cmd_record_entry(args) -> int:
     gap = None   # {stop, start, fields (a new stopped line) or None}
     pause, pause_start = _pause_stands(note, lines)
     if pause:
-        # An Engine catch-up's pause (p54-14) is the engine's own move, never his: its gap stop is `catch-up`.
-        own = _catching_up(note) or _open_pause_mode(lines) == CATCH_UP
-        gap = {"stop": CATCH_UP if own else "pause", "start": pause_start, "fields": None}
+        # An Engine catch-up's pause (p54-14) is the engine's own move, never his: its gap stop is `catch-up`. A Lead
+        # hand-over's (p55-5) is the engine's own too: its gap stop is `hand-over`, the fresh lead's Reinstate.
+        mode = _open_pause_mode(lines)
+        stop = HAND_OVER if _handing_over(note) or mode == HAND_OVER else \
+            CATCH_UP if _catching_up(note) or mode == CATCH_UP else "pause"
+        gap = {"stop": stop, "start": pause_start, "fields": None}
     elif st["open"]:
         o = st["open"][-1]
         gap = {"stop": o["cause"], "start": _away_stamp(o.get("at"))[0] or _rec_ts(o), "fields": None}
@@ -11517,6 +11747,10 @@ def _halt_lane(rollout, slug, args, state):
 # error writes one Run record `lead-error` line: this verb's `lead-error` for sites args-refusal, pre-check and command
 # (the lead's call), and cmd_reconcile for site merge-step (_reconcile_lead_error), which no lead can name.
 LEAD_ERROR_BOUND = 3
+# At its bound a Lead error hands over (p55-5, execute § 4.5 *Lead error*): its `over` line carries `handOver: true` while
+# the task's total, every session's count with this line, is below this; from it on `handOver: false` and the site's old
+# route stands, so a refusal every fresh lead repeats stops at two hand-overs.
+LEAD_ERROR_HANDOVER_TOTAL = 2 * LEAD_ERROR_BOUND
 LEAD_ERROR_MERGE_STEP = "merge-step"
 LEAD_ERROR_SITES = ("args-refusal", "pre-check", LEAD_ERROR_MERGE_STEP, "command")     # run_record.py's LEAD_ERROR_SITES
 LEAD_ERROR_VERB_SITES = tuple(s for s in LEAD_ERROR_SITES if s != LEAD_ERROR_MERGE_STEP)    # the lead's: `lead-error`
@@ -11614,10 +11848,13 @@ def _reconcile_lead_error(args, note, slug, rollout, held, le, errors) -> bool:
         _lead_errors); a failed emit is today's path. Below LEAD_ERROR_BOUND: `integrating:` removed and the note kept
         `review` (no `## Blocker diagnosis`, no Integration log line, no counter, no rung), then `lane-freed
         release=halt` (_free_lane), and one line, `<slug>: lead error (merge-step n/B): passed <A>, the engine names
-        <R>; no set-aside, no retry spent; back to step 1`. At the bound the line reads `over: true` and today's path
+        <R>; no set-aside, no retry spent; back to step 1`. At the bound the line reads `over: true`; with `handOver:
+        true` (the task's total, every session's count with this line, below LEAD_ERROR_HANDOVER_TOTAL; p55-5, execute
+        § 4.5 *Lead error* site (c)) the row is taken as below the bound, its line ending `at the bound: the lead hands
+        over (no set-aside)`, and `next` reads the line as the hand-over's cause; with `handOver: false` today's path
         sets the task aside;
-      - an earlier line for the row with `over: true`: today's path, no second line;
-      - an earlier line without it (a replay): no second line, and the note never goes blocked. Only while the note
+      - an earlier line for the row with `over: true` and no `handOver: true`: today's path, no second line;
+      - an earlier line without it (a replay, an `over` one that handed over included): no second line, and the note never goes blocked. Only while the note
         still reads `review` with `integrating:` and no `lane-taken` for the task follows that line (the first pass was
         cut short) does it finish the outcome: `integrating:` removed, and `lane-freed` emitted when none followed.
         Otherwise it writes nothing (the redo's own lane hold is left alone), its line `… already recorded for this
@@ -11633,7 +11870,7 @@ def _reconcile_lead_error(args, note, slug, rollout, held, le, errors) -> bool:
     at = [i for i, d in enumerate(lines) if d.get("kind") == "lead-error" and d.get("task") == me
           and d.get("site") == LEAD_ERROR_MERGE_STEP and d.get("row") == le["row"]]
     if at:
-        if any(lines[i].get("over") is True for i in at):
+        if any(lines[i].get("over") is True and lines[i].get("handOver") is not True for i in at):
             return False
         last, after = lines[at[-1]], lines[at[-1] + 1:]
         said = f"{slug}: lead error (merge-step {last.get('n')}/{last.get('bound')}) already recorded for this row"
@@ -11656,13 +11893,15 @@ def _reconcile_lead_error(args, note, slug, rollout, held, le, errors) -> bool:
     if not held:
         return False
     session = os.environ.get("CLAUDE_CODE_SESSION_ID") or None
-    mine, _total = _lead_errors(rollout, slug, session, lines)
+    mine, total = _lead_errors(rollout, slug, session, lines)
     n = mine + 1
     over = n >= LEAD_ERROR_BOUND
+    hand_over = over and total + 1 < LEAD_ERROR_HANDOVER_TOTAL
     fields = {"site": LEAD_ERROR_MERGE_STEP, "n": n, "bound": LEAD_ERROR_BOUND, "call": "integrate",
               "row": le["row"], "passed": le["passed"], "named": le["named"]}
     if over:
         fields["over"] = True
+        fields["handOver"] = hand_over
     if session:
         fields["session"] = session
     if le["evidence"]:
@@ -11670,14 +11909,16 @@ def _reconcile_lead_error(args, note, slug, rollout, held, le, errors) -> bool:
     head = f"{slug}: lead error (merge-step {n}/{LEAD_ERROR_BOUND})"
     line = (f"{head}: passed {le['passed']}, the engine names {le['named']}; no set-aside, no retry spent; "
             "back to step 1")
+    if hand_over:
+        line = f"{head}: passed {le['passed']}, the engine names {le['named']}; at the bound: the lead hands over (no set-aside)"
     if args.dry_run:
-        if over:
+        if over and not hand_over:
             return False
         print(f"{line} (dry-run)")
         return True
     if not _event(rollout, "lead-error", slug, fields, args):
         return False
-    if over:
+    if over and not hand_over:
         print(f"{head}: at the bound, so no redo: set aside as before")
         return False
     note.remove("integrating")
@@ -11696,8 +11937,10 @@ def cmd_lead_error(args) -> int:
     or command (merge-step is cmd_reconcile's own, never a choice here). One `lead-error` line {site, n, bound, over?,
     session?, call?, evidence?} for --tasks's task, or for the rollout with no --tasks; n is this session's count of
     those lines plus one (_lead_errors: --session, else CLAUDE_CODE_SESSION_ID) and `over` true from LEAD_ERROR_BOUND
-    on; the evidence is stdin's first non-empty line (_lead_error_evidence). Prints one JSON line {rollout, task, site,
-    n, bound, over, total}, total every session's count with this one. Exit 1 (one ERROR line, nothing written): no
+    on; an `over` line also carries `handOver` (p55-5): true while total, every session's count with this one, is below
+    LEAD_ERROR_HANDOVER_TOTAL (the lead hands over, and `next` reads the line as the hand-over's cause), false from it
+    on (the site's old route). The evidence is stdin's first non-empty line (_lead_error_evidence). Prints one JSON line
+    {rollout, task, site, n, bound, over, handOver, total}, handOver false below the bound. Exit 1 (one ERROR line, nothing written): no
     rollout note, a Run record that cannot be read, or a line the writer did not write; the lead then takes the site's
     old route, so a count is never lost into an endless redo. Exit 2: more than one slug, or a slug run_record.py
     refuses. --dry-run prints the line and writes nothing."""
@@ -11728,9 +11971,11 @@ def cmd_lead_error(args) -> int:
     mine, total = _lead_errors(ro, slug, session, lines)
     n = mine + 1
     over = n >= LEAD_ERROR_BOUND
+    hand_over = over and total + 1 < LEAD_ERROR_HANDOVER_TOTAL
     fields = {"site": args.site, "n": n, "bound": LEAD_ERROR_BOUND}
     if over:
         fields["over"] = True
+        fields["handOver"] = hand_over
     if session:
         fields["session"] = session
     if args.call:
@@ -11742,7 +11987,7 @@ def cmd_lead_error(args) -> int:
               "site's old route", file=sys.stderr)
         return 1
     print(json.dumps({"rollout": ro, "task": slug, "site": args.site, "n": n, "bound": LEAD_ERROR_BOUND, "over": over,
-                      "total": total + 1}))
+                      "handOver": hand_over, "total": total + 1}))
     return 0
 
 
@@ -12557,7 +12802,7 @@ def _row_flakes(args, rollout, slug, task, note, tasks_dir, errors, warnings):
 
 def _idle_reason(whole, paused, pause_requested, holds, queued, start, race_hold, set_aside, cap_held,
                  last_start_held, pr_held=False, task_pr_held=False, heat_held=False, main_red=(),
-                 quota_held=False, surface_held=False, catching_up=False) -> str:
+                 quota_held=False, surface_held=False, catching_up=False, handing_over=False) -> str:
     """The idle-slots reason (the module docstring's table, first match). `whole`: the whole-rollout git-env trips (a bare
     checkout; a lane trip holds no Slot); `main_red`: `next`'s mainRed (a RACE revert that did not land). `cap_held`:
     this call holds a queued row on the Mac-wide cap, "trickle" (`trickle:`) or "away-cap" (`away cap:`), else None (a
@@ -12567,11 +12812,14 @@ def _idle_reason(whole, paused, pause_requested, holds, queued, start, race_hold
     `quota_held`: one on `quota:` (the quota hold, p36-7), after the heat and ahead of the Mac-wide cap.
     `surface_held`: a row a surface wait holds (`surface wait:`, P41-3), after the pause's drain and ahead of the heat:
     `next` launches nothing while it stands. `catching_up`: the pause is an Engine catch-up's (`paused_for: catch-up`,
-    p54-14): catch-up-drain, ahead of pause-drain."""
+    p54-14): catch-up-drain, ahead of pause-drain. `handing_over`: it is a Lead hand-over's (`paused_for: hand-over`,
+    p55-5): hand-over-drain, ahead of both."""
     if whole:
         return "hold-git-env"
     if main_red:
         return "hold-race"
+    if (paused or pause_requested) and handing_over:
+        return "hand-over-drain"
     if (paused or pause_requested) and catching_up:
         return "catch-up-drain"
     if paused or pause_requested:
@@ -13056,7 +13304,7 @@ def _next_compactions(stem) -> dict:
     """`next`'s `compactions` key (p55-4; ADR 0085 d4): {session, count, file} for the caller's session
     (CLAUDE_CODE_SESSION_ID; null when unset or no file name) and this rollout: the count file's `count`, 0 with no
     file, `file` "ok", "none" or "unreadable" (garbage, or another version: count 0 and one COMPACTIONS_WARN line on
-    stderr). It writes nothing and routes nothing; the lead's hand-over at the count is p55-5's."""
+    stderr). It writes nothing; `next` routes the Lead hand-over on it (_hand_over_cause, p55-5)."""
     session = os.environ.get("CLAUDE_CODE_SESSION_ID")
     if not _session_ok(session):
         return {"session": None, "count": 0, "file": "none"}
@@ -13339,8 +13587,18 @@ def cmd_record_pause(args) -> int:
         return 0
     at = _parse_ts(stamp)
     _event(ro, "paused", None, {"mode": "hard"}, args, ts=at.isoformat() if at else None)
+    freed = _record_hard_stop(ro, rollout_path, Path(os.path.expanduser(args.tasks_dir)), args, state)
+    print(f"{ro}: hard pause recorded ({', '.join(freed) or 'nothing in flight'})"
+          + (" (dry-run)" if args.dry_run else ""))
+    return 0
+
+
+def _record_hard_stop(ro, rollout_path, tasks_dir, args, state):
+    """A hard stop's record of what was in flight (record-pause's, and a Lead hand-over's bound, p55-5): each linked
+    task note `in_progress` gets `slot-freed outcome=stopped`, and each that holds the lane has it freed (_halt_lane,
+    off --dry-run), in slug order. `state` is the Run record's replay (_record_state) or None. Returns what it freed,
+    `slot <slug>` and `lane <slug>`; the notes are left as they are (the next lead restarts them)."""
     freed = []
-    tasks_dir = Path(os.path.expanduser(args.tasks_dir))
     for path, note in sorted(_linked_task_notes(rollout_path, tasks_dir), key=lambda pn: pn[0].stem.lower()):
         if _status(note) == "in_progress":
             _event(ro, "slot-freed", path.stem, {"outcome": "stopped"}, args)
@@ -13349,9 +13607,7 @@ def cmd_record_pause(args) -> int:
             if not args.dry_run:
                 _halt_lane(ro, path.stem, args, state)
             freed.append(f"lane {path.stem}")
-    print(f"{ro}: hard pause recorded ({', '.join(freed) or 'nothing in flight'})"
-          + (" (dry-run)" if args.dry_run else ""))
-    return 0
+    return freed
 
 
 # ---- defer ------------------------------------------------------------------
@@ -15767,6 +16023,9 @@ def cmd_carry(args) -> int:
                       "rollout is superseded")
     if not fresh and _catching_up(src_note):
         return refuse(f"--from {src.stem} is catching up (an Engine catch-up): it resumes by itself; nothing carried")
+    if not fresh and _handing_over(src_note):
+        return refuse(f"--from {src.stem} is handing over to a fresh lead (a Lead hand-over): it resumes there; nothing "
+                      "carried")
     held = _race_holds(src_note, linked)
     if held:
         names = ", ".join(f"[[{slug}]] ({kind})" for slug, kind in sorted(held.values(), key=lambda h: h[0].lower()))
@@ -17333,11 +17592,11 @@ def cmd_join(args) -> int:
     if inc:
         return refuse(f"--rollout {stem} is incomplete ({inc}): /thread:schedule --regenerate supersedes it")
     # An Engine catch-up's stamps (p54-14) are no pause someone made: joined rows wait behind its drain and start
-    # after its move.
-    if _valued(x_note.get("paused")) and not _catching_up(x_note):
+    # after its move. Nor are a Lead hand-over's (p55-5): they wait behind its drain and start under the fresh lead.
+    if _valued(x_note.get("paused")) and not _catching_up(x_note) and not _handing_over(x_note):
         return refuse(f"--rollout {stem} is paused ({_scalar(x_note.get('paused'))}): /thread:schedule --regenerate "
                       "supersedes it, carrying its unlanded tasks")
-    if _truthy_flag(x_note.get("pause_requested")) and not _catching_up(x_note):
+    if _truthy_flag(x_note.get("pause_requested")) and not _catching_up(x_note) and not _handing_over(x_note):
         return refuse(f"--rollout {stem} is pausing (pause_requested): once its `paused:` stamp lands, "
                       "/thread:schedule --regenerate supersedes it")
     counts = _counts([dict(zip(("state", "setAsideAt"), _queue_state(n))) for _p, n in linked])
@@ -17598,11 +17857,19 @@ def cmd_stamp_start(args) -> int:
     `hold_until` (readable or not) refuses instead: a held queue starts on Lachy's word, never the Backlog orient's.
     A serial note (P44-4, ADR 0076 d4) is listed on the Waiting list: the same refusals up to the never-started one
     (a chain that has run is refused: its Leg log says whether it rejoins the list), then the stamp, whatever its
-    `started_unattended:`, `supersedes:` or `hold_until`, with or without --backlog."""
+    `started_unattended:`, `supersedes:` or `hold_until`, with or without --backlog.
+    With `--hand-over [--gated]` (p55-5, execute § 4.5 step 5's `hand-over` arm) it is a Lead hand-over's listing
+    (_hand_over_finish), ahead of every refusal above: a handed-over note is paused and has run, which a plain
+    stamp-start still refuses."""
     def refuse(msg):
         print(f"ERROR: stamp-start: {msg}", file=sys.stderr)
         return 1
 
+    if getattr(args, "hand_over", False):
+        return _hand_over_finish(args, manual=False)   # a Lead hand-over's listing (p55-5), ahead of every refusal here
+    if getattr(args, "gated", False):
+        print("ERROR: stamp-start: usage: --gated is read only with --hand-over", file=sys.stderr)
+        return 2
     path = Path(os.path.expanduser(args.rollout))
     note, why = _queue_note(path)
     if why:
@@ -18008,8 +18275,9 @@ def _regenerate_gate(walk, anchor, trigger_path):
     if _status(note) in CLOSED_ROLLOUT_STATUSES:
         return "waiting", "closed: nothing to regenerate"
     linked = [(p, n) for p, n in walk.by_rollout.get(path.stem.lower(), ()) if p != path]
-    # An Engine catch-up's `paused:` (p54-14) is the engine's own move, read as running.
-    if not ((_valued(note.get("paused")) and not _catching_up(note)) or approved_unrun(note, linked)[0]):
+    # An Engine catch-up's `paused:` (p54-14) is the engine's own move, read as running; so is a Lead hand-over's (p55-5).
+    if not ((_valued(note.get("paused")) and not _catching_up(note) and not _handing_over(note))
+            or approved_unrun(note, linked)[0]):
         return "waiting", "running: schedule joins a running rollout, regenerating nothing, until it is paused or finished"
     return None, None
 
@@ -18094,7 +18362,8 @@ def _trigger_eval(scan, path, note, e):
         read_on = (anchor or (path, note))[1]
         if _status(read_on) in CLOSED_ROLLOUT_STATUSES or _valued(read_on.get("superseded_by")):
             return "waiting", "closed: it never pauses"
-        if not _valued(read_on.get("paused")) or _catching_up(read_on):   # a catch-up's is no pause (p54-14)
+        # A catch-up's is no pause (p54-14), nor a Lead hand-over's (p55-5).
+        if not _valued(read_on.get("paused")) or _catching_up(read_on) or _handing_over(read_on):
             return "waiting", "not paused"
     return "due", {"id": e["id"], "note": path.stem, "path": str(path), "scope": scope, "on": e["on"], "do": e["do"],
                    "kind": do["kind"], "command": command, "project": project,
@@ -18807,6 +19076,11 @@ def cmd_clear_pause(args) -> int:
     Under `paused_for: sign-off` (ADR 0034) it first checks the queue with the pause ignored: while that would still be
     awaiting sign-off (_awaits_sign_off), it writes nothing, prints `STILL-AWAITING: [[<slug>]]: <gate>` per pending
     gate and exits 3, so a reinstate with a gate unsigned never re-runs the sign-off form.
+
+    Under a Lead hand-over (p55-5 D7: `paused_for: hand-over` with either stamp) the handing session (the open
+    hand-over's `session`, _same_session) is refused first: nothing written, one `HAND-OVER-OWED: [[<slug>]]: …` line,
+    exit 4 (execute's *Reinstate* routes it to step 1.1's `next` and step 5's `hand-over` arm). Any other caller clears
+    as above, and the clear appends `- <stamp> hand-over: taken by session <id | none>` to the `## Pause log`.
     """
     path = Path(os.path.expanduser(args.rollout))
     if not path.exists():
@@ -18814,6 +19088,16 @@ def cmd_clear_pause(args) -> int:
         return 1
     note = Note(path)
     stamp = _scalar(note.get("paused"))
+    # A Lead hand-over (p55-5 D7): the spent session never reinstates itself. Under `paused_for: hand-over` (either
+    # stamp) a caller that is the open hand-over's handing session by _same_session is refused, whatever the cause and
+    # whatever its count file or the Run record now read.
+    handing_over = _handing_over(note)
+    ho = _hand_over_open(note) if handing_over else None
+    caller = os.environ.get("CLAUDE_CODE_SESSION_ID") or None
+    if ho is not None and _same_session(caller, ho["session"]):
+        print(f"HAND-OVER-OWED: [[{path.stem}]]: this session handed the rollout over at {ho['since']} ({ho['cause']}): "
+              "it never reinstates it; take step 1.1's `next` to step 5's `hand-over` arm (execute § 4.5)")
+        return 4
     if _valued(stamp) and _scalar(note.get(PAUSED_FOR_KEY)).lower() == SIGN_OFF:
         wait, rows = _awaits_sign_off(path, note, Path(os.path.expanduser(args.tasks_dir)))
         if wait:
@@ -18837,13 +19121,18 @@ def cmd_clear_pause(args) -> int:
     note.remove("paused")
     note.remove("pause_requested")
     note.remove(PAUSED_FOR_KEY)
+    if ho is not None:
+        note.append_line(PAUSE_LOG_SECTION, f"- {_stamp(_now(args))} hand-over: taken by session "
+                                            f"{caller if _session_ok(caller) else 'none'}")
     note.save(dry_run=args.dry_run)
     if _valued(stamp) and not args.dry_run:
-        # The Run record (p15-2): a hard pause whose record-pause never ran is caught up at its stamp first.
+        # The Run record (p15-2): a hard pause whose record-pause never ran is caught up at its stamp first (a Lead
+        # hand-over's under its own mode).
         state = _record_state(path.stem)
         if state is None or not state["paused"]:
             at = _parse_ts(stamp)
-            _event(path.stem, "paused", None, {"mode": "hard"}, args, ts=at.isoformat() if at else None)
+            _event(path.stem, "paused", None, {"mode": HAND_OVER if handing_over else "hard"}, args,
+                   ts=at.isoformat() if at else None)
         _event(path.stem, "resumed", None, None, args)
     if note.dirty:
         print("pause cleared (paused/pause_requested/paused_for removed)" +
@@ -21346,6 +21635,279 @@ def _open_pause_mode(lines):
     return mode
 
 
+# ---- hand-over: the Lead hand-over (ADR 0085 d3, d5, d6 and d9, p55-5; the module docstring's `hand-over`) ----------
+# The `## Pause log` lines (vault-grammar § Pause log), each `- <stamp> hand-over: <rest>`, none holding a wikilink:
+#   draining (<cause>; session <id | none>; count <n>)     `next` starts it (cause compactions | lead-error)
+#   bound after <m> min: stopping <slug> (<runId>), …; lane <slug>    `next` at the drain's bound (once per hand-over)
+#   listed[ (gated)]     stamp-start --hand-over: listed on the Waiting list
+#   manual[ (gated)]     hand-over --manual: the needs-you start line, off the Stage
+#   lifted (<why>)       `next`: another session leads, or nothing is left to hand
+#   not handed over (<why>)   hand-over --abort: his pause takes over
+#   taken by session <id | none>   clear-pause: a fresh lead's Reinstate
+# The open hand-over is everything from the last `draining` line on, until a closing line (the last three).
+HAND_OVER_DRAINING_RE = re.compile(r"^draining \((?P<cause>[a-z-]+); session (?P<session>\S+); count (?P<count>\d+)\)$")
+HAND_OVER_BOUND_RE = re.compile(r"^bound after (?P<mins>\d+) min: stopping (?P<stop>.+)$")
+HAND_OVER_FINISH_RE = re.compile(r"^(?P<finish>listed|manual)(?P<gated> \(gated\))?$")
+HAND_OVER_CLOSE_RE = re.compile(r"^(?:lifted \(.*\)|not handed over \(.*\)|taken by session \S+)$")
+HAND_OVER_STOP_RE = re.compile(r"^(?P<slug>[^\s(),;]+)(?: \((?P<runId>[^\s()]+)\))?$")
+HAND_OVER_NO_TASK = "no task call"
+
+
+def _handing_over(note) -> bool:
+    """A Lead hand-over stands on the rollout note: `paused_for: hand-over` with one of its stamps (its drain's
+    `pause_requested`, or its `paused:`), the engine's own pause, never one someone made. With neither stamp a
+    `paused_for: hand-over` is dangling (his soft-pause cancel, the Stage's quiet-drain undo): no hand-over stands, and
+    the next `next` that finds the cause starts a new one."""
+    return note is not None and _scalar(note.get(PAUSED_FOR_KEY)).lower() == HAND_OVER and \
+        (_valued(note.get("paused")) or _truthy_flag(note.get("pause_requested")))
+
+
+def _same_session(a, b) -> bool:
+    """The identity rule (p55-5 D14): two sessions are the same only when both are valid session ids (_session_ok) and
+    equal. A null never matches, so a session-less lead (Codex, or the variable unset) is refused nothing and lifts
+    nothing: a stated residual."""
+    return _session_ok(a) and _session_ok(b) and a == b
+
+
+def _hand_over_stop_items(text):
+    """The `stop` a bound line names: [{slug, runId?}], its task calls then its lane holder."""
+    tasks, _, lane = text.partition("; lane ")
+    out = []
+    for item in ([] if tasks.strip() == HAND_OVER_NO_TASK else tasks.split(", ")) + ([lane] if lane else []):
+        m = HAND_OVER_STOP_RE.match(item.strip())
+        if m:
+            out.append({"slug": m.group("slug"), **({"runId": m.group("runId")} if m.group("runId") else {})})
+    return out
+
+
+def _hand_over_open(note):
+    """The open Lead hand-over on the rollout note's `## Pause log`, or None: from the last `draining` line on,
+    {since (its stamp), cause, session (None for `none`), count, bound (a bound line followed), stop (that line's
+    [{slug, runId?}]), finish (`listed` | `manual` | None: the first finish logged wins), gated, finishAt}. None with no
+    `draining` line, or once a closing line (`lifted`, `not handed over`, `taken by session`) follows it. Read from the
+    note alone, so who hands over needs no Run record."""
+    if note is None:
+        return None
+    lines = []
+    for line in note.section_text(PAUSE_LOG_SECTION).split("\n"):
+        m = HAND_OVER_LINE_RE.match(line.strip())
+        if m:
+            lines.append((m.group("ts"), m.group("rest").strip()))
+    at = max((i for i, (_ts, rest) in enumerate(lines) if HAND_OVER_DRAINING_RE.match(rest)), default=None)
+    if at is None:
+        return None
+    m = HAND_OVER_DRAINING_RE.match(lines[at][1])
+    ho = {"since": lines[at][0], "cause": m.group("cause"),
+          "session": None if m.group("session") == "none" else m.group("session"), "count": int(m.group("count")),
+          "bound": False, "stop": [], "finish": None, "gated": False, "finishAt": None}
+    for ts, rest in lines[at + 1:]:
+        if HAND_OVER_CLOSE_RE.match(rest):
+            return None
+        b = HAND_OVER_BOUND_RE.match(rest)
+        if b and not ho["bound"]:
+            ho["bound"], ho["stop"] = True, _hand_over_stop_items(b.group("stop"))
+            continue
+        f = HAND_OVER_FINISH_RE.match(rest)
+        if f and ho["finish"] is None:
+            ho["finish"], ho["gated"], ho["finishAt"] = f.group("finish"), bool(f.group("gated")), ts
+    return ho
+
+
+def _hand_over_cause(compactions, lines, session):
+    """Why a hand-over is due for the caller, or None: `compactions` when its session's count for the rollout (`next`'s
+    `compactions`) is at LEAD_HANDOVER_COMPACTIONS or more; else `lead-error` when the Run record (`lines`, None when
+    unreadable: no cause) holds a `lead-error` line with `over: true` and `handOver: true` of the caller's session
+    (`session`, by _lead_errors' own rule: an absent one on both sides is the same) after its last `hand-over` line of
+    outcome handed, so a hand-over consumes the Lead errors before it."""
+    if (compactions or {}).get("count", 0) >= LEAD_HANDOVER_COMPACTIONS:
+        return "compactions"
+    if lines is None:
+        return None
+    last = max((i for i, d in enumerate(lines) if d.get("kind") == HAND_OVER and d.get("outcome") == "handed"),
+               default=-1)
+    for d in lines[last + 1:]:
+        if d.get("kind") == "lead-error" and d.get("over") is True and d.get("handOver") is True \
+                and (d.get("session") or None) == (session or None):
+            return "lead-error"
+    return None
+
+
+def _hand_over_opened(note, lines):
+    """Whether a fresh lead has opened a handed-over note (p55-5 D11): the Run record (`lines`) holds, after its open
+    `paused` line (else after the note's `paused:` stamp), a `lead-entry` whose session is not the handing session's by
+    _same_session, so the handing session's own entries (its Watchdog resume, his paste, a stray tick) never open it.
+    None when the record cannot be read (its readers WARN and read not opened)."""
+    if lines is None:
+        return None
+    ho = _hand_over_open(note)
+    handing = ho["session"] if ho is not None else None
+    open_i = None
+    for i, d in enumerate(lines):
+        if d.get("kind") == "paused" and open_i is None:
+            open_i = i
+        elif d.get("kind") == "resumed":
+            open_i = None
+    if open_i is not None:
+        after = lines[open_i + 1:]
+    else:
+        t0 = _parse_ts(note.get("paused"))
+        after = [d for d in lines if t0 is not None and _rec_ts(d) is not None and _rec_ts(d) >= t0]
+    return any(d.get("kind") == "lead-entry" and not _same_session(d.get("session"), handing) for d in after)
+
+
+def _hand_over_closing(stem, ho, merged, total):
+    """The closing lines a finished hand-over printed, by its logged finish: [lines], the last the ROLLOUT-STATUS."""
+    gated = " --gated" if ho["gated"] else ""
+    if ho["finish"] == "listed":
+        return [f"ROLLOUT-STATUS: {stem} merged={merged}/{total} running=0 state=done "
+                f'reason="handed over: listed on the Waiting list for a fresh lead"']
+    return [f"[[{stem}]] lead hand-over: start a fresh lead in a new session with /thread:execute [[{stem}]]{gated}",
+            f"ROLLOUT-STATUS: {stem} merged={merged}/{total} running=0 state=halted "
+            f'reason="lead hand-over: start a fresh lead with /thread:execute [[{stem}]]{gated}"']
+
+
+def _hand_over_output(handing, ho, cause, compactions, caller, note, unlanded, paused_any, lines, live, held,
+                      dry_run, stem) -> dict:
+    """`next`'s `handOver` key (p55-5): {due, cause, state, at, count, session, since, open, held, stop, why}. `state`
+    null with none standing, else draining (its `pause_requested`), drained (its `paused:`), bound (the bound line
+    logged), or listed or manual (the finish logged). `at` is LEAD_HANDOVER_COMPACTIONS and `count` the caller's count;
+    `session` and `since` the open hand-over's (the caller's session while none stands). `open` (D4 (d)): the calls
+    the Run record still shows in flight (inflight_calls) that this call's live rows and the record's lane holder do not
+    account for, [{task, runId?, call?}], so a lead whose summary lost a handle has its id; `held` the rows D10's split
+    holds; `stop` the bound line's [{slug, runId?}]. With none standing, `due` is true only where a lead's `next` (off
+    --dry-run) would start one; `why` says what holds it (nothing left to hand, a pause, the count)."""
+    state = None
+    if handing:
+        state = (ho["finish"] if ho is not None and ho["finish"] else "bound" if ho is not None and ho["bound"]
+                 else "drained" if _valued(note.get("paused")) else "draining")
+    out = {"due": False, "cause": None, "state": state, "at": LEAD_HANDOVER_COMPACTIONS,
+           "count": (compactions or {}).get("count", 0), "session": _session_ok(caller) and caller or None,
+           "since": None, "open": [], "held": [r["slug"] for r in held], "stop": [], "why": None}
+    if handing:
+        out.update(due=True, cause=ho["cause"] if ho is not None else cause,
+                   session=ho["session"] if ho is not None else None, since=ho["since"] if ho is not None else None,
+                   stop=ho["stop"] if ho is not None and ho["bound"] else [])
+        rec = _record_state(stem)
+        lane = rec["lane"] if rec is not None else None
+        mine = {r["slug"].lower() for r in live}
+        out["open"] = [c for c in inflight_calls(lines or []) if c["task"] not in mine and c["task"] != lane]
+        out["why"] = f"a Lead hand-over ({out['cause'] or 'its cause unlogged'}): {state}"
+    elif not unlanded:
+        out["why"] = "nothing left to hand"
+    elif cause:
+        out["cause"] = cause
+        if paused_any:
+            out["why"] = "a pause stands: the hand-over starts at the first `next` after it clears"
+        else:
+            out["due"] = True
+            out["why"] = "due: the lead's `next` starts its drain" + (" (dry-run: nothing stamped)" if dry_run else "")
+    else:
+        out["why"] = f"compaction {out['count']} of {LEAD_HANDOVER_COMPACTIONS}: not due"
+    return out
+
+
+def _hand_over_finish(args, manual) -> int:
+    """The finish of a Lead hand-over (execute § 4.5 step 5's `hand-over` arm), `stamp-start --hand-over` (manual
+    False: listed on the Waiting list) or `hand-over --manual` (off the Stage). Refuses (exit 1, one ERROR line, nothing
+    written) a note that is not found, serial, closed or superseded, one with no hand-over `paused:` (`paused:` with
+    `paused_for: hand-over`) and one with no open hand-over on its Pause log. Inside the open hand-over the first finish
+    logged wins: a repeat writes nothing and prints the closing lines that finish printed. Else, listed: `start:
+    unattended` (unless it stands) and the `listed[ (gated)]` line; manual: the `manual[ (gated)]` line only; then one
+    `hand-over` Run record line {outcome: handed, listed, session?, gated?} and the closing lines."""
+    verb = "hand-over --manual" if manual else "stamp-start --hand-over"
+
+    def refuse(msg):
+        print(f"ERROR: {verb}: {msg}; nothing written", file=sys.stderr)
+        return 1
+
+    path = Path(os.path.expanduser(args.rollout))
+    note, why = _queue_note(path)
+    if why:
+        return refuse(why)
+    stem = path.stem
+    if _shape(note) == SHAPES[1]:
+        return refuse(f"{stem} is a serial rollout: a Leg hands over by itself (legs.md § Hand over)")
+    if _status(note) in CLOSED_ROLLOUT_STATUSES:
+        return refuse(f"{stem} is {_status(note)}: a closed rollout runs nothing")
+    if _valued(note.get("superseded_by")):
+        return refuse(f"{stem} is superseded by [[{_link_slug(note, 'superseded_by')}]]")
+    if not (_valued(note.get("paused")) and _scalar(note.get(PAUSED_FOR_KEY)).lower() == HAND_OVER):
+        return refuse(f"{stem} carries no hand-over paused: (`next` stamps it once the drain ends)")
+    ho = _hand_over_open(note)
+    if ho is None:
+        return refuse(f"{stem} has no open hand-over on its {PAUSE_LOG_SECTION}")
+    rows, _index = _rows(path, note, Path(os.path.expanduser(args.tasks_dir)))
+    counts = _counts(rows)
+    if ho["finish"] is not None:
+        for line in _hand_over_closing(stem, ho, counts["merged"], counts["total"]):
+            print(line)
+        return 0
+    gated = bool(getattr(args, "gated", False))
+    if not manual and not _start_unattended(note):
+        note.set(START_KEY, START_UNATTENDED, after=("status",))
+    finish = "manual" if manual else "listed"
+    note.append_line(PAUSE_LOG_SECTION, f"- {_stamp(_now(args))} hand-over: {finish}" + (" (gated)" if gated else ""))
+    try:
+        note.save(dry_run=args.dry_run)
+    except OSError as e:
+        return refuse(f"cannot write {path}: {e}")
+    ev = {"outcome": "handed", "listed": not manual}
+    if _session_ok(ho["session"]):
+        ev["session"] = ho["session"]
+    if gated:
+        ev["gated"] = True
+    _event(stem, HAND_OVER, None, ev, args)
+    for line in _hand_over_closing(stem, dict(ho, finish=finish, gated=gated), counts["merged"], counts["total"]):
+        print(line)
+    return 0
+
+
+def cmd_hand_over(args) -> int:
+    """`hand-over` (p55-5; the module docstring's `hand-over`). `--manual [--gated]`: the finish off the Stage
+    (_hand_over_finish). `--abort --why W` (his pause takes over, execute § Pausing): under `paused_for: hand-over`
+    (read alone, so a dangling one goes too) it removes `paused`, `pause_requested` and `paused_for`, and `start:
+    unattended` when the open hand-over finished listed; with an open hand-over it appends `not handed over (<W>)`;
+    it emits `resumed` when the Run record's open `paused` line is the hand-over's, then `hand-over {outcome:
+    not-handed, why}` with an open one. With neither it writes nothing (`[no-change]`). It consumes neither the count
+    nor a Lead error's cause, so his Reinstate in the same session hands over again at its first `next`."""
+    if args.abort == args.manual:
+        print("ERROR: hand-over: usage: one of --manual or --abort --why W", file=sys.stderr)
+        return 2
+    if args.manual:
+        return _hand_over_finish(args, manual=True)
+    if not (args.why or "").strip():
+        print("ERROR: hand-over: usage: --abort needs --why W", file=sys.stderr)
+        return 2
+    path = Path(os.path.expanduser(args.rollout))
+    note, why = _queue_note(path)
+    if why:
+        print(f"ERROR: hand-over: {why}", file=sys.stderr)
+        return 1
+    ro = path.stem
+    ho = _hand_over_open(note)
+    stamped = _scalar(note.get(PAUSED_FOR_KEY)).lower() == HAND_OVER
+    if ho is None and not stamped:
+        print(f"{ro}: no Lead hand-over stands [no-change]")
+        return 0
+    why = " ".join(args.why.split())
+    if stamped:
+        for key in ("paused", "pause_requested", PAUSED_FOR_KEY):
+            note.remove(key)
+        if ho is not None and ho["finish"] == "listed":
+            _clear_start(note)
+    if ho is not None:
+        note.append_line(PAUSE_LOG_SECTION, f"- {_stamp(_now(args))} hand-over: not handed over ({why})")
+    note.save(dry_run=args.dry_run)
+    if not args.dry_run:
+        if stamped and _open_pause_mode(_record_read(ro)) == HAND_OVER:
+            _event(ro, "resumed", None, None, args)
+        if ho is not None:
+            _event(ro, HAND_OVER, None, {"outcome": "not-handed", "why": why[:200]}, args)
+    print(f"{ro}: Lead hand-over not handed over: {why}" + ("; its stamps removed" if stamped else "")
+          + (" (dry-run)" if args.dry_run else " [written]"))
+    return 0
+
+
 def _claude_md_text(root):
     """(text, source) of the Project root's CLAUDE.md: `git show refs/remotes/origin/<d>:CLAUDE.md`, <d> read from
     refs/remotes/origin/HEAD (no fetch: as fresh as the root's last fetch), else the working tree's; (None, why)."""
@@ -21632,6 +22194,8 @@ def cmd_catch_up(args) -> int:
             pf = _scalar(note.get(PAUSED_FOR_KEY)).lower()
             return say(why="an Engine catch-up's move is made: clear-pause resumes it" if catching
                        else "a sign-off pause stands (ADR 0034)" if pf == SIGN_OFF
+                       else "a Lead hand-over stands: the fresh lead's first loop entry takes the catch-up"
+                       if _handing_over(note)
                        else "a pause stands (his act): no catch-up while it stands")
     elif op is not None:
         if es._leg_open(body):
@@ -21703,7 +22267,7 @@ REGENERATE_STALL_MIN = 120    # the Approved-queue route's one foreground turn: 
 # (status § The Watchdog's reading, *Which waits silence judges*, binds this list by a contract test). moving_verdict
 # returns each through its by_silence, which refuses a cause not listed here, so the code cannot judge a wait by silence
 # that the list (and status) leaves out.
-SILENCE_JUDGED = ("merge-hold", "regenerating", "surface-wait", "leg-wait", "catch-up")
+SILENCE_JUDGED = ("merge-hold", "regenerating", "surface-wait", "leg-wait", "catch-up", "hand-over")
 LEG_WAIT = "leg-wait"         # a serial note's open Leg at a waiting turn end (ADR 0075 d5, P41-4), its lease's silence
 LEG_PY = Path(__file__).resolve().parent / "leg.py"
 _LEG_MOD = None
@@ -21971,8 +22535,28 @@ def moving_verdict(rollout_path, tasks_dir, now=None, stall_after=STALL_AFTER_MI
             return done("stalled", cause, f"no life sign for {out['ageMinutes']}m")
         return None
 
-    # 3. Pauses: an Engine catch-up's `paused:` first (p54-14: the lead's own turn makes its move, so a dead lead's is a
-    # stall), then a sign-off pause (await-sign-off stamps paused: with it), then a stamped pause (his act).
+    # 3. Pauses: a Lead hand-over's `paused:` first (p55-5: unfinished, or finished and opened by a fresh lead, it is a
+    # lead's own next turn, judged by silence; listed and unopened it waits for the Stage until HAND_OVER_UNOPENED_MINUTES
+    # past `paused:`, then for him; manual and unopened it waits for him), then an Engine catch-up's `paused:` (p54-14:
+    # the lead's own turn makes its move, so a dead lead's is a stall), then a sign-off pause (await-sign-off stamps
+    # paused: with it), then a stamped pause (his act). A hand-over's drain (no `paused:` yet) reads as work below.
+    if _valued(note.get("paused")) and _handing_over(note):
+        ho = _hand_over_open(note)
+        since = _scalar(note.get("paused"))
+        opened = _hand_over_opened(note, lines)
+        finish = ho["finish"] if ho is not None else None
+        if finish is None or opened:
+            return by_silence(stall_after, HAND_OVER, f"a Lead hand-over: " + (
+                "a fresh lead opened it" if finish else f"its lead finishes it, paused since {since}"))
+        if finish == "listed":
+            t0 = _parse_ts(since)
+            until = t0 + timedelta(minutes=HAND_OVER_UNOPENED_MINUTES) if t0 is not None else None
+            if until is not None and now < until:
+                return done("waiting", HAND_OVER, f"a Lead hand-over: listed on the Waiting list since {since}",
+                            _stamp(until))
+            return done("waiting", "you", f"lead hand-over: no fresh lead opened it since {since}: start one with "
+                                          f"/thread:execute [[{ro}]]")
+        return done("waiting", "you", f"lead hand-over: start a fresh lead with /thread:execute [[{ro}]]")
     if _valued(note.get("paused")) and _catching_up(note):
         return by_silence(stall_after, CATCH_UP, f"an Engine catch-up: moving onto the Green tip since "
                                                  f"{_scalar(note.get('paused'))}")
@@ -22098,8 +22682,11 @@ def moving_verdict(rollout_path, tasks_dir, now=None, stall_after=STALL_AFTER_MI
             until = _stamp(base + timedelta(minutes=REGENERATE_STALL_MIN)) if base is not None else None
             return by_silence(REGENERATE_STALL_MIN, "regenerating", "approved queue: regenerating", until)
         return silent(stall_after) or done("moving", None, "work moves")
-    # 12a. A wait only the lead's own tick ends: an Engine catch-up `next` reads drained (p54-14: its next turn moves
-    # it), then a merge hold, each judged by silence.
+    # 12a. A wait only the lead's own tick ends: a Lead hand-over `next` reads drained (p55-5: its next turn finishes
+    # it), an Engine catch-up `next` reads drained (p54-14: its next turn moves it), then a merge hold, each judged by
+    # silence.
+    if nx.get("halt") == HAND_OVER:
+        return by_silence(stall_after, HAND_OVER, "a Lead hand-over drained: the lead's next turn finishes it")
     if nx.get("halt") == CATCH_UP:
         return by_silence(stall_after, CATCH_UP, "an Engine catch-up drained: the lead's next turn moves it")
     if merge_held:
@@ -23809,8 +24396,13 @@ def _parser():
                                                      "or a serial note to list")
     ss.add_argument("--backlog", action="store_true", help="the Backlog orient's decided start (ADR 0071): the note "
                                                             "need supersede nothing, and a rollout hold_until refuses")
+    ss.add_argument("--hand-over", action="store_true", help="p55-5: a Lead hand-over's listing (execute § 4.5 step 5): "
+                                                              "stamp start: unattended on the hand-over's paused note")
+    ss.add_argument("--gated", action="store_true", help="--hand-over: the run was --gated (the fresh lead's prompt "
+                                                          "carries it)")
     ss.add_argument("--tasks-dir", default=str(DEFAULT_TASKS_DIR), help=tasks_dir_help)
-    ss.set_defaults(func=cmd_stamp_start)
+    ss.add_argument("--now", type=_iso_arg, default=None, help=now_help)
+    ss.set_defaults(func=cmd_stamp_start, dry_run=False)
 
     tg = sub.add_parser("triggers", help="durable follow-up triggers on notes (p45-7; vault-grammar § When): `due` lists "
                                          "them, read-only, with no lead; `fire <id>` runs one and records it")
@@ -23835,6 +24427,7 @@ def _parser():
     cp.add_argument("--rollout", required=True, help="path to the rollout note")
     cp.add_argument("--tasks-dir", default=str(DEFAULT_TASKS_DIR), help=tasks_dir_help)
     cp.add_argument("--dry-run", action="store_true")
+    cp.add_argument("--now", type=_iso_arg, default=None, help=now_help)
     cp.set_defaults(func=cmd_clear_pause)
 
     aw = sub.add_parser("await-sign-off", help="pause a rollout whose only unlanded tasks wait on a gate: stamp paused: + "
@@ -24008,6 +24601,19 @@ def _parser():
     cu.add_argument("--now", type=_iso_arg, default=None, help=now_help)
     cu.add_argument("--dry-run", action="store_true", help="print the reading; write nothing")
     cu.set_defaults(func=cmd_catch_up)
+
+    ho = sub.add_parser("hand-over", help="p55-5 (ADR 0085 d3, d5, d6 and d9): a Lead hand-over's finish off the Stage "
+                                          "(--manual), or his pause over it (--abort --why W)")
+    ho.add_argument("--rollout", required=True, help="path to the rollout note")
+    ho.add_argument("--manual", action="store_true", help="off the Stage: log the manual finish and print the needs-you "
+                                                          "start line")
+    ho.add_argument("--abort", action="store_true", help="his pause takes over: remove the hand-over's stamps")
+    ho.add_argument("--why", default=None, help="--abort: why (its `not handed over` line's words)")
+    ho.add_argument("--gated", action="store_true", help="--manual: the run was --gated")
+    ho.add_argument("--tasks-dir", default=str(DEFAULT_TASKS_DIR), help=tasks_dir_help)
+    ho.add_argument("--now", type=_iso_arg, default=None, help=now_help)
+    ho.add_argument("--dry-run", action="store_true", help="print what it would write; write nothing")
+    ho.set_defaults(func=cmd_hand_over)
     return p
 
 

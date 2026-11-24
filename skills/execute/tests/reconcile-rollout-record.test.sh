@@ -1089,17 +1089,29 @@ leup lf6
 THREAD_EVENTS_DIR="$TMP/le-file/events" python3 "$SCRIPT" reconcile --result "$(lerow lf6 "$D_CARRIES")" --tasks-dir "$V" --now "$NOW" >/dev/null 2>&1
 ok "$(fm lf6 status)|$(grep -c '^## Blocker diagnosis' "$V/lf6.md")" "status: blocked|1" "27d: an unreadable Run record: set aside as today"
 
-echo "== 27e. the bound: the third in one session reads over and sets aside as today; another session's lines count only in total"
+echo "== 27e. the bound: the third in one session reads over; below the hand-over total it hands over (p55-5), from it it sets aside as today; another session's lines count only in total"
 leup l5
 for k in 1 2; do leplant l5 "{\"site\":\"command\",\"n\":$k,\"bound\":3}"; done
 M=$(cnt le)
 out=$(row "$(lerow l5 "$D_CARRIES")")
-has "$out" "l5: lead error (merge-step 3/3): at the bound, so no redo: set aside as before" "27e: the third says it is at the bound"
-ok "$(fm l5 status)|$(since le "$M")" "status: blocked|lead-error:l5 lane-freed:l5 set-aside:l5" "27e: its line, then today's set-aside"
-ok "$(since le "$M" 'd["over"] if d["kind"] == "lead-error" else None' | cut -d' ' -f1)" "true" "27e: the third line reads over: true"
+has "$out" "l5: lead error (merge-step 3/3): passed $H40, the engine names $R40; at the bound: the lead hands over (no set-aside)" \
+  "27e: the third, its total 3, says the lead hands over"
+ok "$(fm l5 status)|$(fm l5 integrating)|$(since le "$M")" "status: review|<none>|lead-error:l5 lane-freed:l5" \
+  "27e: … taken as below the bound: integrating: removed, the lane freed, no set-aside"
+ok "$(since le "$M" '[d["over"], d["handOver"]] if d["kind"] == "lead-error" else None' | cut -d' ' -f1)" "[true,true]" \
+  "27e: the third line reads over: true and handOver: true"
 M=$(cnt le)
 row "$TMP/lerow-l5.json" >/dev/null
 ok "$(since le "$M")|$(lecount l5)" "|3" "27e: its replay writes no second line"
+leup l5b
+for k in 1 2 3; do leplant l5b "{\"site\":\"command\",\"n\":$k,\"bound\":3,\"session\":\"other\"}"; done
+for k in 1 2; do leplant l5b "{\"site\":\"command\",\"n\":$k,\"bound\":3}"; done
+M=$(cnt le)
+out=$(row "$(lerow l5b "$D_CARRIES")")
+has "$out" "l5b: lead error (merge-step 3/3): at the bound, so no redo: set aside as before" "27e: the sixth of the task's total says it is at the bound"
+ok "$(fm l5b status)|$(since le "$M")" "status: blocked|lead-error:l5b lane-freed:l5b set-aside:l5b" "27e: its line, then today's set-aside"
+ok "$(since le "$M" '[d["over"], d["handOver"]] if d["kind"] == "lead-error" else None' | cut -d' ' -f1)" "[true,false]" \
+  "27e: the sixth line reads over: true and handOver: false"
 leup l6
 for k in 1 2; do leplant l6 "{\"site\":\"command\",\"n\":$k,\"bound\":3,\"session\":\"other\"}"; done
 has "$(row "$(lerow l6 "$D_CARRIES")")" "l6: lead error (merge-step 1/3)" "27e: another session's two lines do not count toward n"
@@ -1126,17 +1138,17 @@ echo "== 28. the lead-error verb (sites args-refusal, pre-check and command)"
 lev() { rrs lead-error --rollout "$V/le.md" "$@"; }
 M=$(cnt le)
 ok "$(printf 'thread:args-refused: verifySlot: missing\nmore\n' | lev --tasks l9 --site args-refusal --call task)" \
-  '{"rollout": "le", "task": "l9", "site": "args-refusal", "n": 1, "bound": 3, "over": false, "total": 1}' "28: its JSON line"
+  '{"rollout": "le", "task": "l9", "site": "args-refusal", "n": 1, "bound": 3, "over": false, "handOver": false, "total": 1}' "28: its JSON line"
 ok "$(since le "$M" '[d["task"], d["site"], d["n"], d["bound"], d["call"], d["evidence"], "over" in d, "session" in d]')" \
   '["l9","args-refusal",1,3,"task","thread:args-refused: verifySlot: missing",false,false]' "28: its line: evidence the first line, no session unset"
 lev --tasks l9 --site pre-check </dev/null >/dev/null
 ok "$(CLAUDE_CODE_SESSION_ID=s9 lev --tasks l9 --site command </dev/null)" \
-  '{"rollout": "le", "task": "l9", "site": "command", "n": 1, "bound": 3, "over": false, "total": 3}' "28: another session counts from 1"
-ok "$(lev --tasks l9 --site command </dev/null)" '{"rollout": "le", "task": "l9", "site": "command", "n": 3, "bound": 3, "over": true, "total": 4}' \
-  "28: the third in this session is over the bound"
+  '{"rollout": "le", "task": "l9", "site": "command", "n": 1, "bound": 3, "over": false, "handOver": false, "total": 3}' "28: another session counts from 1"
+ok "$(lev --tasks l9 --site command </dev/null)" '{"rollout": "le", "task": "l9", "site": "command", "n": 3, "bound": 3, "over": true, "handOver": true, "total": 4}' \
+  "28: the third in this session is over the bound, below the hand-over total: handOver"
 ok "$(since le "$M" 'd.get("over")' | tr ' ' '\n' | tail -1)|$(since le "$M" 'd.get("session")' | tr ' ' '\n' | sed -n 3p)" 'true|"s9"' \
   "28: the over line reads over: true; a session's line carries it"
-ok "$(lev --site command </dev/null)" '{"rollout": "le", "task": null, "site": "command", "n": 1, "bound": 3, "over": false, "total": 1}' \
+ok "$(lev --site command </dev/null)" '{"rollout": "le", "task": null, "site": "command", "n": 1, "bound": 3, "over": false, "handOver": false, "total": 1}' \
   "28: a command of no task counts under the rollout"
 out=$(THREAD_EVENTS_DIR="$TMP/le-file/events" lev --tasks l9 --site command </dev/null 2>"$TMP/le-err"); rc=$?
 ok "$rc|$out" "1|" "28: an unreadable or unwritable events dir: exit 1, nothing on stdout"

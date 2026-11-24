@@ -219,7 +219,7 @@ function check(f) {
   const bySilence = group(/^- judged by silence/, /^- judged by its own bound/)
   const byBound = group(/^- judged by its own bound/, /^- judged by a condition/)
   const never = group(/^- never judged by silence/, /^\*\*What `stalled` means/)
-  const CAUSES = ['sign-off', 'paused', 'room-stop', 'not-started', 'merge-hold', 'regenerating', 'surface-wait', 'leg-wait', 'catch-up',
+  const CAUSES = ['sign-off', 'paused', 'room-stop', 'not-started', 'merge-hold', 'regenerating', 'surface-wait', 'leg-wait', 'catch-up', 'hand-over',
     'cool-down', 'heat', 'away-cap', 'trickle', 'last-start', 'approved-queue', 'pr-hold', 'you']
   const named = (txt) => CAUSES.filter((c) => new RegExp('`' + c + '`').test(txt))
   fail('watchdog', !wdc.includes('reconcile-rollout.py moving --rollout <rollout-note>') ||
@@ -230,7 +230,7 @@ function check(f) {
     !wdc.includes('The Watchdog is Chorus\'s Companion alone: with Chorus not running nothing watches, and a stall is read when Lachy runs /thread:status') ||
     /launchd|watchdog\.py|ntfy|only notif|notif(?:y|ies) (?:Lachy|him)/i.test(wdc) ||
     /a live lead never reads/i.test(wdc) ||
-    JSON.stringify(silenceJudged) !== JSON.stringify(['merge-hold', 'regenerating', 'surface-wait', 'leg-wait', 'catch-up']) ||
+    JSON.stringify(silenceJudged) !== JSON.stringify(['merge-hold', 'regenerating', 'surface-wait', 'leg-wait', 'catch-up', 'hand-over']) ||
     JSON.stringify(named(bySilence).sort()) !== JSON.stringify([...silenceJudged].sort()) ||
     JSON.stringify(named(byBound)) !== JSON.stringify(['room-stop']) ||
     !['paused', 'sign-off', 'not-started', 'you'].every((c) => named(never).includes(c)) ||
@@ -345,10 +345,11 @@ test('control: a lane-site exit 2 routed to § 7, or the marker clause dropped, 
 
 test('control: an absolute live-lead claim, a silence list off SILENCE_JUDGED, a launchd fallback back, or nothing-watches dropped, fails watchdog', () => {
   only('status', 'So `stalled` is a reason to look', 'So a live lead never reads `stalled`; it is a reason to look', 'watchdog')
-  only('rr', 'SILENCE_JUDGED = ("merge-hold", "regenerating", "surface-wait", "leg-wait", "catch-up")',
-    'SILENCE_JUDGED = ("merge-hold", "regenerating", "surface-wait", "leg-wait")', 'watchdog')
-  // p54-14: an Engine catch-up is judged by silence, its status line kept beside the list
+  only('rr', 'SILENCE_JUDGED = ("merge-hold", "regenerating", "surface-wait", "leg-wait", "catch-up", "hand-over")',
+    'SILENCE_JUDGED = ("merge-hold", "regenerating", "surface-wait", "leg-wait", "catch-up")', 'watchdog')
+  // p54-14: an Engine catch-up is judged by silence, its status line kept beside the list; p55-5: a Lead hand-over too
   only('status', '  - `catch-up` (at `--stall-after`:', '  - an Engine catch-up (at `--stall-after`:', 'watchdog')
+  only('status', '  - `hand-over` (at `--stall-after`:', '  - a Lead hand-over (at `--stall-after`:', 'watchdog')
   only('status', '  - `leg-wait` (at `--stall-after`,', '  - a Leg (at `--stall-after`,', 'watchdog')
   only('status', '  - `merge-hold` (at `--stall-after`:', '  - `pr-hold`, and `merge-hold` (at `--stall-after`:', 'watchdog')
   only('status', 'The Watchdog is Chorus\'s Companion alone: with Chorus not', 'The Watchdog is Chorus\'s Companion, and a launchd job when Chorus is not running: with Chorus not', 'watchdog')

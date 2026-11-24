@@ -1732,6 +1732,27 @@ test('the Engine catch-up (p54-14): its kind, the paused mode, the idle reason, 
   assert.ok(!listing(ev(home)).includes('r2.jsonl'), 'nothing written for a refused line')
 })
 
+// p55-5 (ADR 0085 d3, d5, d6 and d9): the Lead hand-over's values, each accepted at its kind, and a malformed one refused.
+test('the Lead hand-over (p55-5): its kind, the paused mode, the idle reason, the entry stop, lead-error handOver and time-lost other', (t) => {
+  const home = tmpHome(t)
+  const good = [['hand-over', { outcome: 'drain', cause: 'compactions', session: 's1', count: 2 }],
+    ['hand-over', { outcome: 'bound', cause: 'lead-error', drainMinutes: 161 }],
+    ['hand-over', { outcome: 'handed', listed: true, session: 's1', gated: true }],
+    ['hand-over', { outcome: 'not-handed', why: 'his pause' }], ['paused', { mode: 'hand-over' }],
+    ['idle-slots', { reason: 'hand-over-drain', free: 1, settings: { parallel_ceiling: 2 } }], ['lead-entry', { by: 'stage', stop: 'hand-over' }],
+    ['lead-error', { site: 'command', n: 3, bound: 3, over: true, handOver: true }]]
+  for (const [kind, f] of good) emitOk(home, ['--rollout', 'r', '--kind', kind, '--json', JSON.stringify(f)], { env: EV(home) })
+  emitOk(home, ['--kind', 'time-lost', '--json', JSON.stringify({ ...TL.record, other: { 'hand-over': 0.5, 'hand-over-drain': 0.25 } })], { env: EV(home) })
+  assert.deepEqual(lines(path.join(ev(home), 'r.jsonl')).map((l) => l.kind), good.map(([k]) => k))
+  for (const [kind, f] of [['hand-over', { outcome: 'handing' }], ['hand-over', { outcome: 'drain', cause: 'compaction' }],
+    ['hand-over', { outcome: 'handed', listed: 'yes' }], ['paused', { mode: 'handover' }],
+    ['lead-error', { site: 'command', n: 1, bound: 3, handOver: true }]]) {
+    const r = cli(home, ['emit', '--rollout', 'r2', '--kind', kind, '--json', JSON.stringify(f)], { env: EV(home) })
+    assert.equal(r.status, 2, `${kind} ${JSON.stringify(f)}: ${r.stderr}`)
+  }
+  assert.ok(!listing(ev(home)).includes('r2.jsonl'), 'nothing written for a refused line')
+})
+
 // ADR 0080 (p47-9): merge-settings.py's four kinds, one line per change of a repo's merge settings and per verdict on it.
 const CHANGED = { id: 'a'.repeat(12), repo: 'o/r', branch: 'master', source: 'ruleset', rulesetId: 42, block: 'unreported-context',
   change: 'replaced', context: 'build', newContext: 'build-and-test', before: '{"rules":[]}', after: '{"rules":[]}',
