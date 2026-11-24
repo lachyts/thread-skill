@@ -1830,6 +1830,21 @@ through time, from attention to merged PRs. Terms only — no implementation.
   never moves the Engine snapshot: it is the engine's pause, not Lachy's
   moment, so its signed-gate handles keep their cache replay (ADR 0043).
   _Avoid_: stuck, gate hold.
+- **Lead hand-over** — a parallel rollout's lead ending its own session at a
+  fixed count of compactions (two), after a drain, so a fresh lead takes the
+  queue. The count is the engine's, never an operator setting or the lead's
+  recall. It is no **Handoff**: it writes no doc and starts no session itself;
+  the rollout waits on the **Waiting list** for its fresh lead, as a chain
+  does between **Leg**s. A serial chain needs none: a Leg already hands over
+  (ADR 0085; not yet built: Phase 55). _Avoid_: handoff, rotation, restart,
+  compaction limit.
+- **Lead error** — a stop the lead's own launch caused (a refused anchor, a
+  flag a script does not take, a script path that is not there), which the
+  lead redoes from the values the engine names and no task pays for: it
+  spends none of the task's retries and is never a set-aside, so it never
+  reaches Lachy. Not an **Agent-fixable block** (an agent's stop, which the
+  automatic retry budgets) nor a **Stop** (the run halting) (ADR 0085; not
+  yet built: Phase 55). _Avoid_: launch failure, lead bug, retry.
 - **Stalled rollout** — a rollout with work it could do and nothing moving:
   its lead, session or Mac stopped, or a hold froze more than it threatens
   (ADR 0048): a recorded halt narrower than the work beside it. A wait that is
