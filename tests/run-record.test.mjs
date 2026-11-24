@@ -2104,6 +2104,29 @@ print(json.dumps(out))`, { env: EV(home) })
   assert.equal(lines[0].origin, 'o/r')
 })
 
+// p55-3 (ADR 0085 d8): a Lead error's line. Site merge-step alone carries the row's key and the pair it names.
+test('lead-error: accepted with and without a task; a bad site, over false, a merge-step line with no row and a row on another site refused', (t) => {
+  const home = tmpHome(t)
+  const r = api(home, `
+row = {"site": "merge-step", "n": 1, "bound": 3, "call": "integrate", "row": {"startedAt": "2026-10-05T10:01+00:00"},
+       "passed": "a" * 40, "named": "b" * 40}
+out = [m.emit("x", "lead-error", task="t", fields=row, strict=True),
+       m.emit("x", "lead-error", fields={"site": "command", "n": 3, "bound": 3, "over": True, "evidence": "usage: x"}, strict=True)]
+for f in ({"site": "lane", "n": 1, "bound": 3}, {"site": "command", "n": 1, "bound": 3, "over": False},
+          {k: v for k, v in row.items() if k != "row"}, {"site": "pre-check", "n": 1, "bound": 3, "passed": "a" * 40}):
+    try:
+        m.emit("x", "lead-error", task="t", fields=f, strict=True)
+        out.append("no raise")
+    except m.Refused:
+        out.append("Refused")
+print(json.dumps(out))`, { env: EV(home) })
+  assert.equal(r.status, 0, r.stderr)
+  assert.deepEqual(JSON.parse(r.stdout), [true, true, 'Refused', 'Refused', 'Refused', 'Refused'])
+  const got = lines(path.join(ev(home), 'x.jsonl'))
+  assert.deepEqual(got.map((l) => [l.task, l.site, l.n, l.over ?? null, l.row ?? null]),
+    [['t', 'merge-step', 1, null, { startedAt: '2026-10-05T10:01+00:00' }], [null, 'command', 3, true, null]])
+})
+
 test('an unexpected exception while writing is a warning and False, strict or not', (t) => {
   const home = tmpHome(t)
   const r = api(home, `

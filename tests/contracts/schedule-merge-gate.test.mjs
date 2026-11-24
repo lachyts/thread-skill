@@ -7,7 +7,9 @@
 //   later step, the suffixes, and no tool name and no plain ask in it;
 // - schedule's Scope, its Don't on git, the confirm batch, step 6's {{VERIFIER}}, step 8's `Verifier:` and `Merge gate:`
 //   lines, § Verification's Merge-gate regression and the Don't on deriving a gate;
-// - execute § 3's paragraph and § 4.5 step 4's exit-1 row (the reason from its last ERROR: line), reflect § 11's trace,
+// - execute § 3's paragraph and § 4.5 step 4's exit-1 row (the reason from its last ERROR: line, which the engine cuts from
+//   merge-task's own output file, p55-3: step 4's output-file sentence, its merge-task set-aside and the Codex launch
+//   form that gives Codex the same file), reflect § 11's trace,
 //   the run_record and reconcile docstrings (the one cause both readers take, _merge_task_cause), CONTEXT.md's
 //   **Merge gate** entry and the ADR;
 // - merge-gate.py names no tool, and no touched file writes the possessive `giflab's ADR` (refs rule A would resolve
@@ -40,6 +42,10 @@ const GAPS = 'A cut step (`runTruncated`), a remote or nested reusable workflow 
 const COMPARED = 'An entry is compared when it is not `cut`, has a counted job, and every counted job in its closure is read.'
 const UNREAD = 'It is partly read when it is `cut` or some counted job is unread, and at least one counted job is read; it is unread when it is ' +
   '`unmatched`, has no counted job, or none is read. A partly read or unread entry is never covered.'
+// p55-3 (ADR 0085 d8): step 4 keeps merge-task's output file, and the merge-task set-aside cuts the exit-1 reason from it.
+const OUT_FILE = "and keep **merge-task's output file**: the file the harness names for this background command, in its launch result and in its completion notification, which holds its stdout and stderr together"
+const MT_ASIDE = '`python3 ${CLAUDE_PLUGIN_ROOT}/skills/execute/scripts/lead-integrate.py set-aside --note <task note> --repo <repoPath> --merge-task <F> | python3 ${CLAUDE_PLUGIN_ROOT}/skills/execute/scripts/reconcile-rollout.py reconcile --result -`'
+const CODEX_FILE = 'In Codex each `merge-task.sh` launch line gains ` > <repoPath>/.claude/integration/<slug>.merge-task.out 2>&1; cat <repoPath>/.claude/integration/<slug>.merge-task.out`'
 const NOT_READ = '`merge gate: not read (<n> required contexts unread: <context (its read gaps)>, …)`, never "covered"'
 const COVERED = '`merge gate: <compared contexts>, covered by the verifier`'
 const ONLY = '"covered" names only compared contexts'
@@ -140,7 +146,9 @@ function check(f) {
   const row1 = (f.execute ?? '').split('\n').find((l) => l.startsWith('   | 1 | *Set aside* at its own run')) ?? ''
   need('execute', all(s3, ['**The verifier and the merge gate (giflab ADR 0012 d4).**', 'reasonClass `merge-gate`',
     "read off the stop's own cause: the reason from its last `ERROR:` line to the end", 'that is a schedule-time miss of schedule § 2.5 (its merge gate), and reflect § 11 traces it there']) &&
-    has(row1, 'reason `merge-task: <its output from its last ERROR: line to the end>`'))
+    has(row1, 'reason `merge-task: <its output from its last ERROR: line to the end>` (the merge-task set-aside, above)') &&
+    has(section(f.execute, /^### 4\.5\. /), OUT_FILE) && has(section(f.execute, /^### 4\.5\. /), MT_ASIDE) &&
+    has(section(f.execute, /^## Native runtime binding/), CODEX_FILE))
   need('reflect', all(section(f.reflect, /^### 11\. /), ['`merge-gate`', 'traces to schedule § 2.5 (its merge gate), a schedule-time miss']))
   need('records', all(docstring(f.runRecord), ['merge-task | merge-gate | declined', 'a merge-task stop whose own cause (the reason from its last `ERROR:` line to the end) is a red required check']) &&
     all(docstring(f.reconcile), ['merge-gate (a reason starting `merge-task` whose own cause holds MERGE_GATE_MARK',
@@ -209,6 +217,9 @@ test('control: schedule\'s Scope, Don\'ts, confirm batch, step 6, step 8 and § 
 
 test('control: execute, reflect, the records, CONTEXT.md and the ADR each fail their rule', () => {
   only(edit('execute', 'reason `merge-task: <its output from its last ERROR: line to the end>`', 'reason `merge-task: <its output>`'), 'execute', 'the whole output')
+  only(edit('execute', OUT_FILE, 'and read its exit'), 'execute', 'no output file kept')
+  only(edit('execute', MT_ASIDE, '`printf \'%s\' "<reason>" | lead-integrate.py set-aside --kind own`'), 'execute', 'the lead types the reason')
+  only(edit('execute', CODEX_FILE, 'In Codex merge-task runs in the foreground'), 'execute', 'no Codex file')
   only(edit('reflect', 'traces to\n  schedule § 2.5 (its merge gate), a schedule-time miss', 'traces to\n  execute § 4.5'), 'reflect', 'traced elsewhere')
   only(edit('runRecord', 'merge-task | merge-gate | declined', 'merge-task | declined'), 'records', 'run_record lacks it')
   only(edit('reconcile', 'printed before an infra rerun that a later `ERROR:` line follows stays merge-task)', 'anywhere)'), 'records', 'the mark anywhere')

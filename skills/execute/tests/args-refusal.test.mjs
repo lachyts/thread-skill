@@ -1,7 +1,7 @@
 // p32-1 (execute § 4.5 *Args refusal*): every refusal the engine makes before any dispatch carries one sentinel,
 // `thread:args-refused`, at the head of its message, so the lead tells it from a *Lost call* by a *contains* match even
 // when the notification wraps or cuts the text. Such a call dispatched nothing and the same args are refused again, so
-// the lead halts the entry once and never resumes it.
+// the lead never resumes it: it redoes the launch as a Lead error (p55-3, ADR 0085 d8), a halt only at its bound.
 //
 // Three parts:
 // - the constant and the message shape (loadEngine);

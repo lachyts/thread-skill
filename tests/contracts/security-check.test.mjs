@@ -117,7 +117,7 @@ const PRE_SENTENCES = [
   'An integrate call carries it too: Integration scans its own commits and merge resolutions (`scan --anchor`).',
   `A mismatch writes nothing and halts as above with \`${PRE}\`, an integrate call's lane freed as above. A resume is exempt from it too.`,
 ]
-const BULLET_PRE = `- § 4's verifySlot pre-check finds a fresh call's \`args.securityCheck\` (a task call, a seeded revise or an integrate call) not this entry's \`verify-timeout\` \`securityCheck\` (\`${PRE}\`: the same writes as for \`args.verifySlot\`, an integrate call's lane freed the same way; a lead bug: re-invoke), or`
+const BULLET_PRE = `- § 4's verifySlot pre-check finds a fresh call's \`args.securityCheck\` (a task call, a seeded revise or an integrate call) not this entry's \`verify-timeout\` \`securityCheck\` (\`${PRE}\`: the same writes as for \`args.verifySlot\`, an integrate call's lane freed the same way; a Lead error first, this halt at its bound or on an operator's edit: re-invoke), or`
 const BULLET_5 = `- \`reconcile-rollout.py verify-timeout\` exits 5 at an entry (§ 3: \`${HALT5}\`: nothing is stamped, cleared or dispatched; fix or remove the rollout's \`security_checks:\`, or install gitleaks, as its ERROR line says, then re-invoke), or`
 const CONTEXT_SERIAL = [
   "A serial chain's Leg runs it too, on each task with commits, before any review and again before `leg.py done`",
@@ -325,7 +325,7 @@ test('control: the jsonc entry back to never on an integrate call fails args', (
 
 test('control: § 7 without the exit-5 bullet, or a third free-lane phrase, fails halts', () => {
   only('execute', BULLET_5 + '\n', '', 'halts', 'no exit-5 bullet')
-  only('execute', "an integrate call's lane freed the same way; a lead bug: re-invoke), or", `an integrate call's lane freed with \`${FREE_PHRASE}; a lead bug: re-invoke), or`, 'halts', 'a third free-lane phrase')
+  only('execute', "an integrate call's lane freed the same way; a Lead error first, this halt at its bound or on an operator's edit: re-invoke), or", `an integrate call's lane freed with \`${FREE_PHRASE}; a Lead error first, this halt at its bound or on an operator's edit: re-invoke), or`, 'halts', 'a third free-lane phrase')
 })
 
 test('control: a reason off the kept list, or no pattern for it, fails kept', () => {

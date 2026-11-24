@@ -7,6 +7,8 @@
 # Tests 8-10 (ADR 0080): a no-runner block freed end to end by merge-settings.py and merged on a re-polled BLOCKED; the
 # unreported-context probe at the never-appeared and NON-check sites (a renamed job set aside, its wait while CI runs,
 # its one re-watch, transient reads as 8), the PR's own rename freed end to end, and today's exit 1 where it cannot tell.
+# 6e and 7e (p55-3, ADR 0085 d8): the lead's set-aside of a real exit-1 run and a real signal run is cut by the engine
+# from merge-task's own output and sentinel (`lead-integrate.py set-aside --merge-task`), as the exit-4 rows' are.
 # Hermetic on the shared fake gh (tests/fixtures/merge-task/fake-gh.py); a watch slice is 1 s, so each cut costs 1 s.
 set -uo pipefail
 cd "$(dirname "$0")/.."
@@ -131,6 +133,7 @@ has "$err" "ERROR: required checks never appeared for PR #5 — no CI runs in fl
   "6. the never-appeared text, MERGE_TASK_INFRA's"
 has "$err" 'held only by jobs no runner took: job "self-hosted (arm)" queued' "6. names the held job"
 has "$err" "with no runner (run 7, job 8)" "6. names its run and job"
+cp "$tmp/repo/.claude/merge-task.status" "$tmp/6.status"; printf '%s\n' "$out" > "$tmp/6.out"   # for 6e, below
 
 # 7. A signal mid-wait names the wait it was in (ADR 0033 d4 as amended): the in-flight line lists each unfinished job on
 #    the head, a no-runner one marked, and the run's last line is `last wait: <that line>`, the reason the lead copies.
@@ -151,6 +154,7 @@ for form in a b; do
   kill -TERM "$pid"; wait "$pid"; rc=$?
   out=$(cat "$f7"); last=$(tail -1 "$f7")
   ok "$rc" 143 "7$form. SIGTERM mid-wait exits 143"; ok "$(sent)" "failed:143" "7$form. failed:143"
+  cp "$tmp/repo/.claude/merge-task.status" "$tmp/$form.7.status"   # for 7e, below
   has "$out" "CI in flight on head — waiting on: " "7$form. the in-flight line names what it waits on"
   has "$out" "build (in_progress)" "7$form. … the live job"
   case "$last" in
@@ -182,11 +186,12 @@ notes() {  # a rollout and its task t on PR #5, awaiting Integration
     > "$TD/t.md"
 }
 reason() { printf '%s\n' "$out" | sed -n 's/^set-aside reason: //p' | head -1; }
-aside() {  # aside <reason> <now>: the lead's exit-4 set-aside, reconciled (the reason verbatim)
-  printf '%s' "$1" | python3 "$LI" set-aside --note "$TD/t.md" --kind integration \
+aside() {  # aside <merge-task's output file> <now>: the lead's exit-4 set-aside, reconciled, its reason cut by the engine
+          # from merge-task's own output and sentinel (step 4's merge-task set-aside, p55-3), never typed
+  python3 "$LI" set-aside --note "$TD/t.md" --repo "$tmp/repo" --merge-task "$1" \
     | python3 "$RR" reconcile --result - --tasks-dir "$TD" --now "$2" >/dev/null
 }
-same_stop() {  # same_stop <reason>: set aside at 08:00, retried at 08:15, the same stop at 08:30 (the settings point)
+same_stop() {  # same_stop <output file>: set aside at 08:00, retried at 08:15, the same stop at 08:30 (the settings point)
   aside "$1" 2026-10-03T08:00:00Z
   python3 "$RR" auto-retry --tasks t --rollout "$TD/ro.md" --tasks-dir "$TD" --now 2026-10-03T08:15:00Z >/dev/null 2>&1 \
     || echo "FAIL - same_stop: auto-retry"
@@ -208,6 +213,30 @@ print(json.dumps({"total_count": len(runs), "check_runs": runs}))' "$@"
 mss() { printf '%s\n' "$@" > "$MT_STATE/pr/5/mergeStateStatus.seq"; }
 nrows() { awk '$0=="## Merge settings"{on=1; next} on && /^## /{exit} on && NF' "$TD/t.md"; }
 
+# 6e, 7e (p55-3, ADR 0085 d8): step 4's merge-task set-aside cuts its reason from merge-task's own output file and
+#     sentinel (`set-aside --merge-task`), never the lead's words: test 6's real exit-1 run and test 7a's real SIGTERM
+#     run, each sentinel put back as that run wrote it.
+notes
+for c in 6 7a; do
+  if [ "$c" = 6 ]; then st="$tmp/6.status"; f="$tmp/6.out"; else st="$tmp/a.7.status"; f="$tmp/7a.out"; fi
+  cp "$st" "$tmp/repo/.claude/merge-task.status"
+  sa=$(python3 "$LI" set-aside --note "$TD/t.md" --repo "$tmp/repo" --merge-task "$f"); src=$?
+  ok "$src" 0 "${c}e. set-aside --merge-task on the real run: exit 0"
+  d=$(j "$sa" 'd["tasks"][0]["blockerDiagnosis"]')
+  if [ "$c" = 6 ]; then
+    ok "$(j "$sa" 'd["tasks"][0]["leadSetAside"]')" integration "6e. GitHub's side: set aside at Integration"
+    has "$d" "integration: merge-task exit 1, GitHub-side: ERROR: required checks never appeared for PR #5" \
+      "6e. the diagnosis carries merge-task's own ERROR: line"
+    has "$d" 'held only by jobs no runner took: job "self-hosted (arm)"' "6e. … to its end"
+  else
+    case "$d" in
+      "integration: merge-task signalled twice (143): last wait: PR #5 — required checks not created yet; CI in flight on head — waiting on:"*)
+        ok y y "7e. a signal: merge-task signalled twice (143): its last wait line" ;;
+      *) ok "$d" "integration: merge-task signalled twice (143): last wait: …" "7e. a signal: merge-task signalled twice (143): its last wait line" ;;
+    esac
+  fi
+done
+
 # 8. A required job no runner takes, end to end: merge-task sets it aside (no-runner), the lead's set-aside and its retry
 #    reach the same stop, merge-settings.py removes the check, `inputs` re-enters it once (22a), and merge-task merges
 #    on the re-polled BLOCKED (S2): GitHub folds the change in lazily, never the NON-check gate's 1.
@@ -218,7 +247,8 @@ chk 8 "$(row 'self-hosted (arm)' pending 8)" "" 30
 run 5 "$I" "$B"
 ok "$rc" 4 "8. merge-task: exit 4 no-runner"
 R=$(reason); has "$R" "integration: no-runner: required job \"self-hosted (arm)\"" "8. (its reason)"
-same_stop "$R"
+printf '%s\n' "$out" > "$tmp/8.out"
+same_stop "$tmp/8.out"
 out=$(free_t); frc=$?
 ok "$frc" 0 "8. merge-settings.py free: exit 0 at the settings point"
 ok "$(python3 -c 'import json,sys; print([c["context"] for c in json.load(open(sys.argv[1]))["checks"]])' "$MT_STATE/rsc.json")" "['ci']" \
@@ -294,7 +324,8 @@ rsc '{"strict": true, "checks": [{"context": "ci", "app_id": null}, {"context": 
 green ci 1; cruns "$I" ci build-and-test > "$MT_STATE/checkruns.$I"
 run 5 "$I" "$B"
 ok "$rc" 4 "9c. the PR's own rename: exit 4 unreported-context"; R=$(reason); has "$R" 'required check "build"' "9c. … naming build"
-same_stop "$R"
+printf '%s\n' "$out" > "$tmp/9c.out"
+same_stop "$tmp/9c.out"
 : > "$MT_STATE/writes.log"; out=$(free_t); frc=$?
 ok "$frc|$(grep -c . "$MT_STATE/writes.log")" "0|1" "9c. free: one write"
 ok "$(sed -n 's/^PATCH [^ ]* //p' "$MT_STATE/writes.log")" '{"checks":[{"app_id":-1,"context":"ci"},{"app_id":15368,"context":"build-and-test"}],"strict":true}' \

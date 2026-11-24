@@ -77,7 +77,7 @@ test('execute § 4.5 Run record: the lead\'s calls, their forms and order, best-
 
 test('each new verb is documented in the module docstring and wired in main()', () => {
   const doc = rrs.slice(0, rrs.indexOf('\nimport argparse'))
-  for (const verb of ['bind-run', 'free-lane', 'hold', 'record-pause']) {
+  for (const verb of ['bind-run', 'free-lane', 'hold', 'record-pause', 'lead-error']) {   // lead-error: p55-3, ADR 0085 d8
     assert.ok(new RegExp(`^  ${verb}\\s`, 'm').test(doc), `${verb} documented`)
     assert.ok(rrs.includes(`sub.add_parser("${verb}"`), `${verb} wired`)
   }

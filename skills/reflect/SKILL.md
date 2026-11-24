@@ -449,7 +449,7 @@ gaps reach Lachy through the decision task (step 15).
 
 ### 11. The reading
 
-For each rollout, read its `friction` items, of nine kinds (`ask`, `set-aside`, `retry`, `takeout`, `descope`, `repair`,
+For each rollout, read its `friction` items, of ten kinds (`ask`, `set-aside`, `retry`, `takeout`, `lead-error`, `descope`, `repair`,
 `escape`, `churn`, and a serial chain's `restart`), and trace each to the skill rule or ADR that produced it:
 
 - An `ask` (a Recorded answer, a sign-off, a retry hand-back, a merge hold, a RACE decision, a git-env hold) is a
@@ -487,6 +487,11 @@ For each rollout, read its `friction` items, of nine kinds (`ask`, `set-aside`, 
   the same feedback, left the rollout with its dependants (`with` names the task a dependant left with). Listed, never
   alerted (decision 7): trace why the task could not land, which is the next orient's rewrite evidence (decision 6).
   Its wait is priced as the stalls `take-out` cause.
+- A `lead-error` is execute § 4.5's Lead error (ADR 0085 d8): a stop the lead's own launch caused, which it redid with
+  no set-aside and no retry spent (`site` names which: `args-refusal`, `pre-check`, `merge-step` or `command`). Listed,
+  never alerted, as a `takeout` is: trace it to the step whose command the lead typed wrong, which is that step's
+  wording or a command a script could build instead (ADR 0085 d7). One with `over` true reached the bound and took
+  its site's old route (a halt, a set-aside or the exit's route): read it beside that route's own item.
 - A `descope` is repair § 2–§ 5's descope and its hand-back (ADR 0035): trace why the task's scope could not land
   whole.
 - A `repair` item is traced by its shape: `race-decided` is read with its `raceDecided` ask, never twice;

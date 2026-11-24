@@ -441,6 +441,17 @@ Kinds (T: a task is required; `?` marks an optional field; every enum is closed)
                      catch-up's pause). p29-10:
                      reconcile-rollout.py record-entry, one per loop entry and per heartbeat tick. ledger.py reads a
                      lead-entry only by its ts (stop_spans), so neither value feeds a sum.
+  lead-error         site (args-refusal | pre-check | merge-step | command: execute § 4.5 *Lead error*'s four sites),
+                     n (an int >= 1: this Lead error's count in its lead session, per task, or per rollout for one with
+                     no task), bound (an int >= 1: reconcile-rollout.py's LEAD_ERROR_BOUND); over? (true only: n reached
+                     the bound, so there was no redo and the stop took its site's old route), session? (the lead's
+                     CLAUDE_CODE_SESSION_ID), call? (task | revise | integrate), evidence? (at most 200 characters: the
+                     refusal's or the stderr's first line), row? ({startedAt, finishedAt?}: the integrate row's
+                     metrics, the key a replay is read by), passed?, named? (40 lowercase hex each: the value the lead
+                     passed and the one the engine names). Site merge-step carries row, passed and named; no other
+                     site carries any of them. A task is optional. p55-3, ADR 0085 d8: reconcile-rollout.py
+                     `lead-error` writes sites args-refusal, pre-check and command (the lead's call), and its reconcile
+                     writes merge-step; a Reflection lists each (reflect.py's friction), never alerted.
   suite-started      suite (s- and 16 lowercase hex, shared with its suite-ended), by (task | integration | race |
                      completion), runner (agent | lead), sha (the tree's HEAD), dirty (a bool: tracked changes on
                      it); load? (exactly 3 finite numbers >= 0: the 1, 5 and 15 minute load average), diff? (12 hex:
@@ -1673,6 +1684,13 @@ MAX_NON_INERT = 20
 REASON_MAX = 200
 SUITE_ID_RE = re.compile(r"s-[0-9a-f]{16}\Z")
 HEX12_RE = re.compile(r"[0-9a-f]{12}\Z")
+# p55-3 (ADR 0085 d8), the Lead error: execute § 4.5 *Lead error*'s four sites; merge-step alone carries the row's key
+# and the pair (LEAD_ERROR_ROW_FIELDS), the cross-field rule in _check_fields.
+LEAD_ERROR_SITES = ("args-refusal", "pre-check", "merge-step", "command")
+LEAD_ERROR_CALLS = ("task", "revise", "integrate")
+LEAD_ERROR_ROW_FIELDS = ("row", "passed", "named")
+LEAD_ERROR_EVIDENCE_MAX = 200
+HEX40_RE = re.compile(r"[0-9a-f]{40}\Z")
 
 
 def _calls(v):
@@ -1705,6 +1723,17 @@ def _suite_id(v):
 
 def _hex12(v):
     return None if isinstance(v, str) and HEX12_RE.match(v) else "12 lowercase hex"
+
+
+def _hex40(v):
+    return None if isinstance(v, str) and HEX40_RE.match(v) else "40 lowercase hex"
+
+
+def _lead_error_row(v):
+    """lead-error's row (p55-3): the integrate row's own key, {startedAt, finishedAt?}, each a non-empty string."""
+    ok = isinstance(v, dict) and "startedAt" in v and set(v) <= {"startedAt", "finishedAt"} \
+        and all(isinstance(x, str) and x for x in v.values())
+    return None if ok else "an object {startedAt, finishedAt?} of non-empty strings"
 
 
 def _names(n, width):
@@ -1918,6 +1947,11 @@ KINDS = {
     "stopped": (False, {"cause": _enum(*STOP_CAUSES), "inferred": _bool, "calls": _calls},
                 {"at": _stampz, "boot": _stampz, "wake": _stampz, "reason": _short(REASON_MAX)}),
     "lead-entry": (False, {"by": _enum(*ENTRY_BYS)}, {"session": _str, "stop": _enum(*ENTRY_STOPS)}),
+    # p55-3 (ADR 0085 d8): reconcile-rollout.py `lead-error` and its reconcile; the cross-field rule in _check_fields.
+    "lead-error": (False, {"site": _enum(*LEAD_ERROR_SITES), "n": _int(1), "bound": _int(1)},
+                   {"over": _true, "session": _str, "call": _enum(*LEAD_ERROR_CALLS),
+                    "evidence": _short(LEAD_ERROR_EVIDENCE_MAX), "row": _lead_error_row, "passed": _hex40,
+                    "named": _hex40}),
     "suite-started": (False, dict(SUITE_REQUIRED, sha=_str, dirty=_bool),
                       {"load": _load3, "diff": _hex12, "waited": _seconds, "running": _int(0),
                        "runningWeight": _room(False)}),
@@ -2121,6 +2155,12 @@ def _check_fields(kind, fields):
                 raise Refused("take-out: cause dependant carries `with` and no %s" % ", ".join(TAKE_OUT_OWN_FIELDS))
         elif "with" in fields or len(own) != len(TAKE_OUT_OWN_FIELDS):
             raise Refused("take-out: cause %s carries %s and no `with`" % (fields["cause"], ", ".join(TAKE_OUT_OWN_FIELDS)))
+    if kind == "lead-error":
+        pair = [k for k in LEAD_ERROR_ROW_FIELDS if k in fields]
+        if fields["site"] == "merge-step" and len(pair) != len(LEAD_ERROR_ROW_FIELDS):
+            raise Refused("lead-error: site merge-step carries %s" % ", ".join(LEAD_ERROR_ROW_FIELDS))
+        if fields["site"] != "merge-step" and pair:
+            raise Refused("lead-error: only site merge-step carries %s" % ", ".join(LEAD_ERROR_ROW_FIELDS))
     if kind == "review-round" and "open" in fields and "blocking" in fields and fields["open"] > fields["blocking"]:
         raise Refused("review-round: open (%d) exceeds blocking (%d)" % (fields["open"], fields["blocking"]))
     if kind == "review-round" and "findings" in fields and ("filed" in fields or "unconfirmed" in fields):
