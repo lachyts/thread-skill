@@ -53,7 +53,7 @@ Subcommands:
       (best-effort, through reconcile-rollout.py's _event, which never raises). `inert` is always printed:
       {skip, why, globs, changed (at most 200), changedTotal, nonInert (at most 20), readers (at most 20)}; with
       no --verifier, no repo table, an empty list or a refused rollouts.toml (a land.sh timeout included) it gives
-      no skip and a `why`. Always prints branch, worktreePath,
+      no skip and a `why`. Always prints default (--default, which `call` reads from the record), branch, worktreePath,
       prHead, anchor, taskBase, mainSha, case, route, trouble, reason, landed (one {prUrl, title,
       files, taskPath} per first-parent commit in TB..B whose subject ends ` (#N)` or starts
       `Merge pull request #N `), unlisted (one {sha, subject, files} per other first-parent commit in
@@ -81,22 +81,61 @@ Subcommands:
       mergeCommit ≠ --head, an unwritable directory.
 
   call --repo R --slug S --note N [--row FILE|-] [--after shared-green|red|push-refused]
-      The integrate call's `integration`, whole (p47-11, execute § 4.5 step 3): the lead passes it verbatim and
-      types no sha. From the prepare record: headSha = its anchor, taskBase, mainSha, landed, branch,
-      worktreePath, and prepared = {anchor, taskBase}, the pair the engine's args check holds headSha and
-      taskBase to (a retyped sha is refused before dispatch). trouble: the trouble route's own with no --after;
-      the verify route's `--after shared-green` (["shared-file"] and leadMerge {mergeCommit: M, headSha: M,
-      baseSha: mainSha, verified: true}, M its merge commit, a shared file required, and the Mac verdict green for M,
-      else exit 2: `--after shared-green needs the Mac verdict green for M`), `--after red` (["red"],
-      plus "shared-file" when it had one) or `--after push-refused` ([]), the skip route's `--after push-refused`.
-      prUrl, reviewHistory, reviewRoundsUsed and rung are `inputs --row`'s integrate record; readyAt the note's
-      `ready:` (absent with none); startedAt a fresh stamp. Prints {integration, source, rungSource, rowRefused,
-      prUrlError}: a non-empty prUrlError launches nothing (the lead's set-aside, as with inputs). Exit 2
-      (`lead-integrate call: …`, nothing launched; `call` runs on the task that holds the lane, so execute's
-      *lead-integrate's exit 2* routes it to the Lane hold, ADR 0048: the lane's own command stops merging, never
-      the whole rollout): no record, an unreadable one or another slug's, a route that launches no integrate call
-      (merge, set-aside), an --after the route does not take, a record sha that is not 40-hex, or a --note that is
-      not the slug's.
+  call --revise --repo R --slug S --note N
+      A Workflow launch's whole args, which the lead passes verbatim and never assembles (ADR 0085 d7, execute § 4.5
+      steps 3 and 1.2): it builds, retypes, trims and adds to none of it. R is read in the one spelling prepare records
+      it in (Path(expanduser(R)): a trailing / or a /./ goes), and every path printed is built from that string, so the
+      engine's worktreeDir(repoPath, S) is the printed tree.
+      The integrate form (p47-11, step 3) prints {args, source, rungSource, rowRefused, prUrlError, budgetError}: args is
+      the launch args (below), mode 'integrate' and integration. integration comes from the prepare record: headSha =
+      its anchor, taskBase, mainSha, landed, branch, worktreePath (worktree_dir(R, S); a record whose tree is another
+      directory by realpath is exit 2, a mere spelling difference is not), and prepared = {anchor, taskBase}, the pair
+      the engine's args check holds headSha and taskBase to (a retyped sha is refused before dispatch). trouble: the
+      trouble route's own with no --after; the verify route's `--after shared-green` (["shared-file"] and leadMerge
+      {mergeCommit: M, headSha: M, baseSha: mainSha, verified: true}, M its merge commit, a shared file required, and the
+      Mac verdict green for M, else exit 2: `--after shared-green needs the Mac verdict green for M`), `--after red`
+      (["red"], plus "shared-file" when it had one) or `--after push-refused` ([]), the skip route's `--after
+      push-refused`. prUrl, reviewHistory, reviewRoundsUsed and rung are `inputs --row`'s integrate record; readyAt the
+      note's `ready:` (absent with none); startedAt a fresh stamp.
+      The --revise form (a seeded revise, step 1.2; it reads no prepare record, and --row or --after with it is usage)
+      prints {args, prUrlError, budgetError}: args is the launch args with touched (the rollout's `touched:`, omitted
+      when empty), unreachablePaths (rollout-settings.py resolve()'s `unreachable_paths` for the Project root, omitted
+      when []), task.arms (the note's `arms:` when it parses), task.unreachable (true only when the note stamps
+      `unreachable: true`, never false or null) and task.resume = {stage: revise, prUrl, branch (inputs'), worktreePath
+      (worktree_dir(R, S)), reviewHistory (inputs' history), reviewRoundsUsed (its last round), plan (the note's
+      `## Approved plan`, reconcile-rollout.py approved_plan, the reader `plan` prints)}; no mode. The note must read
+      `resumeAt: revise` with a history the engine's historyError takes.
+      The launch args, both forms, are read from disk only (_launch_args): rolloutSlug (the rollout note beside N that its
+      `rollout:` names), repoPath (R, which must be that note's `Project root:` by realpath), defaultBranch (the prepare
+      record's `default`, else default-branch.sh asked of origin, always so for --revise; omitted when `main`), verifier
+      (the rollout's `verifier:`, through reconcile's command reader), date (today), knownBaselineFailures (the rollout's
+      `## Known baseline failures` with HTML comments removed: every non-blank line, one leading `- ` stripped, a `none`
+      line skipped; omitted when none is left), envBootstrap (the rollout's `env_bootstrap:`, the same reader; omitted
+      when empty), ladder (ladder.py's load(), the object its CLI prints), verifySlot ({script: verify-slot.py beside
+      reconcile-rollout.py, slots: the machine's verify_slots}, verify-timeout's own), securityCheck (reconcile's
+      _security_check of the rollout, present only when it is on) and task: slug, taskPath, scope, planGate (execute
+      § 3.5: `plan_approval` on the task, then the rollout, else scope-gated), maxIterations, maxReviewRounds and
+      maxPlanRounds (each the first level that carries it, task then rollout, else rollout-settings.py's resolved value),
+      ignoreGate (true only when stamped), rung when the note's `rung:` is a rung name, else the legacy model (task, then
+      rollout) and effort (task) when stamped, and approvedGates (the note's `## Approved gates` bullets, the
+      annotation stripped, when it has the section). Never progress or gatePricer.
+      args is null beside a non-empty prUrlError (the note's pr: gives no PR URL the engine takes) or budgetError
+      (`invalid round budget: <key> on [[S]] must be an integer >= 1, got '<raw>'`: a task-level max_iterations,
+      max_review_rounds or max_plan_rounds stamp that is not an integer >= 1, an empty one included, read from N alone
+      before any read of the rollout note or the rollout settings; the integrate form's prepare-record exit 2s, and
+      --revise's resumeAt and history ones, come first): the lead launches nothing and writes its own set-aside
+      (execute § 4.5).
+      Exit 2 (`lead-integrate call: …`, nothing printed, nothing launched). The integrate form's: no record, an
+      unreadable one or another slug's, a route that launches no integrate call (merge, set-aside), an --after the route
+      does not take, a record sha that is not 40-hex, a record tree that is another directory. --revise's: a note not at
+      resumeAt revise, a history the engine refuses, a refused unreachable_paths read. Both forms': an R that is not
+      absolute after expanduser, a --note that is not the slug's or is unreadable, `scope: read-only`, no rollout note,
+      an R that is not its Project root, no `verifier:` or a `verifier:` or `env_bootstrap:` the command reader refuses,
+      a rollout-level round-budget stamp that is not an integer >= 1, refused rollout settings, a refused ladder file,
+      no verify-slot.py, a refused `security_checks:`, a default branch origin does not answer. The integrate form runs
+      on the task that holds the lane, so execute's *lead-integrate's exit 2* routes its exit 2 to the Lane hold (ADR
+      0048: the lane's own command stops merging, never the whole rollout); --revise's is § 7's halt, but `task note
+      unreadable:`, that task's alone.
 
   verify --tree T --out O --timeout S [--bootstrap CMD] --verifier CMD [--repo R --detach-at SHA]
          [[--slots N] --slot-wait W] [--outcome] [--rollout NOTE [--slug SLUG]] [--diff-base REV [--named-rerun CMD]]
@@ -365,9 +404,10 @@ Subcommands:
       The task's approved plan, for the one launch that passes it (execute § 4.5 step 1.2's seeded revise,
       as `resume.plan`): {slug, plan}, where plan is the note's `## Approved plan` quote unquoted
       (reconcile-rollout.py approved_plan), or "" when the note has none (its last own call was not
-      plan-gated, or it predates p14-2). Step 3's integrate call passes no plan: its integrator reads the
-      same `## Approved plan` from the note itself (p27-1). Kept out of `inputs`, which every status and
-      repair read prints. Read-only.
+      plan-gated, or it predates p14-2). `call --revise` reads the plan through the same reader into the
+      seeded revise's task.resume.plan, so the lead copies none. Step 3's integrate call passes no plan: its
+      integrator reads the same `## Approved plan` from the note itself (p27-1). Kept out of `inputs`, which
+      every status and repair read prints. Read-only.
 
   set-aside --note N --kind integration|revise-stopped|own     (the reason on stdin)
       The lead's own set-aside row, for `reconcile-rollout.py reconcile --result -`: {rolloutSlug,
@@ -391,10 +431,11 @@ Exit codes: 0 a verdict (or verify finished; its own exit is the rc; shards --jo
 undo, prepare without integrating:, revert's guard, mac's refused end of a verdict; shards --jobs: an unreadable FILE or a roll-up not proven), 3 no id
 reduced (shards --jobs), 2 usage or environment (an exit 2 from _load_note reads `task note unreadable: …`, p29-7;
 execute § 4.5 *lead-integrate's exit 2* routes each exit 2 by verb and site), or the Engine snapshot guard (ADR 0043:
-prepare, set-aside and revert first ask
+prepare, set-aside, revert and call (both forms: it prints paths built from this root, verifySlot.script and
+securityCheck.script) first ask
 engine-snapshot.py's guard_task() for the rollout the note's `rollout:` names, loaded from this tree, before any git
 call; a rollout stamped with another usable snapshot than this plugin root, or a live one whose snapshot is
-unusable, prints its `engine-snapshot: ` line and nothing else: re-run from the root it names; inputs, call, plan, verify,
+unusable, prints its `engine-snapshot: ` line and nothing else: re-run from the root it names; inputs, plan, verify,
 mac, push, undo, base-moved, ci-headroom, shards and stamp are exempt), 8 retryable (prepare's fetch failed twice; revert's fetch, push, gh read
 or PR create), 75 verify got no verify slot in time (O.rc `noslot`),
 76 verify's Heat hold outlasted the slot wait (O.rc `heat`). Stdlib only; `Note` and `_stamp` come from
@@ -925,7 +966,8 @@ def cmd_prepare(args):
                       f"{args.slug} first (execute § 4.5 step 3); nothing fetched or merged")
     tasks_dir = Path(os.path.expanduser(args.tasks_dir)) if args.tasks_dir else _path.parent
     br, tree = branch_of(args.slug), worktree_dir(str(repo), args.slug)
-    out = {"slug": args.slug, "branch": br, "worktreePath": tree, "prHead": None, "anchor": None, "taskBase": None,
+    out = {"slug": args.slug, "default": args.default, "branch": br, "worktreePath": tree, "prHead": None, "anchor": None,
+           "taskBase": None,
            "mainSha": None, "case": None, "route": None, "trouble": [], "reason": "", "landed": [], "unlisted": [],
            "mergeCommit": "", "sharedFiles": [], "conflictFiles": [], "staleRefDeleted": None,
            "abortedMerge": False, "stashed": "", "record": None, "note": "",
@@ -2713,18 +2755,241 @@ def _call_trouble(rec, after, mac=None):
     return ["shared-file"], {"mergeCommit": m, "headSha": m, "baseSha": rec["mainSha"], "verified": True}
 
 
+# The three round budgets a launch carries (execute § 3), in § 3's order: the note's key and the args' task key.
+BUDGET_KEYS = (("max_iterations", "maxIterations"), ("max_review_rounds", "maxReviewRounds"),
+               ("max_plan_rounds", "maxPlanRounds"))
+BASELINE_SECTION = "## Known baseline failures"
+
+
+def _call_repo(repo):
+    """--repo in the one spelling prepare records it in (cmd_prepare's Path(expanduser(R)): a trailing / or a /./ goes),
+    so every path `call` prints, and the engine's worktreeDir(repoPath, slug), is built from the same string. An R that
+    is not absolute after expanduser is EnvError: the engine and its agents take repoPath and every path built from it
+    as printed, from their own cwd."""
+    expanded = os.path.expanduser(repo)
+    if not os.path.isabs(expanded):
+        raise EnvError(f"--repo {repo} is not an absolute path; nothing launched")
+    return str(Path(expanded))
+
+
+def _budget_error(path, note):
+    """§ 3's round-budget validation at the task level (ADR 0048): `invalid round budget: <key> on [[<slug>]] must be an
+    integer >= 1, got '<raw>'` for the first of BUDGET_KEYS the task note carries that is not one (an empty value is
+    present, and invalid), else ''. Read from the task note alone, before any read of the rollout note or the rollout
+    settings, so a fault that is the task's own is never one of their exit 2s (a Lane hold)."""
+    for key, _ in BUDGET_KEYS:
+        raw = note.get(key)
+        if raw is not None and rr._stamp_value(raw, 1) is None:
+            return f"invalid round budget: {key} on [[{path.stem}]] must be an integer >= 1, got {raw!r}"
+    return ""
+
+
+def _budgets(note, rollout_note):
+    """{maxIterations, maxReviewRounds, maxPlanRounds}: each key at the first level that carries it, task then rollout,
+    else rollout-settings.py's resolved value for the Project root. A rollout stamp that is not an integer >= 1 is
+    EnvError naming [[<rollout>]] (it threatens every task); so is a resolver that will not answer."""
+    out, res = {}, None
+    for key, name in BUDGET_KEYS:
+        for n in (note, rollout_note):
+            raw = n.get(key)
+            if raw is None:
+                continue
+            value = rr._stamp_value(raw, 1)
+            if value is None:
+                raise EnvError(f"invalid round budget: {key} on [[{n.path.stem}]] must be an integer >= 1, got {raw!r}; "
+                               "nothing launched")
+            out[name] = value
+            break
+        else:
+            if res is None:
+                res = rr._resolved_settings(rollout_note)
+            entry = (res["settings"] or {}).get(key)
+            if not isinstance(entry, dict) or type(entry.get("value")) is not int:
+                raise EnvError(f"rollout settings refused: {res['error'] or f'no {key}'}; nothing launched")
+            out[name] = entry["value"]
+    return out
+
+
+def _baseline(rollout_note):
+    """The rollout's `## Known baseline failures` entries (schedule § 2.6): with HTML comments removed (across lines),
+    every non-blank line, one leading `- ` stripped; a line reading `none` (any case) is skipped and no other is
+    dropped. [] when the section is absent or nothing is left."""
+    text = re.sub(r"<!--.*?-->", "", rollout_note.section_text(BASELINE_SECTION), flags=re.S)
+    out = []
+    for line in text.split("\n"):
+        s = line.strip()
+        if s.startswith("- "):
+            s = s[2:].strip()
+        if s and s.lower() != "none":
+            out.append(s)
+    return out
+
+
+def _plan_gate(note, rollout_note):
+    """execute § 3.5's task.planGate: `plan_approval` on the task, then the rollout, else scope-gated; off is false,
+    required true, and scope-gated (or any other value) true only for `scope: cross-cutting`."""
+    mode = rr._scalar(note.get("plan_approval")).lower() or rr._scalar(rollout_note.get("plan_approval")).lower()
+    if mode == "off":
+        return False
+    if mode == "required":
+        return True
+    return rr._scope(note) == "cross-cutting"
+
+
+def _approved_gates(note):
+    """execute § 3.7's task.approvedGates: the note's `## Approved gates` bullets, each with its bullet marker and its
+    `(approved …)` annotation stripped; None when the note has no such section (the key is then omitted)."""
+    if not note.has_heading(rr.APPROVED_GATES_SECTION):
+        return None
+    out = []
+    for line in note.section_text(rr.APPROVED_GATES_SECTION).split("\n"):
+        m = re.match(r"^[-*]\s+(.*)$", line.strip())
+        gate = rr.GATE_ANNOT_RE.sub("", m.group(1)).strip() if m else ""
+        if gate:
+            out.append(gate)
+    return out
+
+
+def _ladder_json():
+    """ladder.py's load(), the object its CLI prints (execute § 3, read at this call's start). Any failure, a refused
+    file or python < 3.11 among them, is EnvError `ladder file refused: <where>: <reason>`."""
+    mod = None
+    try:
+        spec = importlib.util.spec_from_file_location("thread_ladder", rr.LADDER_PY)
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+        return mod.load()
+    except Exception as e:
+        path = ""
+        try:
+            path = mod.default_path() if mod is not None else str(rr.LADDER_PY)
+        except Exception:
+            pass
+        reason = str(getattr(e, "reason", "") or e) or type(e).__name__
+        line = getattr(e, "line", None)
+        where = path if line is None else f"{path}:{line}"
+        raise EnvError(f"ladder file refused: {where}: {reason}; nothing launched")
+
+
+def _default_branch(repo):
+    """origin's default branch, asked of the remote through execute § 4's default-branch.sh with git's repo-local variables
+    scrubbed; EnvError when the remote does not answer (never a guessed main)."""
+    try:
+        p = subprocess.run(["bash", str(rr.DEFAULT_BRANCH_SH), repo], capture_output=True, text=True, env=ENV,
+                           timeout=rr.ORIGIN_TIMEOUT)
+    except (OSError, subprocess.TimeoutExpired) as e:
+        raise EnvError(f"origin's default branch for {repo} did not resolve: {_one_line(e)}; nothing launched")
+    name = p.stdout.strip()
+    if p.returncode != 0 or not name:
+        raise EnvError(f"origin's default branch for {repo} did not resolve: {why(p)}; nothing launched")
+    return name
+
+
+def _launch_args(repo, slug, path, note, default, revise=False):
+    """The args every launch `call` builds shares (execute § 4, ADR 0085 d7), read from disk only, so the lead types
+    none of them: rolloutSlug, repoPath, defaultBranch (omitted for main), verifier, date, knownBaselineFailures,
+    envBootstrap, ladder, verifySlot, securityCheck and task. With `revise` (a seeded revise) also touched,
+    unreachablePaths, task.arms and task.unreachable, which mode 'integrate' ignores. Never progress or gatePricer. Every
+    failure is EnvError: the rollout's or the machine's, but `scope: read-only`."""
+    ro = _rollout_note_of(path, note)
+    if ro is None:
+        raise EnvError(f"no rollout note for [[{slug}]]: its rollout: names none beside {path}; nothing launched")
+    name = ro.path.stem
+    root = rr._project_root(ro)
+    if root is None or os.path.realpath(str(root)) != os.path.realpath(repo):
+        raise EnvError(f"--repo {repo} is not [[{name}]]'s Project root ({root or 'none'}); nothing launched")
+    try:
+        verifier = rr._command_value(ro, "verifier")
+        boot = rr._command_value(ro, rr.ENV_BOOTSTRAP_KEY)
+    except rr.CompletionValueError as e:
+        raise EnvError(f"[[{name}]]: {e}; nothing launched")
+    if not verifier:
+        raise EnvError(f"[[{name}]] has no verifier: (execute § 3); nothing launched")
+    scope = rr._scope(note)
+    if scope == "read-only":
+        raise EnvError(f"[[{slug}]] is scope: read-only: it has no PR to integrate or revise; nothing launched")
+    budgets = _budgets(note, ro)
+    ladder = _ladder_json()
+    slots, err = rr._verify_slots()
+    if err:
+        raise EnvError(f"rollout settings refused: {err}; nothing launched")
+    if not rr.VERIFY_SLOT_PY.is_file():
+        raise EnvError(f"{rr.VERIFY_SLOT_PY} not found; nothing launched")
+    security, err = rr._security_check(ro)
+    if err:
+        raise EnvError(f"{rr.SECURITY_CHECKS_KEY}: {err}; nothing launched")
+    out = {"rolloutSlug": name, "repoPath": repo}
+    if default != "main":
+        out["defaultBranch"] = default
+    out.update(verifier=verifier, date=datetime.now().strftime("%Y-%m-%d"))
+    baseline = _baseline(ro)
+    if baseline:
+        out["knownBaselineFailures"] = baseline
+    if boot:
+        out["envBootstrap"] = boot
+    if revise:
+        touched = rr._scalar(ro.get("touched"))
+        if touched:
+            out["touched"] = touched
+        try:
+            unreachable = rr._settings_module().resolve(repo=str(root))["unreachable_paths"]["value"]
+        except Exception as e:
+            raise EnvError(f"rollout settings refused: {_one_line(e)}; nothing launched")
+        if unreachable:
+            out["unreachablePaths"] = unreachable
+    out.update(ladder=ladder, verifySlot={"script": str(rr.VERIFY_SLOT_PY), "slots": slots})
+    if security:
+        out["securityCheck"] = security
+    task = {"slug": slug, "taskPath": os.path.abspath(path), "scope": scope, "planGate": _plan_gate(note, ro), **budgets}
+    if rr._truthy_flag(note.get("ignore_gate")):
+        task["ignoreGate"] = True
+    rung = rr._scalar(note.get("rung"))
+    if rr.is_rung_name(rung):
+        task["rung"] = rung
+    else:
+        model = rr._scalar(note.get("model")) or rr._scalar(ro.get("model"))
+        effort = rr._scalar(note.get("effort"))
+        if model:
+            task["model"] = model
+        if effort:
+            task["effort"] = effort
+    gates = _approved_gates(note)
+    if gates is not None:
+        task["approvedGates"] = gates
+    if revise:
+        arms = rr._parse_arms(note.get(rr.ARMS_KEY))
+        if arms:
+            task["arms"] = arms
+        if rr._truthy_flag(note.get(rr.UNREACHABLE_KEY)):
+            task["unreachable"] = True
+    out["task"] = task
+    return out
+
+
 def cmd_call(args):
-    """The integrate call's `integration`, whole: the lead passes it verbatim and types no sha (p47-11)."""
-    rec = _read_prepared(args.repo, args.slug)
-    trouble, lead_merge = _call_trouble(rec, args.after, read_mac(args.repo, args.slug))
+    """A launch's whole args, which the lead passes verbatim and never assembles (ADR 0085 d7): the integrate call's (p47-11)
+    from prepare's record, or with --revise a seeded revise's from the note."""
+    if args.revise:
+        return _call_revise(args)
+    repo = _call_repo(args.repo)
+    rec = _read_prepared(repo, args.slug)
+    trouble, lead_merge = _call_trouble(rec, args.after, read_mac(repo, args.slug))
     path, note = _load_note(args.note)
     if path.stem != args.slug:
         raise EnvError(f"--note {path} is not {args.slug}'s task note; nothing launched")
-    inp = task_inputs(path, note, None, args.repo, args.row)
+    tree = worktree_dir(repo, args.slug)
+    if rec.get("worktreePath") and os.path.realpath(rec["worktreePath"]) != os.path.realpath(tree):
+        raise EnvError(f"the prepare record's worktreePath {rec['worktreePath']} is not {tree}: run prepare again; "
+                       "nothing launched")
+    inp = task_inputs(path, note, None, repo, args.row)
     got = inp["integrate"]
+    out = {"args": None, "source": got["source"], "rungSource": got["rungSource"], "rowRefused": got["rowRefused"],
+           "prUrlError": got["prUrlError"], "budgetError": _budget_error(path, note)}
+    if out["prUrlError"] or out["budgetError"]:
+        return out
+    launch = _launch_args(repo, args.slug, path, note, rec.get("default") or _default_branch(repo))
     integration = {
-        "prUrl": got["prUrl"], "branch": rec.get("branch") or branch_of(args.slug),
-        "worktreePath": rec.get("worktreePath") or worktree_dir(os.path.expanduser(args.repo), args.slug),
+        "prUrl": got["prUrl"], "branch": rec.get("branch") or branch_of(args.slug), "worktreePath": tree,
         "headSha": rec["anchor"], "taskBase": rec["taskBase"], "mainSha": rec["mainSha"],
         "prepared": {"anchor": rec["anchor"], "taskBase": rec["taskBase"]},
         "trouble": trouble, "landed": rec.get("landed") or [],
@@ -2735,8 +3000,33 @@ def cmd_call(args):
     if inp.get("readyAt"):
         integration["readyAt"] = inp["readyAt"]
     integration["startedAt"] = rr._stamp(datetime.now())
-    return {"integration": integration, "source": got["source"], "rungSource": got["rungSource"],
-            "rowRefused": got["rowRefused"], "prUrlError": got["prUrlError"]}
+    out["args"] = {**launch, "mode": "integrate", "integration": integration}
+    return out
+
+
+def _call_revise(args):
+    """`call --revise`: a seeded revise's whole args (execute § 4.5 step 1.2), with no prepare record: the launch args with
+    revise's own keys and task.resume, built from `inputs`' read of the note and the note's approved plan."""
+    repo = _call_repo(args.repo)
+    path, note = _load_note(args.note)
+    if path.stem != args.slug:
+        raise EnvError(f"--note {path} is not {args.slug}'s task note; nothing launched")
+    inp = task_inputs(path, note, None, repo)
+    if inp["resumeAt"] != "revise":
+        raise EnvError(f"[[{args.slug}]] reads resumeAt {inp['resumeAt']}, not revise: no seeded revise to build; "
+                       "nothing launched")
+    he = history_error(inp["history"], False)
+    if he:
+        raise EnvError(f"[[{args.slug}]]'s review history {he}, which the engine refuses; nothing launched")
+    out = {"args": None, "prUrlError": inp["prUrlError"], "budgetError": _budget_error(path, note)}
+    if out["prUrlError"] or out["budgetError"]:
+        return out
+    launch = _launch_args(repo, args.slug, path, note, _default_branch(repo), revise=True)
+    launch["task"]["resume"] = {"stage": "revise", "prUrl": inp["prUrl"], "branch": inp["branch"],
+                                "worktreePath": worktree_dir(repo, args.slug), "reviewHistory": inp["history"],
+                                "reviewRoundsUsed": inp["lastRound"], "plan": rr.approved_plan(note)}
+    out["args"] = launch
+    return out
 
 
 def _latest_run(note, heading):
@@ -3581,10 +3871,12 @@ def _sha(value):
     return value
 
 
-# The verbs that act on one task of a rollout from the lead's root (ADR 0043): its Integration, its own set-aside row and
-# its RACE revert. inputs and plan are readers (status reads inputs); verify, mac, push, undo and call (mac and call read
-# prepare's record) follow a guarded prepare in one flow.
-GUARDED = ("prepare", "set-aside", "revert")
+# The verbs that act on one task of a rollout from the lead's root (ADR 0043): its Integration, its own set-aside row, its
+# RACE revert and the launch args `call` prints (both forms), which carry paths built from this root (verifySlot.script,
+# securityCheck.script), so a call from another root would launch the engine at the wrong copy. inputs and plan are
+# readers (status reads inputs); verify, mac, push and undo (mac reads prepare's record) follow a guarded prepare in one
+# flow.
+GUARDED = ("prepare", "set-aside", "revert", "call")
 
 
 def _engine_guard(note, tasks_dir):
@@ -3691,10 +3983,13 @@ def main(argv=None):
                     "against the note for the integrate record")
     ip.add_argument("--now", type=rr._iso_arg, default=None, help="the time a retry cool-down is read against (default: now)")
 
-    cl = sub.add_parser("call", help="the integrate call's integration, whole, from prepare's record (p47-11)")
+    cl = sub.add_parser("call", help="a launch's whole args: the integrate call's from prepare's record (p47-11), or with "
+                        "--revise a seeded revise's (ADR 0085 d7)")
     cl.add_argument("--repo", required=True)
     cl.add_argument("--slug", required=True)
     cl.add_argument("--note", required=True)
+    cl.add_argument("--revise", action="store_true", help="a seeded revise's args (execute § 4.5 step 1.2): no prepare "
+                    "record, no --row or --after")
     cl.add_argument("--row", default=None, help="the approving row's result JSON (file, or - for stdin), as inputs --row")
     cl.add_argument("--after", default=None, choices=["shared-green", "red", "push-refused"],
                     help="the verify or skip route's end that launches the call (none on the trouble route)")
@@ -3723,6 +4018,8 @@ def main(argv=None):
     args = p.parse_args(argv)
     if args.cmd == "shards" and (bool(args.jobs) != bool(args.job_id) or (args.whole and not args.jobs)):
         sh.error("--job-id and --whole go with --jobs, and --jobs needs at least one --job-id")
+    if args.cmd == "call" and args.revise and (args.row is not None or args.after is not None):
+        cl.error("--revise takes no --row or --after: a seeded revise has no approving row and no Integration route")
     if args.cmd in GUARDED:
         refusal = _engine_guard(args.note, getattr(args, "tasks_dir", None))
         if refusal:   # ADR 0043: before any git call; nothing fetched, merged or printed

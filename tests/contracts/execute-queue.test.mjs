@@ -8,6 +8,12 @@
 // real files and the controls run through identical logic and no matcher can pass vacuously: each control mutates
 // the real text in one place and must fail with exactly its rule. The status-line rule parses § 6's spec with the
 // driver's own STATUS_RE (python, via spawnSync). Reads files only.
+//
+// `call-args` (p55-2, ADR 0085 d7) holds CALL_ARGS, a fixed list of { at, must, gone }: every sentence of the skill that
+// once asked the lead to build or pass a value of a seeded revise or an integrate call by hand, now naming
+// `lead-integrate.py call` as the one builder (`must`), with the old phrase that may not come back (`gone`). The list is
+// finite: § 3's opening, its `unreachable_paths`, `touched` and `security_checks` rows, its round-budget, verify_timeout
+// (and its mid-entry edit sentence) and ladder paragraphs, § 4's opening and three jsonc comments, § 4.5 steps 1.2, 1.3 and 3, and the Don'ts.
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
@@ -107,6 +113,45 @@ const BUDGET = 'Integrations run one at a time: each merges the latest `main` in
   "re-reviews when needed, and waits on the PR's required checks before the squash. Budget ≈ (merge-in + verifier + any re-review + " +
   'required checks + squash) per approved task, **sequentially**'
 
+// call-args (p55-2, ADR 0085 d7): the fixed list the file's header names. `at` picks the text: st3, s12 and s13 (§ 4.5
+// steps 3, 1.2 and 1.3), s3 (§ 3), ladder (§ 3's ladder paragraph), s4 (§ 4, collapsed) and s4raw (§ 4 as written, for
+// the jsonc comments' own lines), donts.
+const CALL_ARGS = [
+  { at: 'st3', must: "is § 5's Workflow call whose args are, verbatim and whole, the `args` object of `python3 ${CLAUDE_PLUGIN_ROOT}/skills/execute/scripts/lead-integrate.py call --repo <repoPath> --slug <slug> --note <task note> [--row",
+    gone: ["is § 5's Workflow call with § 4's args and task object"] },
+  { at: 'st3', must: '**The whole call is built by the script, never by the lead:** the lead assembles no args for it, retypes no value, adds no key and drops none.', gone: [] },
+  { at: 'st3', must: "Its other exit 2 causes are each the rollout's or the machine's, and take the same *Lane hold*: no rollout note beside the task note, a `--repo` that is not its `Project root:`", gone: [] },
+  { at: 'st3', must: "A task-level round-budget stamp that is not an integer >= 1 is that task's alone (ADR 0048), so it is no exit 2: `call` exits 0 with a non-empty `budgetError`, and the lead writes its own *Set aside* row at Integration (`--kind integration`) with `budgetError` as the reason", gone: [] },
+  { at: 'st3', must: "`call` prints `args: null` beside a non-empty `prUrlError` or `budgetError`; with both, the row's reason is `prUrlError`.", gone: [] },
+  { at: 's12', must: "a launch runs `python3 ${CLAUDE_PLUGIN_ROOT}/skills/execute/scripts/lead-integrate.py call --revise --repo <repoPath> --slug <slug> --note <task note>`: its `args` object, verbatim and whole, is the Workflow call's args",
+    gone: ["§ 4's task object plus"] },
+  { at: 's12', must: "`call --revise`'s `args`: § 4's args and task object plus `task.resume: {stage: 'revise', prUrl, branch, worktreePath, reviewHistory, reviewRoundsUsed, plan}`",
+    gone: ['prUrl: <inputs.', '<plan.plan>'] },
+  { at: 's12', must: "A non-empty `budgetError` launches nothing: the lead's own *Set aside* row (`--kind revise-stopped`) with `budgetError` as the reason, and the loop goes on.", gone: [] },
+  { at: 's13', must: "For a task's own call (a start, or a restart's own call) mark-started's `progress:` line becomes the args `progress`",
+    gone: ["a restart's seeded revise or own call) mark-started's"] },
+  { at: 's13', must: "A restart's seeded revise takes step 1.2's `call --revise` args whole (run once routing has chosen it, before the check) and passes none of the three lines.", gone: [] },
+  { at: 's3', must: 'For a seeded revise and an integrate call `lead-integrate.py call` resolves it by the same order and prints the args whole (§ 4.5 steps 1.2 and 3, ADR 0085 d7)', gone: [] },
+  { at: 's3', must: 'A seeded revise carries it too: `lead-integrate.py call --revise` reads the same resolver itself (§ 4.5 step 1.2).',
+    gone: ['on every task call and seeded revise while it is not empty'] },
+  { at: 's3', must: "a seeded revise's is `lead-integrate.py call --revise`'s own read; integrate calls ignore it.",
+    gone: ['and passes it on every task call and seeded revise'] },
+  { at: 's3', must: "Every task call, seeded revise and integrate call carries it (§ 4): the lead passes it verbatim on a task's own call, and `lead-integrate.py call` reads it itself for the other two (§ 4.5 steps 1.2 and 3).",
+    gone: ['The lead passes it verbatim on every task call, seeded revise and integrate call'] },
+  { at: 's3', must: "For a seeded revise and an integrate call this validation is `lead-integrate.py call`'s own: a task-level violation is its `budgetError`", gone: [] },
+  { at: 's3', must: "never assembled by hand, on a task's own call; `lead-integrate.py call` reads the same script and slots for a seeded revise and an integrate call", gone: [] },
+  { at: 's3', must: "the lead copies it verbatim onto a task's own call, and `lead-integrate.py call` reads the same key for the other two.",
+    gone: ['integrate calls pass it, verbatim, as `args.securityCheck`'] },
+  { at: 's3', must: "A seeded revise and an integrate call do not wait for the next entry: `lead-integrate.py call` reads `verify_slots` and `security_checks` fresh from disk at each launch, so an edit of either inside an entry makes `call`'s `args.verifySlot` or `args.securityCheck` differ from this entry's `verify-timeout` line, and § 4's check halts the rollout at that launch (an integrate call's lane freed first).", gone: [] },
+  { at: 'ladder', must: "a seeded revise's and an integrate call's `args.ladder` is `lead-integrate.py call`'s own read of the same file", gone: ['before its `startedAt` stamp'] },
+  { at: 's4', must: "Build the args object for a task's own call (a start, or a restart's own call). A seeded revise's and an integrate call's args are `lead-integrate.py call`'s, whole",
+    gone: ['Build the args object for each task call:'] },
+  { at: 's4raw', must: "//   (a seeded revise's is `call`'s own read)", gone: ['OMIT when it is []. Every task call and seeded revise'] },
+  { at: 's4raw', must: '//   integrate call (`call` reads the same pair for the last two);', gone: [] },
+  { at: 's4raw', must: '//   On a seeded revise and an integrate call `call` reads it itself (§ 4.5)', gone: [] },
+  { at: 'donts', must: "Never build, retype, trim or add to an integrate call's or a seeded revise's args: `lead-integrate.py call` prints each whole (§ 4.5 steps 1.2 and 3, ADR 0085 d7)", gone: [] },
+]
+
 // Named failures for execute's queue prose, its hook wiring and the driver path; [] means every rule holds.
 function checkExecute({ skill, hooksJson, exists, template, driver, away }) {
   const fails = []
@@ -161,12 +206,11 @@ function checkExecute({ skill, hooksJson, exists, template, driver, away }) {
   // auto-revise: only autoRevise: true, with --max-review-rounds; revise-stopped and review-blocked are never launched
   // here: a spent budget is the Automatic retry's Overtime, then the take-out (ADR 0070), and only a non-null humanFix
   // waits for hand-back;
-  // the resume's prUrl is inputs' prUrl (p17-1: the note's pr: as a PR URL), and a prUrlError launches nothing; an
-  // answered entry (ADR 0035's answerRecorded) is skipped: the answer's route moves it.
+  // a prUrlError launches nothing (the resume's prUrl, inputs' since p17-1, is `call --revise`'s since p55-2: C67 holds it
+  // in code); an answered entry (ADR 0035's answerRecorded) is skipped: the answer's route moves it.
   if (!s2sub || !s2sub.text.includes('Launch one only when it reports `autoRevise: true`') ||
     !s2sub.text.includes('Skip an entry whose `answerRecorded` is non-null: an answered block is the answer\'s') ||
     !s2sub.text.includes('--max-review-rounds') ||
-    !s2sub.text.includes("resume: {stage: 'revise', prUrl: <inputs.prUrl>,") ||
     !s2sub.text.includes('A non-empty `prUrlError` (the note\'s `pr:` gives no PR URL the engine takes, step 3) launches nothing') ||
     !/A `revise stopped:`, review-blocked or out-of-rounds note is never launched here: its spent budget is the \*Automatic retry\*'s below[^.]*then the take-out \(ADR 0070\), never asked; only one whose `inputs` reads a non-null `humanFix`[^;.]*waits for `hand-back`/.test(s2sub.text)) {
     fails.push('auto-revise')
@@ -246,10 +290,10 @@ function checkExecute({ skill, hooksJson, exists, template, driver, away }) {
   // origin) set aside at Integration, never launched; the rung is the task's own record, the accepted row's, else the note's
   // (neutral when the note has no rung:), never the ladder's top rung, and no tier vocabulary left. prepare's
   // `unlisted`, `note` and `inert` only inform. p47-11: the whole integration is `lead-integrate.py call`'s, passed
-  // unchanged, and its exit 2 is the Lane hold's (ADR 0048), never a halt.
+  // unchanged, and its exit 2 is the Lane hold's (ADR 0048), never a halt; p55-2's whole args are call-args'.
   if (!st3.includes('`startedAt` the fresh stamp `call` takes at launch') ||
     !st3.includes("`readyAt` the note's `ready:`") ||
-    !st3.includes('rung, readyAt, startedAt}` (`leadMerge` too on a green shared file): verbatim, the `integration` object of `python3 ${CLAUDE_PLUGIN_ROOT}/skills/execute/scripts/lead-integrate.py call --repo <repoPath> --slug <slug> --note <task note> [--row') ||
+    !st3.includes('rung, readyAt, startedAt}` (`leadMerge` too on a green shared file)') ||
     !st3.includes('**The anchor is passed by the script, never by the lead:** pass that object whole, retype no sha in it and add no key to it.') ||
     !st3.includes("`call`'s exit 2 (`lead-integrate call: …`: no record, an unreadable one or another slug's, a route that launches no integrate call, an `--after` its route does not take) launches nothing: `call` runs on the task that holds the lane, so *lead-integrate's exit 2* routes it to the *Lane hold* (`--cause integrate-env`, that line the evidence), never a halt") ||
     !st3.includes("Its `prUrl`, `reviewHistory`, `reviewRoundsUsed` and `rung` are the `integrate` record `lead-integrate.py inputs --row` gives") ||
@@ -519,8 +563,9 @@ function checkExecute({ skill, hooksJson, exists, template, driver, away }) {
     }
   }
 
-  // approved-plan (p14-2, L2; p27-1): the seeded revise (step 1.2) takes the approved plan from `lead-integrate.py
-  // plan`, read at that launch only (Restart routing's revise reuses step 1.2's) and passed verbatim. The integrate
+  // approved-plan (p14-2, L2; p27-1; p55-2): the seeded revise (step 1.2) takes the approved plan through the reader
+  // `lead-integrate.py plan` prints, which `call --revise` runs at that launch only (Restart routing's revise reuses step
+  // 1.2's), passed verbatim. The integrate
   // call (step 3) carries no `plan`: its integrator reads the note's `## Approved plan` itself (p27-1), so § 4.5 names
   // `lead-integrate.py plan` once. No empty-plan literal is left; § 6 lists the row's `plan` (then p21-3's
   // `reviewVerdicts`, p29-9's `flakes` and p52-1's `unreachable`, the row's last key), reconcile's three outcomes and
@@ -528,14 +573,15 @@ function checkExecute({ skill, hooksJson, exists, template, driver, away }) {
   const planHits = (section(skill, S45) ?? '').split('lead-integrate.py plan').length - 1
   const s6 = S(skill, S6)
   const VERBATIM = 'passed verbatim as the same JSON string, never retyped, summarised or truncated'
-  if (!s2sub || !s2sub.text.includes('`python3 ${CLAUDE_PLUGIN_ROOT}/skills/execute/scripts/lead-integrate.py plan --note <task note>`, then the Workflow call') ||
-    !s2sub.text.includes('plan: <plan.plan>}') || !s2sub.text.includes(VERBATIM) ||
+  if (!s2sub || !s2sub.text.includes("then the Workflow call with `call --revise`'s `args`") ||
+    !s2sub.text.includes("where `plan` is the note's `## Approved plan`, read by the reader `lead-integrate.py plan` prints") ||
+    !s2sub.text.includes(VERBATIM) ||
     !st3.includes('trouble, landed, reviewHistory') || st3.includes('landed, plan') ||
     !st3.includes("It carries no `plan` (p27-1): the integrator reads the task note's `## Approved plan` itself") ||
     planHits !== 1 || /plan: ''|plan: ""|`plan` is `""`/.test(s45) ||
     !s6.includes('gatedInputs, plan, reviewVerdicts, flakes, unreachable }] }') || !s6.includes('upserts it, quoted, under `## Approved plan`') ||
     !s6.includes('`""` removes that section') || !s6.includes('`null` or absent leaves it') ||
-    !s6.includes("`lead-integrate.py plan` reads it back for §4.5 step 1.2's seeded revise")) {
+    !s6.includes("`lead-integrate.py call --revise` reads it back for §4.5 step 1.2's seeded revise")) {
     fails.push('approved-plan')
   }
 
@@ -990,6 +1036,12 @@ function checkExecute({ skill, hooksJson, exists, template, driver, away }) {
       fails.push('mac-verdict')
     }
   }
+  // call-args (p55-2, ADR 0085 d7): see CALL_ARGS.
+  {
+    const s4raw = section(skill, S4) ?? ''
+    const at = { st3, s12: s2sub?.text ?? '', s13: s3?.text ?? '', s3: S(skill, S3), ladder: ladderP, s4: collapse(s4raw), s4raw, donts }
+    if (CALL_ARGS.some((e) => !at[e.at].includes(e.must) || e.gone.some((g) => at[e.at].includes(g)))) fails.push('call-args')
+  }
   return [...new Set(fails)]
 }
 
@@ -1004,7 +1056,7 @@ const RULES = ['protocol-5', 'launch', 'slots', 'auto-revise', 'halt-guard', 'lo
   'heartbeat', 'heartbeat-register', 'no-wave-mechanics', 'driver', 'resume-running', 'lineage', 'race-hold', 'budget',
   'ladder', 'verify-timeout', 'approved-plan', 'descope', 'settings', 'lane-order', 'auto-retry', 'recorded-answer',
   'verify-slots', 'clone-root', 'trickle', 'skip-path', 'last-starts', 'hold', 'heat', 'race-revert', 'main-red', 'surface-wait',
-  'settings-repair', 'mac-verdict']
+  'settings-repair', 'mac-verdict', 'call-args']
 const CONTROLLED = new Set()
 
 function edit(text, from, to) {
@@ -1039,10 +1091,6 @@ test('control: Restart routing without the revise route fails launch', () => {
 
 test('control: a seeded revise launched regardless of the ceiling fails slots', () => {
   only(sk('; otherwise it waits, blocked, for a later step 1', ''), 'slots', 'no wait')
-})
-
-test("control: a seeded revise on the note's raw pr: fails auto-revise", () => {
-  only(sk("resume: {stage: 'revise', prUrl: <inputs.prUrl>,", "resume: {stage: 'revise', prUrl: <inputs.pr>,"), 'auto-revise', 'raw pr')
 })
 
 test('control: Seeded revises without the answered skip fails auto-revise', () => {
@@ -1407,7 +1455,8 @@ test('control: § 7 without the verify_timeout halt fails verify-timeout', () =>
 
 // approved-plan (p14-2)
 test("control: step 1.2 back on plan: '' fails approved-plan", () => {
-  only(sk('plan: <plan.plan>}', "plan: ''}"), 'approved-plan', "plan ''")
+  only(sk("where `plan` is the note's `## Approved plan`, read by the reader `lead-integrate.py plan` prints", 'where `plan` is `""`'),
+    'approved-plan', "plan ''")
 })
 
 test('control: step 3 passing plan again fails approved-plan', () => {
@@ -1415,8 +1464,8 @@ test('control: step 3 passing plan again fails approved-plan', () => {
 })
 
 test('control: step 1.2 without verbatim fails approved-plan', () => {
-  only(sk("where `plan.plan` is the `plan` output's `plan`, passed verbatim as the same JSON string, never retyped, summarised or truncated.",
-    "where `plan.plan` is the `plan` output's `plan`."), 'approved-plan', 'no verbatim')
+  only(sk("read by the reader `lead-integrate.py plan` prints, passed verbatim as the same JSON string, never retyped, summarised or truncated.",
+    'read by the reader `lead-integrate.py plan` prints.'), 'approved-plan', 'no verbatim')
 })
 
 test('control: step 3 without the note pointer fails approved-plan', () => {
@@ -1807,8 +1856,46 @@ test('control: a Settings repair after the Automatic retry fails auto-retry', ()
   only(sk(l, l.replace(seg, '') + seg), 'auto-retry', 'repair after the retry')
 })
 
-test('the rules are all named (45) and each has a control', () => {
-  assert.equal(RULES.length, 45)
+// call-args (p55-2): one control per CALL_ARGS entry, in its order; each restores the old text or removes the new.
+test('control: each CALL_ARGS sentence restored to its old text, or removed, fails call-args', () => {
+  const C = [
+    ["is § 5's Workflow call whose args are, verbatim and whole, the `args` object of", "is § 5's Workflow call with § 4's args and task object, and the `integration` object of"],
+    [' **The whole call is built by the script, never by the lead:** the lead assembles no args for it, retypes no value, adds no key and drops none.', ''],
+    [" Its other exit 2 causes are each the rollout's or the machine's, and take the same *Lane hold*:", ' The rest:'],
+    [" A task-level round-budget stamp that is not an integer >= 1 is that task's alone (ADR 0048), so it is no exit 2: `call` exits 0 with a non-empty `budgetError`, and the lead writes its own *Set aside* row at Integration (`--kind integration`) with `budgetError` as the reason; the loop goes on and the task's `humanFix` reads H12.", ''],
+    [" `call` prints `args: null` beside a non-empty `prUrlError` or `budgetError`; with both, the row's reason is `prUrlError`.", ''],
+    [" Right after § 3's config, and before § 4's check, a launch runs `python3 ${CLAUDE_PLUGIN_ROOT}/skills/execute/scripts/lead-integrate.py call --revise --repo <repoPath> --slug <slug> --note <task note>`: its `args` object, verbatim and whole, is the Workflow call's args (ADR 0085 d7), so the lead builds, retypes, trims and adds to none of it.", ''],
+    ["`task.resume: {stage: 'revise', prUrl, branch, worktreePath, reviewHistory, reviewRoundsUsed, plan}`", "`resume: {stage: 'revise', prUrl: <inputs.prUrl>, branch: <inputs.branch>, plan}`"],
+    [" A non-empty `budgetError` launches nothing: the lead's own *Set aside* row (`--kind revise-stopped`) with `budgetError` as the reason, and the loop goes on.", ''],
+    ["For a task's own call (a start, or a restart's own call) mark-started's", "For a fresh call (a start, or a restart's seeded revise or own call) mark-started's"],
+    [" A restart's seeded revise takes step 1.2's `call --revise` args whole (run once routing has chosen it, before the check) and passes none of the three lines.", ''],
+    [' For a seeded revise and an integrate call `lead-integrate.py call` resolves it by the same order and prints the args whole (§ 4.5 steps 1.2 and 3, ADR 0085 d7): for those two the lead resolves only what its own commands take (`inputs --max-review-rounds`, `mark-started --arm-default`, `prepare --default`, `--verifier` and `--bootstrap`).', ''],
+    ["on a task's own call while it is not empty; omit it when it is `[]` (prompts and opts never read it). A seeded revise carries it too: `lead-integrate.py call --revise` reads the same resolver itself (§ 4.5 step 1.2).",
+      'on every task call and seeded revise while it is not empty; omit it when it is `[]` (prompts and opts never read it).'],
+    ["On a task's own call the lead reads it from the rollout frontmatter by hand, like `env_bootstrap`, and passes it; a seeded revise's is `lead-integrate.py call --revise`'s own read; integrate calls ignore it.",
+      'The lead reads it from the rollout frontmatter by hand, like `env_bootstrap`, and passes it on every task call and seeded revise; integrate calls ignore it.'],
+    ["Every task call, seeded revise and integrate call carries it (§ 4): the lead passes it verbatim on a task's own call, and `lead-integrate.py call` reads it itself for the other two (§ 4.5 steps 1.2 and 3).",
+      'The lead passes it verbatim on every task call, seeded revise and integrate call (§ 4).'],
+    [" For a seeded revise and an integrate call this validation is `lead-integrate.py call`'s own: a task-level violation is its `budgetError` (the lead's row is `--kind revise-stopped` or `--kind integration`, § 4.5 steps 1.2 and 3), and a rollout-level one is its exit 2 (*lead-integrate's exit 2*).", ''],
+    ["never assembled by hand, on a task's own call; `lead-integrate.py call` reads the same script and slots for a seeded revise and an integrate call (§ 4.5 steps 1.2 and 3);", 'never assembled by hand;'],
+    ["carry it as `args.securityCheck` (§ 4): the lead copies it verbatim onto a task's own call, and `lead-integrate.py call` reads the same key for the other two.", 'pass it, verbatim, as `args.securityCheck` (§ 4).'],
+    [" A seeded revise and an integrate call do not wait for the next entry: `lead-integrate.py call` reads `verify_slots` and `security_checks` fresh from disk at each launch, so an edit of either inside an entry makes `call`'s `args.verifySlot` or `args.securityCheck` differ from this entry's `verify-timeout` line, and § 4's check halts the rollout at that launch (an integrate call's lane freed first).", ''],
+    ['for an integrate call before `call` (step 3\'s', 'for an integrate call before its `startedAt` stamp (step 3\'s'],
+    ["Build the args object for a task's own call (a start, or a restart's own call). A seeded revise's and an integrate call's args are `lead-integrate.py call`'s, whole (§ 4.5 steps 1.2 and 3, ADR 0085 d7): the lead builds no part of them, and where a comment below names those two calls it says which calls carry the key, never who types it:",
+      'Build the args object for each task call:'],
+    ["//   verbatim; OMIT when it is []. A task's own call\n                                          //   (a seeded revise's is `call`'s own read)\n",
+      '//   verbatim; OMIT when it is []. Every task call and seeded revise\n'],
+    ['//   integrate call (`call` reads the same pair for the last two);\n                                          //   the engine wraps every verifier line it renders\n',
+      '//   integrate call; the engine wraps every verifier line it renders\n'],
+    ['                                          //   On a seeded revise and an integrate call `call` reads it itself (§ 4.5)\n', ''],
+    ["- Never build, retype, trim or add to an integrate call's or a seeded revise's args: `lead-integrate.py call` prints each whole (§ 4.5 steps 1.2 and 3, ADR 0085 d7).\n", ''],
+  ]
+  assert.equal(C.length, CALL_ARGS.length, 'one control per CALL_ARGS entry')
+  C.forEach(([from, to], i) => only(sk(from, to), 'call-args', `CALL_ARGS[${i}]`))
+})
+
+test('the rules are all named (46) and each has a control', () => {
+  assert.equal(RULES.length, 46)
   assert.deepEqual(RULES.filter((r) => !CONTROLLED.has(r)), [])
 })
 

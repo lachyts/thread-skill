@@ -196,7 +196,7 @@ function check(f) {
     '- `verify` → no route of its own: the lead reads only `<out>.rc`', '- `undo` at a room stop', '- Any other verb on the task that holds the lane → the *Lane hold* with `--cause integrate-env`',
     '- A verb on a task that holds no lane', '- A line holding `task note unreadable:` is that task\'s alone', '- Anything else → § 7 with `reason="lead-integrate.py failed on [[slug]]"`, kept.']
   const leadBullet = bullet7('- `lead-integrate.py revert` exits 2')
-  const noFlag = [s12.includes('(no `--max-review-rounds` when that value is invalid, § 3; an `inputs` or `plan` exit 2: *lead-integrate\'s exit 2*)'),
+  const noFlag = [s12.includes('(no `--max-review-rounds` when that value is invalid, § 3; an `inputs` or `call --revise` exit 2: *lead-integrate\'s exit 2*)'),
     restart.includes('(none when N is invalid, § 3; an exit 2: *lead-integrate\'s exit 2*)'),
     c65.includes('no `--max-review-rounds` when the task\'s value is invalid, § 3'),
     s3.includes('A task whose resolved `max_review_rounds` is invalid is read with no `--max-review-rounds` wherever `inputs` takes it')]

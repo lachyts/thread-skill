@@ -92,7 +92,8 @@ const ROW = [
   '| `security_checks` | `false` (omit) | `securityCheck` (rollout-level; a task-level key is ignored).',
   "Opt-in: `security_checks: true` on a rollout note, set by hand. Schedule never stamps it, and a `--regenerate` supersede's `carry` copies it onto the new note.",
   'At each entry `reconcile-rollout.py verify-timeout` reads it, runs `security-check.py preflight` and prints `securityCheck` (exit 5 otherwise, § 3).',
-  'The lead passes it verbatim on every task call, seeded revise and integrate call (§ 4).',
+  'Every task call, seeded revise and integrate call carries it (§ 4):',
+  "the lead passes it verbatim on a task's own call",
   "The engine's code-writing agents run `security-check.py scan` after the verifier is green and before they open or update the PR, and the review judge runs it again.",
   "a secret in the task's own commits since their merge base with `origin/<default>`, each merge's resolution included (gitleaks)",
   'a new or changed dependency, outside test fixtures, with a known advisory (OSV)',
@@ -303,7 +304,7 @@ test('the Security check holds every rule across execute, legs.md, schedule, rep
 test('control: the § 3 row without its accept sentence fails s3-row', () => {
   only('execute', "His answer clears it only through the scan (on a serial chain, a secret's answer is its hand-back: below). Each question names its `security-accept <kind>:<key>` answer, and the scan honours a token that an answer recorded in the task note's `## Repair input` repeats from its own question (`record-answer`, repair § 3, its 3b). ", '', 's3-row', 'no accept')
   only('execute', " Integration's scan reads Integration's own dependency changes, never what the task or the landed PRs changed: an entry the task's own change or a merged landed PR holds as written is not Integration's, so a resolution that keeps an entry the task never changed over a landed PR's bump is.", '', 's3-row', 'no Integration dependencies sentence')
-  only('execute', 'every task call, seeded revise and integrate call (§ 4).', 'every task call and seeded revise (§ 4), never on an integrate call.', 's3-row', 'never on integrate again')
+  only('execute', 'Every task call, seeded revise and integrate call carries it (§ 4):', 'Every task call and seeded revise carries it (§ 4), never an integrate call:', 's3-row', 'never on integrate again')
   only('execute', "A Leg never rewrites a primary checkout's history: a secret there", 'A secret there', 's3-row', 'no primary rule')
   only('execute', "Not scanned on a serial chain: a Leg's commits between tasks, which are no task's change (`/thread:close`'s close-out commits: THREAD.md, a handoff doc, METHOD.md), and every merge commit (`leg.py land`'s merge of `<d>` into `chain/<rollout>`, a hand-resolved `🔀 land: merge` included): in place they are on `<d>` at once, and in a Chain copy at the next land. ", '', 's3-row', 'no serial not-scanned sentence')
 })

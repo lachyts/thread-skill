@@ -169,7 +169,7 @@ function check(skill, rr = realRr) {
     !pre.includes("`args.verifySlot` must be exactly this entry's `verify-timeout` `verifySlot`") ||
     !before(pre, 'Check it beside `ladder.py`', "before § 4's `status: in_progress` and `owner:` stamps and before `mark-started`") ||
     !pre.includes('a missing or different value writes nothing (no stamp, no `mark-started`, no Workflow call)') || !pre.includes(PRE_HALT) ||
-    !pre.includes("For an integrate call it is after step 3's `mark-integrating`, before its `startedAt` stamp and the canary arm") ||
+    !pre.includes("For an integrate call it is on `call`'s printed `args`, after step 3's `mark-integrating` and before the canary arm") ||
     !pre.includes(`after ${FREE} while the note keeps \`integrating:\``) ||
     !pre.includes('A resume is exempt: it keeps the original-args rule (below), and a refusal there is an *Args refusal* (§ 4.5)')) {
     fails.push('pre-check')
@@ -177,12 +177,12 @@ function check(skill, rr = realRr) {
 
   // launch-sites: the launch sequences a lead follows name § 4's check at the point it runs, before any stamp: step
   // 1.2's seeded-revise launch right after § 3's config, step 1.3 after a restart's *Restart routing* (whether the check
-  // applies is routing's result: a resume is exempt), and the integrate call after `mark-integrating`, before its
-  // `startedAt` stamp and the canary arm.
+  // applies is routing's result: a resume is exempt), and the integrate call on `call`'s printed `args`, after
+  // `mark-integrating` and before the canary arm.
   const CHECK = "§ 4's *Check verifySlot before the stamps*"
   const SEEDED = `A launch is: § 2.5, § 3's config, ${CHECK} (a missing or different \`args.verifySlot\` writes nothing and halts), stamp \`status: in_progress\``
   const ST13 = `§ 2.5, § 3's config, for a restart resolve *Restart routing* (it writes nothing), then ${CHECK} for a fresh call (a start, or the own call or seeded revise that routing chose for a restart; a resume is exempt), stamp \`status: in_progress\``
-  const INT = `${CHECK} runs after step 3's \`mark-integrating\`, before its \`startedAt\` stamp and the canary arm: a mismatch frees the lane and halts.`
+  const INT = `${CHECK} runs on \`call\`'s printed \`args\`, after step 3's \`mark-integrating\` and before the canary arm: a mismatch frees the lane and halts.`
   if (!seeded.includes(SEEDED) || !before(seeded, SEEDED, '`mark-started --tasks <slug>') ||
     !step13.includes(ST13) || !before(step13, ST13, 'mark-started --tasks <slug>') ||
     !integrateCall.includes(INT) || !before(integrateCall, INT, 'The canary arm (*Git-env canary*: `--kind integrate`) runs right before its launch') ||
@@ -314,7 +314,7 @@ test('control: the pre-check moved after the stamps fails pre-check', () => {
 test('control: a launch sequence that no longer names the verifySlot check fails launch-sites', () => {
   only(edit(real, "A launch is: § 2.5, § 3's config, § 4's *Check verifySlot before the stamps* (a missing or different `args.verifySlot` writes nothing and halts), stamp",
     "A launch is: § 2.5, § 3's config, stamp"), 'launch-sites', 'seeded revise')
-  only(edit(real, " § 4's *Check verifySlot before the stamps* runs after step 3's `mark-integrating`, before its `startedAt` stamp and the canary arm: a mismatch frees the lane and halts.", ''),
+  only(edit(real, " § 4's *Check verifySlot before the stamps* runs on `call`'s printed `args`, after step 3's `mark-integrating` and before the canary arm: a mismatch frees the lane and halts.", ''),
     'launch-sites', 'integrate call')
 })
 
