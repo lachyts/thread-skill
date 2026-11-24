@@ -1836,8 +1836,11 @@ through time, from attention to merged PRs. Terms only — no implementation.
   recall. It is no **Handoff**: it writes no doc and starts no session itself;
   the rollout waits on the **Waiting list** for its fresh lead, as a chain
   does between **Leg**s. A serial chain needs none: a Leg already hands over
-  (ADR 0085; not yet built: Phase 55). _Avoid_: handoff, rotation, restart,
-  compaction limit.
+  (ADR 0085). Built so far (p55-4): the count, kept on disk per session and
+  rollout by the plugin's compaction hook and backed up by the heartbeat, and
+  the lead's re-entry at execute § 1 after each compaction (execute § 1.5
+  *After a compaction*). The hand-over itself is not yet built (p55-5).
+  _Avoid_: handoff, rotation, restart, compaction limit.
 - **Lead error** — a stop the lead's own launch caused (a refused anchor, a
   flag a script does not take, a script path that is not there), which the
   lead redoes from the values the engine names and no task pays for: it

@@ -32,6 +32,18 @@
           }
         ]
       }
+    ],
+    "SessionStart": [
+      {
+        "matcher": "compact",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/hooks/rollout-compaction.py\"",
+            "timeout": 10
+          }
+        ]
+      }
     ]
   }
 }
