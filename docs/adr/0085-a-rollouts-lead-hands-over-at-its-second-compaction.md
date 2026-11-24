@@ -5,9 +5,11 @@ Status: accepted, not built. Lachy's rulings of 2026-11-18, on the two questions
 `thread-skill-grill-a-rollout-lead-hands-over-before-compaction-costs`; the technical calls were decided for him at the
 orient grill of 2026-11-24 (ADR 0054) and are listed last, each overturnable. Written by Phase 55 · Task 1
 (`thread-skill-p55-1-adr-0085-a-rollouts-lead-hands-over-at-its-second-compaction`); p55-2 to p55-5 and one Chorus
-task build it, and each records what it built back into this Status. Amends ADR 0076: its Decided for Lachy 4, and
-d4's last sentence ("Parallel rollouts keep one lead each, started as today"), since once p55-5 builds it a parallel
-rollout whose lead has handed over waits on the Waiting list. Leaves ADR 0043, ADR 0057 and handoff's
+task build it, and each records what it built back into this Status. Amends ADR 0076: its d3, which says what is on
+the list ("An unfinished serial note with `start: unattended`, no open Leg and no stop that needs Lachy is on the
+list; no other store holds it"), its Decided for Lachy 4, and d4's last sentence ("Parallel rollouts keep one lead
+each, started as today"), since once p55-5 builds it a parallel rollout whose lead has handed over waits on the
+Waiting list. Leaves ADR 0043, ADR 0057 and handoff's
 **Invocation gate.** as they are. Extends ADR 0030 decision 5's drain, and gives `paused_for:` a third value beside
 `sign-off` (ADR 0034) and `catch-up` (ADR 0084 d5).
 
@@ -85,8 +87,11 @@ How each is built is technical, and is the list under *Decided for him (overturn
 ## Consequences
 
 - A hand-over costs one drain, about every second compaction of a lead.
-- A gate-pending task's signed-gate handle ends with the old lead's session. After his sign-off the task takes a fresh
-  call (execute § 3.7, *Can no longer resume*), as it does after any new session.
+- A signed-gate handle goes at the compaction, before the hand-over. A gate-pending task's handle lives only in the
+  lead's session, and "compaction or a new session loses it" (execute § 3.7, **The signed-gate handle.**). So the
+  hand-over costs no handle its compaction had not already cost; only a handle a call returns during the drain ends
+  with the old lead's session. After his sign-off the task takes a fresh call (§ 3.7, *Can no longer resume*), as it
+  does after any compaction or new session.
 - p55-4's hook will run from the session's plugin root, while `next` runs from the rollout's Engine snapshot. So the
   count's file will be cross-version state (engine-snapshot.md § Cross-version state): once written, its form only
   widens.
@@ -98,8 +103,12 @@ How each is built is technical, and is the list under *Decided for him (overturn
 - **Left to the build.** Named here and not decided; the task that builds each records it back into this ADR's Status:
   - the hook's event, the count file's shape and the heartbeat backstop (p55-4);
   - the drain's bound and what follows it, the Run record's lines and the Time-lost ledger's cause (p55-5);
-  - a Lead error's Run record line and the bound on repeats (p55-3);
-  - ADR 0076's in-place amendment note and CONTEXT.md's **Waiting list** wording, when p55-5 builds the row.
+  - a Lead error's Run record line and the bound on repeats; whether the lead-caused halts that stand today (item 8's
+    *In the code* note: the *Args refusal* halt and § 4's two pre-check halts) become Lead errors; and the rewording of
+    execute's "a lead bug" at those sites (§ 4.5's **Args refusal (p32-1)** and § 7's halt list), a wording
+    CONTEXT.md's **Lead error** entry lists under _Avoid_ (p55-3);
+  - ADR 0076's in-place amendment note (its d3, d4 and Decided for Lachy 4) and CONTEXT.md's **Waiting list** wording,
+    when p55-5 builds the row.
 - Until those tasks land, nothing here runs: CONTEXT.md's **Lead hand-over** and **Lead error** entries say "not yet
   built", and its **Waiting list** entry still reads as serial chains only.
 
@@ -127,8 +136,13 @@ wrong, and he can overturn any. The numbers carry on from the Decision's two rul
    `/thread:execute [[<rollout>]]` start line. Why: a drain cuts no task mid-step, and the Waiting list is where a
    chain with no session already waits for one. *In the code:* all of it is p55-5's to build. An Engine catch-up's
    drain is `pause_requested` with `paused_for: catch-up`, bounded at 160 minutes; this ADR gives the hand-over's
-   bound no number. `paused_for:` has two values today, `sign-off` and `catch-up`. The Waiting list holds serial
-   chains only (CONTEXT.md **Waiting list**, `unfinished-rollout.py waiting`, ADR 0076 Decided for Lachy 4): a parallel
+   bound no number. "The calls in flight finish" needs the lead to still know its calls, and a hand-over's drain
+   starts right after a compaction, unlike an Engine catch-up's. The lost-handle rule is what stands today (execute
+   § Room stop item 10, **A lost handle.**): a compaction can lose a session's run handles, a task call or seeded
+   revise whose handle is lost is listed by `next` in `restart`, and an integrate call whose handle is lost frees the
+   lane. How the drain treats such a call is p55-5's, under *Left to the build*'s "the drain's bound and what follows
+   it". `paused_for:` has two values today, `sign-off` and `catch-up`. The Waiting list holds serial chains only
+   (CONTEXT.md **Waiting list**, `unfinished-rollout.py waiting`, ADR 0076 d3 and Decided for Lachy 4): a parallel
    note's `start: unattended` is **Start when ready**'s, and `reconcile-rollout.py stamp-start` refuses a paused note
    and one that has run. So listing a handed-over parallel rollout needs a new writer and a new row.
 6. **No session starts its own handoff.** The hand-over will write no handoff doc and call no `create_thread`:
@@ -137,17 +151,27 @@ wrong, and he can overturn any. The numbers carry on from the Decision's two rul
    legs.md § Hand over is the Leg's copy, and it is not edited; the lead's own writer is p55-5's.
 7. **One command builds an integrate call's whole args**, so no lead assembles them by hand. Why: the incident's
    launch was rebuilt from a summary's description of the recipe, and a command leaves nothing to rebuild. *In the
-   code:* p47-11's `lead-integrate.py call` already prints the `integration` object, so the p54-6 error itself is
-   closed on a current snapshot. What p55-2 builds is the rest: § 4's args, the task object, the ladder and
-   `mode: 'integrate'`.
+   code:* p47-11's `lead-integrate.py call` already prints the `integration` object, so a lead that runs `call` types
+   no sha. A retyped one is refused before anything dispatches (execute § 4.5, **Args refusal (p32-1)**), and is no
+   longer a set-aside: no set-aside row is written and no retry is spent. That much of the p54-6 error is closed on a
+   current snapshot, and no more: an Args refusal halts the whole rollout (execute § 7,
+   `state=halted reason="engine refused the args of [[<slug>]]"`, kept under *Threatens every task*), so a lead that
+   rebuilds the call from a summary still stops the queue. What p55-2 builds is the rest: § 4's args, the task object,
+   the ladder and `mode: 'integrate'`.
 8. **A stop the lead caused is a Lead error.** It is redone from the values the engine names, with no retry spent and
    never a set-aside; and a set-aside's reason is always the engine's own text, never the lead's summary. Why: ruling
    2, and the retry rule read a lead's summary as a human's. *In the code:* the lead types a set-aside's reason today
-   (`lead-integrate.py set-aside`, on stdin); p55-3 builds the Lead error and the engine's own reason text.
+   (`lead-integrate.py set-aside`, on stdin). Three lead-caused stops already have a path of their own, and each is a
+   § 7 halt of the whole rollout, never a set-aside: the *Args refusal* halt (`engine refused the args of [[<slug>]]`)
+   and § 4's two pre-check halts (`args.verifySlot`, `args.securityCheck`). Execute § 7 calls each "a lead bug", fixed
+   by a re-invoke. p55-3 builds the Lead error and the engine's own reason text; whether those three halts become Lead
+   errors is listed under *Left to the build*.
 9. **His pause takes over** a hand-over's drain, as it does an Engine catch-up's. Why: the drain is the engine's own,
    never a pause he made. *In the code:* execute § Pausing's paragraph **His pause over an Engine catch-up.**
    (`catch-up --abort --why "his pause"`) is the rule today; p55-5 gives the hand-over's drain the same.
-10. **A serial chain is unchanged.** A Leg already hands over, so this ADR adds nothing to legs.md or `leg.py`.
+10. **A serial chain is unchanged.** A Leg already hands over, so this ADR adds nothing to legs.md or `leg.py`. *In
+    the code:* legs.md § Hand over and `leg.py handed --listed` stand as they are, and no task here edits them.
 11. **The Chorus half is its own task**, `chorus-the-stage-opens-a-handed-over-rollouts-fresh-lead`: the Stage opening
     the fresh lead, and whether any Session gets a compaction limit. Why: sessions are the Stage's to open and to
-    limit, as Legs' sessions already are (ADR 0076 Decided for Lachy 2).
+    limit, as Legs' sessions already are (ADR 0076 Decided for Lachy 2). *In the code:* nothing in this repo: the
+    Stage's opener is Chorus's.
