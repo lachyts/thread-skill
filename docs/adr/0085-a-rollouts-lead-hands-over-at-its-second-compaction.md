@@ -50,6 +50,74 @@ lead-caused halts *Left to the build* named become Lead errors (execute § 4.5 *
 - **D7, a row is recorded once.** Site (c) is keyed on the integrate row's `metrics.startedAt` and `finishedAt`: a
   replay writes no second line and never sets the task aside, finishing only a first pass cut short.
 
+Built so far: items 3 and 4's count, and the re-entry at execute § 1 after a compaction, by p55-4
+(`thread-skill-p55-4-a-compaction-is-counted-on-disk-and-re-enters-the-rules`; execute § 1.5 *After a compaction*).
+The count of two and the hand-over stay p55-5's: nothing routes on the count yet.
+- **The event.** `SessionStart` with matcher `compact`, chosen from the harness's hooks reference at the build: its
+  sources are `startup`, `resume`, `clear`, `compact` and `fork`, and `compact` is an automatic or a manual
+  compaction. Its `additionalContext` is added to the session's context, which is how the hook orders the lead.
+  `PreCompact`'s output becomes summary instructions and `PostCompact` has no decision control, so neither can order
+  it. The incident lead's transcript holds three `compact_boundary` marks and three `SessionStart:compact` hook
+  attachments of this shape.
+- **The output.** Exactly `{"hookSpecificOutput": {"hookEventName": "SessionStart", "additionalContext": "<one line
+  per rollout>"}}`. `hookEventName` is required: without it the harness drops the context as a non-blocking error.
+- **The hook.** `hooks/rollout-compaction.py`, thin and fail-open: every error is swallowed, nothing reaches stderr
+  and the exit is 0. It acts on a main session's compaction only (no `agent_id`, no `agent-*.jsonl` transcript;
+  `agent_type` alone is a lead started with `--agent`, and counts). Its logic is `reconcile-rollout.py`'s
+  `lead_compactions`, loaded in-process from the Primary checkout, which reads each rollout note under its own try, so
+  one unreadable note or record never turns the hook off.
+- **The count file.** `~/.config/thread/compactions/<rollout stem>/<session id>.json`, `{version: 1, rollout, session,
+  count, corrected, told, at, by}`, one per (rollout, session), written through a temp file and a rename. `corrected`
+  is how many the backstop added, `by` the last writer (`hook` or `heartbeat`), and `told` how many counted
+  compactions have had their re-entry ordered with no stop standing, or taken at the entry that ended the stop. It is cross-version state (engine-snapshot.md §
+  Cross-version state) and only widens: a reader takes `count` only under `version: 1`, a writer rewrites the object
+  it read, and a file of another version is never overwritten.
+- **The unit.** A compaction of the session while it was the rollout's lead. The hook reads that when it fires (the
+  Run record's latest `lead-entry` names the session). The backstop reads history: a transcript mark counts when its
+  time falls in a span that opens at a `lead-entry` of the session and closes at the next `lead-entry` of anything
+  else, so a compaction from before the session led, or while another session did, is never counted.
+- **The four lines, and the stops that defer.** Every line starts `ROLLOUT-COMPACTION <slug>: compaction <N> of this
+  lead session, counted on disk (ADR 0085).` and names the engine root's `skills/execute/SKILL.md` to read as a file.
+  With no stop standing it orders the re-entry at § 1 before the next launch, and the hook writes `told = count`.
+  Under his pause, a standing room stop or an open halt the line says to start nothing now and to take the entry that
+  ends the stop from § 1 of that text; the count rises and `told` stays, so the order is deferred, never dropped. A
+  soft pause's drain and an Engine catch-up's pause are no stop.
+- **A deferred order is given once.** The entry that ends the stop takes the order when it is the session's own,
+  its `--by` is not `heartbeat` and it is dated after the hook's write (the file's `by: hook` and `at`): the first
+  tick after it writes `told = count` and reads `reenter: false`, so the skill file is read once. Otherwise that
+  tick gives the order: for a deferral the backstop made itself (it raised the count, so no line was printed) and
+  for one no such entry followed.
+- **A halt at the heartbeat.** Clause (1) stops a tick at the halted line it can see. When a compaction cut that
+  line, clause (2b)'s `record-entry --by heartbeat` closes the open halt just before (2e) runs, so (2e) reads no
+  stop and orders the deferred re-entry at that same tick. No guard is added: clause (7) would re-enter such a
+  rollout from the summary anyway, and the order makes that re-entry read its rules first. The verb's `halt` stop
+  therefore holds for the hook, and for the verb only where no entry ran between the halt and the call.
+- **The gate rule.** A compaction's re-entry is no entry point: it runs § 1.5's `resolve`, § 2's lines and
+  `record-entry --by heartbeat`, § 2.5 and § 2.6, and never § 2.7 or § 2.8, so a local default branch ahead of origin
+  never halts an unattended run at a compaction. An entry someone else opens after a compaction under a stop keeps its
+  opener's rules.
+- **`--gated`.** The line, clause (2e) and § 1.5 say the re-entry continues the run with the flags it was started
+  with, and that a `--gated` run stays gated. The mode itself is on no disk (no stamp and no Run record line carries
+  it), so after a compaction it lives only in the summary: a residual, which a stamp for the mode would close.
+- **The backstop.** The heartbeat's clause (2e) runs `reconcile-rollout.py compactions` after (2b)'s `record-entry`.
+  It raises the count to the transcript's marks and never lowers it, and its `reenter: true` (owed above zero, no
+  stop standing and no entry that took the order) orders the re-entry, naming the file to read. A mark with no usable
+  timestamp is never counted and is reported `undated`; a count above the marks is left as it is, with one
+  `WARN: compactions:` line each tick, the only signal of a compaction counted that was not the lead's.
+- **`next`.** Its JSON carries `compactions: {session, count, file}` right after `startCleared`: the caller's
+  session's count for the rollout. No step routes on it; p55-5 is its first consumer.
+- **Residuals.** Codex fires no hook and keeps no `~/.claude/projects` transcript, so a session-driven Codex lead's
+  compactions are neither counted nor ordered. The hook matches dated rollout names only, so a legacy undated
+  `<project>-rollout` note is counted and ordered by clause (2e) alone. A lead on a snapshot older than this change
+  gets the hook's count and line but has no clause (2e). And with no stop standing the hook writes `told = count` on
+  the strength of its print: a line the harness then fails to deliver, or one the lead reads and does not follow,
+  leaves nothing owed on disk, and no test reaches the harness's own delivery. The heartbeat's lapse re-entry out of
+  a room stop is `--by heartbeat`, which a tick's own liveness line is too, so it never takes a deferred order:
+  after a compaction under a room stop that lapses, the lead reads the skill file at the lapse re-entry (the hook's
+  line) and once more at the next tick's order, a second read of a 453 KB file (about 110k tokens) that brings the
+  next compaction closer. An entry that takes the order does so on its Run record line alone: nothing checks that
+  the lead read the file at it.
+
 ## Context
 
 One lead session (`22a01d17`) led `thread-skill-rollout-2026-11-12` from 12 Nov 11:16 to 17 Nov 22:31 AEDT: five and a
@@ -138,7 +206,7 @@ How each is built is technical, and is the list under *Decided for him (overturn
   at a hand-over, as a handed-off Leg moves nothing for a stamped chain (ADR 0043). A waiting engine Speed fix will
   still be taken, by an Engine catch-up at the fresh lead's first loop entry, with nothing running.
 - **Left to the build.** Named here and not decided; the task that builds each records it back into this ADR's Status:
-  - the hook's event, the count file's shape and the heartbeat backstop (p55-4);
+  - the hook's event, the count file's shape and the heartbeat backstop (p55-4; built, its Status above);
   - the drain's bound and what follows it, the Run record's lines and the Time-lost ledger's cause (p55-5);
   - a Lead error's Run record line and the bound on repeats; whether the lead-caused halts that stand today (item 8's
     *In the code* note: the *Args refusal* halt and § 4's two pre-check halts) become Lead errors; and the rewording of
@@ -150,8 +218,9 @@ How each is built is technical, and is the list under *Decided for him (overturn
     `reconcile-rollout.py`'s `_lead_errors()`);
   - ADR 0076's in-place amendment note (its d3, d4 and Decided for Lachy 4) and CONTEXT.md's **Waiting list** wording,
     when p55-5 builds the row.
-- Until those tasks land, nothing here runs: CONTEXT.md's **Lead hand-over** entry says "not yet built", and its
-  **Waiting list** entry still reads as serial chains only. Its **Lead error** entry is built (p55-3).
+- Until those tasks land, no hand-over runs: CONTEXT.md's **Lead hand-over** entry says the count and the § 1
+  re-entry are built (p55-4) and the hand-over is not yet (p55-5), and its **Waiting list** entry still reads as
+  serial chains only. Its **Lead error** entry is built (p55-3).
 
 ## Decided for him (overturnable)
 
@@ -161,15 +230,18 @@ wrong, and he can overturn any. The numbers carry on from the Decision's two rul
 
 3. **The count is two.** After its first compaction a lead will re-enter execute § 1 from its engine root; at its
    second it will hand over. Why: all six launch errors of the incident followed the third compaction, so two leaves
-   one compaction of margin, and a hand-over costs one drain. *In the code:* the first compaction's re-entry is
-   today's prose rule (execute § 1.5), which no script enforces, and nothing counts a compaction; p55-4 builds both.
+   one compaction of margin, and a hand-over costs one drain. *In the code:* the count and the re-entry after each
+   compaction are built by p55-4 (Status above): the hook counts and orders the re-entry, and the heartbeat's clause
+   (2e) backs both up. The line at two, and the hand-over there, are p55-5's.
 4. **The count lives on disk and in the engine.** A hook on the harness's compaction event will count it, per session
    and rollout; `next` will read the count and return the hand-over. The number will be a constant in the engine,
    named in `skills/execute/SKILL.md`; it is no operator setting, and the lead never counts from recall. Why: his
-   ruling, "so limits don't depend on memory". *In the code:* the plugin has no hook on a compaction, so the hook is
-   new and p55-4 builds it; this ADR names no event, and p55-4 chooses it from the harness's current hooks reference.
-   A Run record `lead-entry` line carries `{by, session?, stop?}`, its session defaulting to
-   `CLAUDE_CODE_SESSION_ID`: that is how p55-4 can tell which session is a rollout's lead.
+   ruling, "so limits don't depend on memory". *In the code:* built by p55-4 (Status above): the hook is
+   `hooks/rollout-compaction.py` on `SessionStart` with matcher `compact`, the count is a file per session and rollout
+   under `~/.config/thread/compactions/`, and `next` reports it as `compactions`. A Run record `lead-entry` line
+   carries `{by, session?, stop?}`, its session defaulting to `CLAUDE_CODE_SESSION_ID`: that is how the hook tells
+   which session is a rollout's lead. `next` returns no hand-over yet, and the engine holds no constant for the
+   number: both are p55-5's.
 5. **The hand-over is a drain, then the Waiting list.** It will drain as an Engine catch-up drains (CONTEXT.md
    **Engine catch-up**): no new start, the calls in flight finish, and the drain is bounded. Then the note will be
    paused with `paused_for: hand-over` and listed on the Waiting list; the Chorus Stage will open a fresh lead in the

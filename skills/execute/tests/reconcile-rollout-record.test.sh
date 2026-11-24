@@ -245,10 +245,14 @@ ok "$(rrs bind-run --tasks b --run-id wf_b9 --call integrate --journal-dir "$J" 
 ok "$(rrs bind-run --tasks x --run-id wf_x9 --call task --journal-dir "$J" --tasks-dir "$V" 2>/dev/null; echo $?)" 1 "bind-run task on a note not in_progress exits 1"
 ok "$(rrs bind-run --tasks x --run-id run_1 --call integrate --journal-dir "$J" --tasks-dir "$V" 2>/dev/null; echo $?)" 2 "a runId without wf_ is usage (exit 2)"
 ok "$(rrs bind-run --tasks x --run-id wf_a..b --call integrate --journal-dir "$J" --tasks-dir "$V" 2>/dev/null; echo $?)" 2 "a runId with .. is usage"
-ok "$(rrs bind-run --tasks x --run-id wf_r3 --call integrate --tasks-dir "$V" 2>/dev/null; echo $?)" 1 "no session id and no --journal-dir: exit 1"
+ok "$(rrs bind-run --tasks x --run-id wf_r3 --call integrate --tasks-dir "$V" 2>&1; echo "rc=$?")" "ERROR: bind-run: x: CLAUDE_CODE_SESSION_ID is not set (pass --journal-dir <abs>); nothing written
+rc=1" "no session id and no --journal-dir: exit 1, the ERROR line"
 mkdir -p "$TMP/cfg/projects/-proj"; : > "$TMP/cfg/projects/-proj/sess-1.jsonl"
 ok "$(CLAUDE_CONFIG_DIR="$TMP/cfg" CLAUDE_CODE_SESSION_ID=sess-1 rrs bind-run --tasks x --run-id wf_r3 --call integrate --tasks-dir "$V" --dry-run)" \
   "x: run-bound wf_r3 call=integrate journalDir=$TMP/cfg/projects/-proj/sess-1/workflows (dry-run)" "journalDir derived from the session's transcript"
+mkdir -p "$TMP/cfg/projects/-other"; : > "$TMP/cfg/projects/-other/sess-1.jsonl"   # p55-4: the lookup is _session_transcript's
+ok "$(CLAUDE_CONFIG_DIR="$TMP/cfg" CLAUDE_CODE_SESSION_ID=sess-1 rrs bind-run --tasks x --run-id wf_r3 --call integrate --tasks-dir "$V" --dry-run 2>&1; echo "rc=$?")" "ERROR: bind-run: x: 2 transcripts match $TMP/cfg/projects/*/sess-1.jsonl, not one (pass --journal-dir <abs>); nothing written
+rc=1" "two transcripts of the session: exit 1, the ERROR line"
 ok "$(since ro "$M")" "" "refusals and a dry-run record nothing"
 
 echo "== 9b. bind-run refuses a --journal-dir with no journal and no run subdir (p27-3)"
