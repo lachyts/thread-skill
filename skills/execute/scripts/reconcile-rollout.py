@@ -11486,9 +11486,9 @@ def _halt_lane(rollout, slug, args, state):
 # error writes one Run record `lead-error` line: this verb's `lead-error` for sites args-refusal, pre-check and command
 # (the lead's call), and cmd_reconcile for site merge-step (_reconcile_lead_error), which no lead can name.
 LEAD_ERROR_BOUND = 3
-LEAD_ERROR_SITES = ("args-refusal", "pre-check", "merge-step", "command")
-LEAD_ERROR_VERB_SITES = ("args-refusal", "pre-check", "command")
 LEAD_ERROR_MERGE_STEP = "merge-step"
+LEAD_ERROR_SITES = ("args-refusal", "pre-check", LEAD_ERROR_MERGE_STEP, "command")     # run_record.py's LEAD_ERROR_SITES
+LEAD_ERROR_VERB_SITES = tuple(s for s in LEAD_ERROR_SITES if s != LEAD_ERROR_MERGE_STEP)    # the lead's: `lead-error`
 LEAD_ERROR_EVIDENCE_MAX = 200     # run_record.py's LEAD_ERROR_EVIDENCE_MAX
 LEAD_ERROR_HEX40 = re.compile(r"[0-9a-f]{40}\Z")
 # The engine's merge step STOPs that name the value to pass (task.workflow.js integrationMergeStep, the three of its 16

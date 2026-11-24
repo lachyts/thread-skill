@@ -308,11 +308,13 @@ test('control: a sentinel matched by "starts with" fails args-refusal', () => {
 })
 
 test('control: Args refusal moved away from Lost call fails args-refusal', () => {
+  // *Lead error* moves with it (the paragraph right before, p55-3), so only args-refusal's own place breaks.
   const lines = real.split('\n')
-  const i = lines.findIndex((l) => l.startsWith('**Args refusal (p32-1).**'))
-  const moved = [...lines.slice(0, i), ...lines.slice(i + 2)]
+  const i = lines.findIndex((l) => l.startsWith(LE_HEAD))
+  const end = lines.findIndex((l) => l.startsWith('**Args refusal (p32-1).**')) + 2
+  const moved = [...lines.slice(0, i), ...lines.slice(end)]
   const j = moved.findIndex((l) => l.startsWith('**Restart routing**'))
-  moved.splice(j, 0, lines[i], '')
+  moved.splice(j, 0, ...lines.slice(i, end))
   only(moved.join('\n'), 'args-refusal', 'not right before Lost call')
 })
 
