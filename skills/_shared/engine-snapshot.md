@@ -46,7 +46,9 @@ An edit made under an unchanged id line is caught when the running root's own co
 ## When resolve runs
 
 Only at a verb's § 1 entry (a fresh invocation), and again after a compaction. A heartbeat, a cold resume, a Stage
-re-send or a repair hand-off is no § 1 entry for a lead already in hand: it keeps the root it resolved.
+re-send or a repair hand-off is no § 1 entry for a lead already in hand: it keeps the root it resolved. For a parallel
+rollout's lead a script holds the second: the plugin's compaction hook counts the compaction and orders the re-entry,
+and the heartbeat backs it up (execute § 1.5 *After a compaction*; ADR 0085 d3 and d4).
 
 ## Another rollout's commands
 
@@ -195,7 +197,25 @@ refuses a typo, and every writer that adds a newer key raises the line (rollout-
 `record` refuses to raise the line while a live rollout's engine root cannot read the new file. `test_credentials` (ADR
 0063) is the first schema-3 key: an older snapshot ignores it, so its rollouts ask every credential gate as before. `test_logins` (p37-4) is the first schema-5 key: an older snapshot ignores it, so its rollouts ask the Login gate as before. `weight_mem_gb` and `weight_cores` (p53-3) are the first schema-6 keys: an older snapshot ignores them, so its slot-taken records the built-in Weight. `unreachable_paths` (p52-1, ADR 0081 d1) is the first schema-7 key: an older snapshot ignores it, and its engine takes no mark. The plugin's
 hooks run from the Primary checkout, not a snapshot, so the Stop-hook driver's `STATUS_RE` and the `ROLLOUT-STATUS`
-line it parses are a cross-version contract (hooks/rollout-stop-driver.py). The stamps themselves are read only by
+line it parses are a cross-version contract (hooks/rollout-stop-driver.py).
+So are the compaction count and its line (ADR 0085 d3 and d4, p55-4; execute § 1.5 *After a compaction*). The count
+file is `~/.config/thread/compactions/<rollout stem>/<session id>.json`, one per (rollout, session): `{version: 1,
+rollout, session, count, corrected, told, at, by}`. `count` is the session's compactions while it was that rollout's
+lead: the Run record's latest `lead-entry` named the session when the hook fired, and the backstop counts a
+transcript's compaction mark only when its time falls in a span that opens at a `lead-entry` of the session and closes
+at the next `lead-entry` of anything else. `corrected` is how many the backstop added; `told` is how many counted
+compactions have had their § 1 re-entry ordered with no stop standing, and a missing or invalid `told` reads 0; `by`
+is the last writer, `hook` or `heartbeat`. The hook (hooks/rollout-compaction.py, through `reconcile-rollout.py`'s
+`lead_compactions`) writes the file from the Primary checkout; the lead's `compactions` verb writes it, and `next`
+reads it, from the rollout's Engine snapshot. It only widens: a reader takes `count` only from an object with
+`version: 1` and an integer `count`, a writer rewrites the object it read, so a key it does not know survives, and a
+file of another `version` is never overwritten and nothing is ordered from it. The hook's line starts
+`ROLLOUT-COMPACTION <slug>: compaction <N> of this lead session, counted on disk (ADR 0085).` and has four forms: with
+no stop standing it orders the re-entry at § 1 before the next launch; under his pause, a standing room stop or an
+open halt it says to start nothing now and to take the entry that ends that stop from § 1. Every form names only what
+every engine has (the root's `skills/execute/SKILL.md`, § 1, `/thread:execute [[<slug>]]`), so a lead on an older
+snapshot can follow it; that lead's heartbeat has no clause (2e), so the line in its context is its only order.
+The stamps themselves are read only by
 `resolve`, the guards, `unfinished-rollout.py running` (ADR 0031's hold, now only for an unsnapshotted rollout) and
 `retire`. The standing approval's month line (ADR 0034's 2026-10-27 amendment) is cross-rollout state too: its
 `signed under the standing approval:` lines in each rollout note's `## Needs-you log` and its machine-wide

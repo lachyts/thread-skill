@@ -73,7 +73,9 @@ Subcommands:
               the same call (in memory only on --dry-run). `startUnattended` reports the rollout start stamp
               (`start: unattended`, vault grammar § Rollout start stamp) and every call off --dry-run that gets past
               its refusals removes it (`startCleared`), so a running rollout clears it and the Chorus Stage never
-              starts a second lead; a refusal leaves it. Refuses an incomplete rollout (below): exit 1, no
+              starts a second lead; a refusal leaves it. `compactions` ({session, count, file}; p55-4, ADR 0085 d4)
+              follows `startCleared`: the caller's session's compaction count for this rollout (the `compactions` verb
+              below; _next_compactions), null on a superseded note. Refuses an incomplete rollout (below): exit 1, no
               stdout, one ERROR line naming why and the remedy, `/thread:schedule <its first project> --regenerate`.
               Refuses a serial rollout (`shape: serial`, ADR 0040) first, before its ceiling is read: exit 1, no
               stdout, one ERROR line, nothing written and `start:` kept: a serial rollout runs as Legs (execute
@@ -599,6 +601,18 @@ Subcommands:
               the reading names why) and writes one `fable-share` line with no task once its stamp lands.
               Exit 0 (written, skipped, or a warned write failure); 1 no rollout note (an ERROR line); 2 usage and the
               Engine snapshot guard.
+
+  compactions  `--rollout <note> [--session ID] [--transcript PATH] [--now T] [--dry-run]` (p55-4, ADR 0085 d3 and d4;
+              execute § 1.5 *After a compaction*): the compaction count's backstop, run by every heartbeat tick after
+              its record-entry (clause 2e). The count is a file per (rollout, session) under
+              ~/.config/thread/compactions/ (COMPACTIONS_DIR_REL's comment holds its shape), written by the plugin's
+              compaction hook (hooks/, through lead_compactions) and by this verb. For the session the Run record's
+              latest `lead-entry` names, it raises the count to the compaction marks the session's transcript holds
+              from its time as this rollout's lead, never lowers it, and prints one JSON line whose `reenter: true`
+              orders the lead back to execute § 1 (the skill text was cut and not re-read); under his pause, a
+              standing room stop or an open halt the order stays owed (`told`) until the stop ends. cmd_compactions'
+              docstring is the one copy of the unit, the undated rule, the three stops, `told`, `owed` and the WARN
+              lines. Guarded (not GUARD_EXEMPT). Exit 0 a reading, 1 no rollout note, 2 usage and the guard.
 
   defer       Pop task(s) out of a rollout, back to open backlog: clears `rollout:`/`owner:`, a legacy `wave:`
               and the `started:`/`merged:`/`integrating:`/`ready:`/`gates_signed:`/`descope_armed:`/`handed_back:` stamps
@@ -5359,6 +5373,18 @@ LEASE_DIR_REL = ".config/thread/leases"
 LEASE_LAPSE = timedelta(minutes=45)       # two */20 heartbeat ticks and 5 minutes, from the last write or a later wake
 LEASE_MAX_BYTES = 4 * 1024
 LEASE_WARN = "lease: warning:"                                 # the one stderr line a write that fails prints
+# The compaction count (p55-4, ADR 0085 d3 and d4; execute § 1.5 *After a compaction*):
+# ~/.config/thread/compactions/<rollout stem>/<session id>.json under the home dir at call time, one file per (rollout,
+# session): {version: 1, rollout, session, count, corrected, told, at (UTC Z), by ("hook" | "heartbeat")}. count: the
+# session's compactions while it was this rollout's lead; corrected: how many the backstop added; told: how many have
+# had their § 1 re-entry ordered with no stop standing. A cross-version contract (engine-snapshot.md § Cross-version
+# state): the plugin's compaction hook writes it from the Primary checkout while the lead's `compactions` verb and
+# `next` read it from the rollout's Engine snapshot, so it only widens (a reader takes `count` only under `version: 1`,
+# a writer rewrites the object it read, and a file of another version is never overwritten).
+COMPACTIONS_DIR_REL = ".config/thread/compactions"
+COMPACTIONS_VERSION = 1
+COMPACTIONS_MAX_BYTES = 4 * 1024
+COMPACTIONS_WARN = "WARN: compactions:"                        # every stderr line of the count's readers starts so
 # The last starts and the night record (Chorus ADR 0104 d4 and its Consequences; execute away.md).
 LAST_START_PREFIX = "last start:"                              # a row held because it would run past the Morning
 LAST_START_FALLBACK = timedelta(hours=2)                       # a kind with no history starts nothing this close to it
@@ -7584,7 +7610,7 @@ def _superseded_output(stem, successor, progress) -> dict:
             "integrating": [], "setAside": [], "raceHold": [], "gitEnvHold": [], "laneHold": [], "mainRed": [],
             "holdUntil": [], "onMerge": None, "supersededBy": successor, "paused": None, "pauseRequested": False,
             "pausedNow": False, "surfaceWait": None, "speedHoldReleased": [], "startUnattended": False,
-            "startCleared": False,
+            "startCleared": False, "compactions": None,
             "halt": "superseded",
             "awaitingSignOff": [], "progress": progress}
 
@@ -8587,6 +8613,8 @@ def cmd_next(args) -> int:
         "speedHoldReleased": speed_released,
         "startUnattended": start_unattended,
         "startCleared": start_cleared,
+        # The lead session's compaction count for this rollout (p55-4, ADR 0085 d4): {session, count, file}.
+        "compactions": _next_compactions(rollout_path.stem),
         "halt": halt,
         "awaitingSignOff": sign_off,
         # The ETA counts notes only (p28-6; away.md § The Trickle), as `status` and every other progress line do.
@@ -12600,20 +12628,416 @@ def _task_note(args, slug):
         return path, str(e)
 
 
+def _session_ok(session) -> bool:
+    """Whether a session id may be a file name: [A-Za-z0-9][A-Za-z0-9_.-]* with no `..` (_journal_dir's test)."""
+    return (isinstance(session, str) and bool(re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.-]*", session))
+            and ".." not in session)
+
+
+def _session_transcript(session):
+    """(path, hits, cfg) for a session's transcript: the one match of
+    ${CLAUDE_CONFIG_DIR:-$HOME/.claude}/projects/*/<session>.jsonl, path None unless exactly one matches; hits is how
+    many matched and cfg the config dir read. The session id is the caller's to check (_session_ok)."""
+    cfg = os.environ.get("CLAUDE_CONFIG_DIR") or os.path.join(os.path.expanduser("~"), ".claude")
+    hits = sorted(Path(cfg).glob(f"projects/*/{session}.jsonl"))
+    return (hits[0] if len(hits) == 1 else None), len(hits), cfg
+
+
+def _compactions_path(stem, session) -> Path:
+    """The count file of one (rollout, session) (p55-4): COMPACTIONS_DIR_REL/<stem>/<session>.json under the home dir
+    at call time (a pinned HOME is the only override, as for the lease)."""
+    return Path.home() / COMPACTIONS_DIR_REL / stem / f"{session}.json"
+
+
+def _compactions_told(data) -> int:
+    """A readable count file's `told`: an integer from 0 to its `count`, else 0 (a missing or invalid one owes every
+    counted compaction its re-entry once more)."""
+    told = data.get("told")
+    return told if isinstance(told, int) and not isinstance(told, bool) and 0 <= told <= data["count"] else 0
+
+
+def _compactions_read(stem, session):
+    """(state, data, why) for the count file (_compactions_path). state `ok`: an object with `version: 1` and an
+    integer `count` >= 0, data the parsed object (every key kept, so a writer rewrites what it read). `none`: no file,
+    or a plain file in a directory's place. `version`: an object whose `version` is another integer: a newer writer's
+    file, never overwritten and never acted on. `garbage`: anything else (unreadable, over COMPACTIONS_MAX_BYTES, not
+    UTF-8, not JSON, not an object, no usable `version` or `count`), which a writer replaces as if there were no file.
+    data is None unless ok; why says how it is not ok."""
+    try:
+        with open(_compactions_path(stem, session), "rb") as f:
+            raw = f.read(COMPACTIONS_MAX_BYTES + 1)
+    except (FileNotFoundError, NotADirectoryError):
+        return "none", None, "no file"
+    except (OSError, RuntimeError) as e:
+        return "garbage", None, f"cannot read it ({getattr(e, 'strerror', None) or type(e).__name__})"
+    if len(raw) > COMPACTIONS_MAX_BYTES:
+        return "garbage", None, "over 4 KiB"
+    try:
+        data = json.loads(raw.decode("utf-8"))
+    except UnicodeDecodeError:
+        return "garbage", None, "not UTF-8"
+    except (ValueError, RecursionError):
+        return "garbage", None, "not JSON"
+    if not isinstance(data, dict):
+        return "garbage", None, "not a JSON object"
+    version, count = data.get("version"), data.get("count")
+    if isinstance(version, int) and not isinstance(version, bool) and version != COMPACTIONS_VERSION:
+        return "version", None, f"version {version}, which this engine does not read"
+    if version != COMPACTIONS_VERSION or isinstance(version, bool):
+        return "garbage", None, "no `version: 1`"
+    if not isinstance(count, int) or isinstance(count, bool) or count < 0:
+        return "garbage", None, "no integer `count` >= 0"
+    return "ok", data, None
+
+
+def _compactions_write(stem, session, data, count, told, corrected, now, by):
+    """Rewrite the count file: `data` (the object _compactions_read gave, so a key this engine does not know survives;
+    None for a fresh one) with version, rollout, session, count, corrected, told, at (`now`, UTC Z to the second) and by
+    ("hook" or "heartbeat") set, through a temp file beside it and os.replace, so a reader never sees a torn file and of
+    two writers the last wins. The directory is created only under an existing home dir. Returns None once written,
+    else why it was not; never raises and prints nothing (the hook is silent; the verb prints its own WARN)."""
+    tmp = None
+    try:
+        path = _compactions_path(stem, session)
+        if not Path.home().is_dir():
+            return "no home directory"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        out = dict(data) if isinstance(data, dict) else {}
+        out.update({"version": COMPACTIONS_VERSION, "rollout": stem, "session": session, "count": count,
+                    "corrected": corrected, "told": told, "at": _utc_z(now), "by": by})
+        tmp = path.with_name(f".{path.name}.{os.getpid()}.tmp")
+        with open(tmp, "w", encoding="utf-8") as f:
+            f.write(json.dumps(out) + "\n")
+        os.replace(tmp, path)
+        tmp = None
+        return None
+    except (OSError, RuntimeError, ValueError) as e:   # RuntimeError: Path.home() with no home to resolve
+        return (e.strerror if isinstance(e, OSError) else None) or str(e) or type(e).__name__
+    finally:
+        if tmp is not None:
+            try:
+                os.unlink(tmp)
+            except OSError:
+                pass
+
+
+def _compactions_corrected(data) -> int:
+    """A readable count file's `corrected` (how many the backstop added): an integer >= 0, else 0."""
+    c = data.get("corrected") if isinstance(data, dict) else None
+    return c if isinstance(c, int) and not isinstance(c, bool) and c >= 0 else 0
+
+
+def _transcript_marks(path):
+    """The compaction marks a session transcript holds, in file order: [(timestamp, sessionId)], each as the line
+    carries it (any type; None when absent), or None when the file cannot be read. A mark is a line that parses to an
+    object with top-level `type` "system" and `subtype` exactly "compact_boundary" and no `isSidechain: true`. A byte
+    prefilter picks the candidate lines and the exact test decides, so a `microcompact_boundary` line, a user or
+    assistant line quoting the words, and a torn last line are no marks. Whose mark it is and when it fell are the
+    caller's to judge (cmd_compactions)."""
+    out = []
+    try:
+        with open(path, "rb") as f:
+            for raw in f:
+                if b"compact_boundary" not in raw:
+                    continue
+                try:
+                    d = json.loads(raw)
+                except (ValueError, RecursionError):
+                    continue
+                if (isinstance(d, dict) and d.get("type") == "system" and d.get("subtype") == "compact_boundary"
+                        and d.get("isSidechain") is not True):
+                    out.append((d.get("timestamp"), d.get("sessionId")))
+    except OSError:
+        return None
+    return out
+
+
+def _lead_spans(lines, session):
+    """The spans in which `session` was this rollout's lead, by the Run record: [(start, end)], aware datetimes, end
+    None for a span still open. A span opens at a `lead-entry` naming the session and closes at the next `lead-entry`
+    of anything else (another session, or none named). A lead-entry whose ts does not parse opens and closes
+    nothing."""
+    spans, start = [], None
+    for d in lines or ():
+        if d.get("kind") != "lead-entry":
+            continue
+        ts = _rec_ts(d)
+        if ts is None:
+            continue
+        if d.get("session") == session:
+            if start is None:
+                start = ts
+        elif start is not None:
+            spans.append((start, ts))
+            start = None
+    if start is not None:
+        spans.append((start, None))
+    return spans
+
+
+def _compaction_stop(note, lines, now):
+    """The stop under which a compaction's § 1 re-entry is deferred, never dropped (execute § 1.5 *After a
+    compaction*), for the hook and the verb alike; the first that applies, else None:
+      "pause"      his pause stands (_pause_stands: the `paused:` stamp or an open `paused` line) and is not the
+                   engine's own (_catching_up, or the open line's mode `catch-up`). A soft pause's drain
+                   (`pause_requested:` with no `paused:`) and an Engine catch-up's pause are no stop: the lead still
+                   works there, and under a catch-up's pause the re-entry makes the move.
+      "room-stop"  a room stop stands as step-boundary.py `stands` reads it (_room_standing with the Stage's reading
+                   as a callable, so the Stage is read only for a held start line past the 6 h bound).
+      "halt"       the last open stop after the last lead-entry (_stop_state's `open`) has cause `halt`. Any other
+                   open stop keeps the order now: a § 1 entry is what resumes it."""
+    if _pause_stands(note, lines)[0] and not (_catching_up(note) or _open_pause_mode(lines) == CATCH_UP):
+        return "pause"
+    if _room_standing(_last_room_stop(note), now, alive=lambda t: _stage_alive(t)[0]) == 0:
+        return "room-stop"
+    open_stops = _stop_state(lines)["open"]
+    if open_stops and open_stops[-1].get("cause") == "halt":
+        return "halt"
+    return None
+
+
+def _compaction_root(path) -> str:
+    """The root a compaction's line names: the note's `engine_snapshot:` read as the guard reads it
+    (engine-snapshot.py's read_head, scalar, then real: quotes, an inline comment and the `~/` form) when that
+    directory holds skills/execute/SKILL.md, else this file's own plugin root (the hook's). No git is run."""
+    try:
+        mod = _engine_snapshot_mod()
+        stamp = mod.scalar(mod.read_head(str(path)).get("engine_snapshot")) if mod is not None else ""
+        if stamp:
+            snap = mod.real(stamp)
+            if os.path.isfile(os.path.join(snap, "skills", "execute", "SKILL.md")):
+                return snap
+    except Exception:  # noqa: BLE001 — a stamp that cannot be read names the running root
+        pass
+    return str(PLUGIN_ROOT)
+
+
+COMPACTION_STOP_WORDS = {
+    "pause": ("The rollout is paused", "his Reinstate, /thread:execute [[{slug}]]"),
+    "room-stop": ("A room stop stands", "the Stage's resume, the heartbeat's lapse re-entry, or his own "
+                                        "/thread:execute [[{slug}]]"),
+    "halt": ("The rollout is halted", "his own /thread:execute [[{slug}]], a Watchdog recovery or a repair Prompt"),
+}
+
+
+def _compaction_line(slug, n, stop, root, unsaved=None) -> str:
+    """The hook's one line for a rollout (a cross-version contract, engine-snapshot.md § Cross-version state: it names
+    only what every engine has). Every form opens with the count and names `<root>`'s skill file, `§ 1` and the
+    `--gated` rule; the no-stop form orders the re-entry before the next launch, and each stop form says to start
+    nothing now and who may open the entry that ends the stop. `n` is the count after this compaction, or None for a
+    count file of another version; `unsaved` is why the count was not saved, else None."""
+    skill = f"{root}/skills/execute/SKILL.md"
+    line = (f"ROLLOUT-COMPACTION {slug}: compaction {'?' if n is None else n} of this lead session, counted on disk "
+            "(ADR 0085). The skill text was cut from context.")
+    if stop is None:
+        line += (f" Before the next launch, re-enter /thread:execute [[{slug}]] at § 1 from the engine root: read "
+                 f"{skill} as a file and follow it from § 1, with {root} for ${{CLAUDE_PLUGIN_ROOT}} in every command. "
+                 "This re-entry continues the run you lead with the flags it was started with (a --gated run stays "
+                 "gated); it is no entry point (its record-entry is --by heartbeat, and § 2.7 and § 2.8 do not run). "
+                 "Build every command from that text, never from the summary.")
+    else:
+        what, openers = COMPACTION_STOP_WORDS[stop]
+        line += (f" {what}: start nothing now. Whoever opens the entry that ends this stop "
+                 f"({openers.format(slug=slug)}), read {skill} as a file first, with {root} for "
+                 "${CLAUDE_PLUGIN_ROOT} in every command, and take that entry from § 1 of that text under that entry's "
+                 "own rules (its --by, its § 2.7 rule; an entry he opens takes the flags he types, any other keeps "
+                 "this run's: a --gated run stays gated). Build every command from that text, never from the summary.")
+    if unsaved:
+        line += f" (the count was not saved: {unsaved})"
+    return line
+
+
+def lead_compactions(sessions, now=None):
+    """The compaction hook's entry (p55-4, ADR 0085 d3 and d4; execute § 1.5 *After a compaction*): for each parallel
+    rollout one of `sessions` leads, count this compaction on disk and give the line for the lead's context. Returns
+    [{rollout, session, count, stop, root, written, line}], [] when the sessions lead none. It reads each note of
+    DEFAULT_TASKS_DIR whose name is a dated rollout note's (ROLLOUT_NOTE_NAME_RE, as the note-overlap hook scans them;
+    a legacy undated note is clause (2e)'s alone) and that _ledger_skip does not skip, and matches when the Run
+    record's latest `lead-entry` names a candidate session (_stop_state's `session`). For a match it reads the stop
+    (_compaction_stop) and the root (_compaction_root) first, then writes: with no stop `count += 1, told = count`;
+    under a stop `count += 1` and `told` as it was, so the deferred order stays owed on disk for the verb's first tick
+    after the stop. A count file of another version is not written and its line reads `?`; a write that fails says so
+    in the line. The directory listing sits under one try and each note under its own: a note or record that raises is
+    skipped and the others are still read. It runs from the hook's root for a rollout on any snapshot, passes no
+    Engine snapshot guard and writes only the count file, a cross-version store. Never raises."""
+    out = []
+    try:
+        now = now or datetime.now().astimezone()
+        want = [s for s in dict.fromkeys(sessions or ()) if _session_ok(s)]
+        names = sorted(os.listdir(DEFAULT_TASKS_DIR)) if want else []
+    except Exception:  # noqa: BLE001 — no tasks dir is no rollout to count for
+        return out
+    for name in names:
+        try:
+            if not ROLLOUT_NOTE_NAME_RE.search(name):
+                continue
+            path = DEFAULT_TASKS_DIR / name
+            if not path.is_file():
+                continue
+            note = Note(path)
+            if _ledger_skip(note):
+                continue
+            stem = path.stem
+            lines = _record_read(stem)
+            if not lines:
+                continue
+            session = _stop_state(lines)["session"]
+            if session not in want:
+                continue
+            stop = _compaction_stop(note, lines, now)
+            root = _compaction_root(path)
+            state, data, why = _compactions_read(stem, session)
+            if state == "version":
+                count, unsaved = None, why
+            else:
+                count = (data["count"] if state == "ok" else 0) + 1
+                told = count if stop is None else (_compactions_told(data) if state == "ok" else 0)
+                unsaved = _compactions_write(stem, session, data, count, told, _compactions_corrected(data), now,
+                                             "hook")
+            out.append({"rollout": stem, "session": session, "count": count, "stop": stop, "root": root,
+                        "written": unsaved is None, "line": _compaction_line(stem, count, stop, root, unsaved)})
+        except Exception:  # noqa: BLE001 — one broken note or record never turns the hook off for the others
+            continue
+    return out
+
+
+def cmd_compactions(args) -> int:
+    """The compaction count's backstop (p55-4, ADR 0085 d3 and d4; execute § 1.5 *After a compaction*), run by the
+    heartbeat's clause (2e) after (2b)'s record-entry. This docstring is the one copy of its rules.
+    The unit: a compaction of the session while it was this rollout's lead. The hook reads that when it fires (the
+    record's latest `lead-entry` names the session); this verb reads history through _lead_spans, and a compaction
+    mark of the session's transcript (_transcript_marks) counts when its `timestamp` falls in a span. A mark whose
+    `sessionId` names another session (a fork's parent), or whose time falls in no span, is `outside`; one with a
+    missing, unparseable or naive timestamp is `undated` and never counted.
+    It acts only when the record's latest `lead-entry` names the session (--session, else CLAUDE_CODE_SESSION_ID);
+    otherwise it prints `lead: false` and writes nothing. For the lead:
+      - count = max(the count on disk, marks) when the transcript was read (--transcript, else the session's one
+        transcript, _session_transcript), else the count on disk. `corrected` grows by what the raise added. The count
+        only rises.
+      - `owed` is an integer: count after the raise minus `told` as read, the re-entries owed going into this call.
+        `told` is how many counted compactions have had their § 1 re-entry ordered with no stop standing; a missing or
+        invalid one reads 0.
+      - `reenter` is a boolean: owed > 0 and no stop stands (_compaction_stop's three: his pause, a standing room
+        stop, an open halt). When true this call writes `told = count`. Under a stop it raises the count and leaves
+        `told`, so the order survives the stop and the first tick after it gives it.
+      - It writes when `count` or `told` changed, `by: "heartbeat"`; --dry-run writes nothing. A count file of
+        another version is never written and nothing is ordered from it; garbage is replaced as if no file.
+    It prints one JSON line: {rollout, session, lead, count, was (the count before this call), told (after it; on
+    --dry-run, as it would write), owed, transcript (its path, or null when none was read), marks, outside, undated,
+    corrected, stop, reenter, written}. WARN lines go to stderr, one per condition, each starting COMPACTIONS_WARN:
+    undated marks; an over-count (the transcript was read, no mark is undated, and the count on disk is above the
+    marks: a compaction counted that was not this lead's, which raise-only never corrects); a write that failed; an
+    unreadable count file; a Run record that cannot be read (then no session reads as the lead). A serial, superseded,
+    done or dropped note prints `[skip] <stem>: <why>: no compaction counted`. Exit 0 for every reading, 1 for no
+    rollout note, 2 for usage and the Engine snapshot guard."""
+    rollout_path = Path(os.path.expanduser(args.rollout))
+    if not rollout_path.is_file():
+        print(f"ERROR: compactions: rollout note not found at {rollout_path}", file=sys.stderr)
+        return 1
+    try:
+        note = Note(rollout_path)
+    except (OSError, ValueError) as e:
+        print(f"ERROR: compactions: cannot read {rollout_path}: {e}", file=sys.stderr)
+        return 1
+    ro = rollout_path.stem
+    why = _ledger_skip(note)
+    if why:
+        print(f"[skip] {ro}: {why}: no compaction counted")
+        return 0
+    warn = lambda msg: print(f"{COMPACTIONS_WARN} {ro}: {msg}", file=sys.stderr)  # noqa: E731
+    now = _now(args)
+    lines = _record_read(ro)
+    if lines is None:
+        warn("the Run record cannot be read: nothing counted")
+        lines = []
+    session = args.session if args.session is not None else os.environ.get("CLAUDE_CODE_SESSION_ID")
+    session = session if _session_ok(session) else None
+    lead = session is not None and _stop_state(lines)["session"] == session
+    out = {"rollout": ro, "session": session, "lead": lead, "count": 0, "was": 0, "told": 0, "owed": 0,
+           "transcript": None, "marks": 0, "outside": 0, "undated": 0, "corrected": 0, "stop": None,
+           "reenter": False, "written": False}
+    if not lead:
+        print(json.dumps(out))
+        return 0
+    state, data, why = _compactions_read(ro, session)
+    if state in ("version", "garbage"):
+        warn(f"the count file of {session} is unreadable ({why}): "
+             + ("nothing counted or ordered from it" if state == "version" else "read as no file"))
+    disk = data["count"] if state == "ok" else 0
+    told_read = _compactions_told(data) if state == "ok" else 0
+    corrected = _compactions_corrected(data)
+    transcript = Path(os.path.expanduser(args.transcript)) if args.transcript else _session_transcript(session)[0]
+    marks = _transcript_marks(transcript) if transcript is not None else None
+    n_marks = outside = undated = 0
+    if marks is not None:
+        spans = _lead_spans(lines, session)
+        for stamp, sid in marks:
+            ts = _away_stamp(stamp)[0]
+            if isinstance(sid, str) and sid and sid != session:
+                outside += 1
+            elif ts is None:
+                undated += 1
+            elif any(a <= ts and (b is None or ts < b) for a, b in spans):
+                n_marks += 1
+            else:
+                outside += 1
+        out.update(transcript=str(transcript), marks=n_marks, outside=outside, undated=undated)
+        if undated:
+            warn(f"{undated} compaction mark(s) of {session} with no usable timestamp: never counted")
+    stop = _compaction_stop(note, lines, now)
+    out["stop"] = stop
+    if state == "version":
+        print(json.dumps(out))
+        return 0
+    if marks is not None and not undated and disk > n_marks:
+        warn(f"the count on disk ({disk}) is above the {n_marks} compaction mark(s) the transcript of {session} holds "
+             "from its time as lead: left as it is (a compaction counted that was not this lead's)")
+    count = max(disk, n_marks) if marks is not None else disk
+    corrected += count - disk
+    owed = count - told_read
+    reenter = owed > 0 and stop is None
+    told = count if reenter else told_read
+    written, failed = False, False
+    if (count != disk or told != told_read) and not args.dry_run:
+        unsaved = _compactions_write(ro, session, data, count, told, corrected, now, "heartbeat")
+        written, failed = unsaved is None, unsaved is not None
+        if failed:
+            warn(f"cannot write the count file of {session}: {unsaved}")
+    out.update(count=count, was=disk, told=told_read if failed else told, owed=owed, corrected=corrected,
+               reenter=reenter, written=written)
+    print(json.dumps(out))
+    return 0
+
+
+def _next_compactions(stem) -> dict:
+    """`next`'s `compactions` key (p55-4; ADR 0085 d4): {session, count, file} for the caller's session
+    (CLAUDE_CODE_SESSION_ID; null when unset or no file name) and this rollout: the count file's `count`, 0 with no
+    file, `file` "ok", "none" or "unreadable" (garbage, or another version: count 0 and one COMPACTIONS_WARN line on
+    stderr). It writes nothing and routes nothing; the lead's hand-over at the count is p55-5's."""
+    session = os.environ.get("CLAUDE_CODE_SESSION_ID")
+    if not _session_ok(session):
+        return {"session": None, "count": 0, "file": "none"}
+    state, data, why = _compactions_read(stem, session)
+    if state in ("version", "garbage"):
+        print(f"{COMPACTIONS_WARN} {stem}: the count file of {session} is unreadable ({why}): read as 0",
+              file=sys.stderr)
+        return {"session": session, "count": 0, "file": "unreadable"}
+    return {"session": session, "count": data["count"] if state == "ok" else 0, "file": state}
+
+
 def _journal_dir(args):
     """(journalDir, error): --journal-dir, else <dir>/<session id>/workflows for the one transcript
-    ${CLAUDE_CONFIG_DIR:-$HOME/.claude}/projects/*/${CLAUDE_CODE_SESSION_ID}.jsonl."""
+    ${CLAUDE_CONFIG_DIR:-$HOME/.claude}/projects/*/${CLAUDE_CODE_SESSION_ID}.jsonl (_session_transcript)."""
     if args.journal_dir:
         return os.path.normpath(os.path.expanduser(args.journal_dir)), None
     sid = os.environ.get("CLAUDE_CODE_SESSION_ID") or ""
-    if not sid or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.-]*", sid) or ".." in sid:
+    if not _session_ok(sid):
         return None, "CLAUDE_CODE_SESSION_ID is not set (pass --journal-dir <abs>)"
-    cfg = os.environ.get("CLAUDE_CONFIG_DIR") or os.path.join(os.path.expanduser("~"), ".claude")
-    hits = sorted(Path(cfg).glob(f"projects/*/{sid}.jsonl"))
-    if len(hits) != 1:
-        return None, (f"{len(hits)} transcripts match {cfg}/projects/*/{sid}.jsonl, not one "
+    hit, hits, cfg = _session_transcript(sid)
+    if hit is None:
+        return None, (f"{hits} transcripts match {cfg}/projects/*/{sid}.jsonl, not one "
                       "(pass --journal-dir <abs>)")
-    return str(hits[0].parent / sid / "workflows"), None
+    return str(hit.parent / sid / "workflows"), None
 
 
 def _journal_dir_refusal(jdir: str, run_id: str):
@@ -23242,6 +23666,16 @@ def _parser():
     ren.add_argument("--now", type=_iso_arg, default=None, help=now_help)
     ren.add_argument("--dry-run", action="store_true", help="print what it would record; write nothing")
     ren.set_defaults(func=cmd_record_entry)
+
+    cp = sub.add_parser("compactions", help="p55-4 (ADR 0085 d3, d4): the compaction count's backstop: raise the count "
+                                            "to the transcript's marks and say whether a § 1 re-entry is owed")
+    cp.add_argument("--rollout", required=True, help="path to the rollout note")
+    cp.add_argument("--session", default=None, help="the lead's session id (default: CLAUDE_CODE_SESSION_ID)")
+    cp.add_argument("--transcript", default=None, help="the session's transcript (default: its one match under "
+                                                       "${CLAUDE_CONFIG_DIR:-~/.claude}/projects/*/)")
+    cp.add_argument("--now", type=_iso_arg, default=None, help=now_help)
+    cp.add_argument("--dry-run", action="store_true", help="print the reading; write nothing")
+    cp.set_defaults(func=cmd_compactions)
 
     df = sub.add_parser("defer", help="pop task(s) out of a rollout back to open backlog (/thread:repair)")
     df.add_argument("--tasks", required=True, help="comma-separated task slugs to defer")
