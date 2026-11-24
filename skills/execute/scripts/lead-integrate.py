@@ -122,17 +122,20 @@ Subcommands:
       args is null beside a non-empty prUrlError (the note's pr: gives no PR URL the engine takes) or budgetError
       (`invalid round budget: <key> on [[S]] must be an integer >= 1, got '<raw>'`: a task-level max_iterations,
       max_review_rounds or max_plan_rounds stamp that is not an integer >= 1, an empty one included, read from N alone
-      before any rollout or machine read): the lead launches nothing and writes its own set-aside (execute § 4.5).
+      before any read of the rollout note or the rollout settings; the integrate form's prepare-record exit 2s, and
+      --revise's resumeAt and history ones, come first): the lead launches nothing and writes its own set-aside
+      (execute § 4.5).
       Exit 2 (`lead-integrate call: …`, nothing printed, nothing launched). The integrate form's: no record, an
       unreadable one or another slug's, a route that launches no integrate call (merge, set-aside), an --after the route
       does not take, a record sha that is not 40-hex, a record tree that is another directory. --revise's: a note not at
-      resumeAt revise, a history the engine refuses, a refused unreachable_paths read. Both forms': a --note that is not
-      the slug's or is unreadable, `scope: read-only`, no rollout note, an R that is not its Project root, no
-      `verifier:` or a `verifier:` or `env_bootstrap:` the command reader refuses, a rollout-level round-budget stamp
-      that is not an integer >= 1, refused rollout settings, a refused ladder file, no verify-slot.py, a refused
-      `security_checks:`, a default branch origin does not answer. The integrate form runs on the task that holds the
-      lane, so execute's *lead-integrate's exit 2* routes its exit 2 to the Lane hold (ADR 0048: the lane's own command
-      stops merging, never the whole rollout); --revise's is § 7's halt, but `task note unreadable:`, that task's alone.
+      resumeAt revise, a history the engine refuses, a refused unreachable_paths read. Both forms': an R that is not
+      absolute after expanduser, a --note that is not the slug's or is unreadable, `scope: read-only`, no rollout note,
+      an R that is not its Project root, no `verifier:` or a `verifier:` or `env_bootstrap:` the command reader refuses,
+      a rollout-level round-budget stamp that is not an integer >= 1, refused rollout settings, a refused ladder file,
+      no verify-slot.py, a refused `security_checks:`, a default branch origin does not answer. The integrate form runs
+      on the task that holds the lane, so execute's *lead-integrate's exit 2* routes its exit 2 to the Lane hold (ADR
+      0048: the lane's own command stops merging, never the whole rollout); --revise's is § 7's halt, but `task note
+      unreadable:`, that task's alone.
 
   verify --tree T --out O --timeout S [--bootstrap CMD] --verifier CMD [--repo R --detach-at SHA]
          [[--slots N] --slot-wait W] [--outcome] [--rollout NOTE [--slug SLUG]] [--diff-base REV [--named-rerun CMD]]
@@ -2760,15 +2763,20 @@ BASELINE_SECTION = "## Known baseline failures"
 
 def _call_repo(repo):
     """--repo in the one spelling prepare records it in (cmd_prepare's Path(expanduser(R)): a trailing / or a /./ goes),
-    so every path `call` prints, and the engine's worktreeDir(repoPath, slug), is built from the same string."""
-    return str(Path(os.path.expanduser(repo)))
+    so every path `call` prints, and the engine's worktreeDir(repoPath, slug), is built from the same string. An R that
+    is not absolute after expanduser is EnvError: the engine and its agents take repoPath and every path built from it
+    as printed, from their own cwd."""
+    expanded = os.path.expanduser(repo)
+    if not os.path.isabs(expanded):
+        raise EnvError(f"--repo {repo} is not an absolute path; nothing launched")
+    return str(Path(expanded))
 
 
 def _budget_error(path, note):
     """§ 3's round-budget validation at the task level (ADR 0048): `invalid round budget: <key> on [[<slug>]] must be an
     integer >= 1, got '<raw>'` for the first of BUDGET_KEYS the task note carries that is not one (an empty value is
-    present, and invalid), else ''. Read from the task note alone, before any rollout or machine read, so a fault that is
-    the task's own is never an exit 2 (a Lane hold)."""
+    present, and invalid), else ''. Read from the task note alone, before any read of the rollout note or the rollout
+    settings, so a fault that is the task's own is never one of their exit 2s (a Lane hold)."""
     for key, _ in BUDGET_KEYS:
         raw = note.get(key)
         if raw is not None and rr._stamp_value(raw, 1) is None:
