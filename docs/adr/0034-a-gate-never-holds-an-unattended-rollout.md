@@ -29,7 +29,9 @@ under a task's or rollout's own limit never counts toward `[defaults]`'s.)*
 neither earlier reading prices is read at its widest and signed within the limit and the month line; a gate that names
 no amount it can read, or none a cap word governs, still asks.)*
 *(Amended 2026-11-25 by p56-1: the sweep's irreversible things read a live publish, a publish, deploy or push that
-goes `live`, so a Webflow publish of animately.co is asked ahead; a publish to staging, a preview or a draft is no hit.)*
+goes `live`, so a Webflow publish of animately.co is asked ahead when its note names the publish as live; a note that
+names no live publish is still first seen at the plan gate (the accepted residual), and a publish to staging, a preview
+or a draft is no hit.)*
 
 ## Context
 

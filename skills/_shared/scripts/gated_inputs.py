@@ -45,10 +45,12 @@ a reading needs it (part 1), with no git and no bytecode.
    `to production` (deploy, push, publish, promote, release or migrate, in any form, at most two words, then `to
    production`), `live publish` (p56-1: publish, deploy or push, in any form, then at most eight words of one clause,
    then `live` as a word, not `live-`; or `live publish` or `live deploy`, in any form; a clause ends at `,`, `;`,
-   `!`, `?`, a `.` or `:` before a space, or a blank line, so `publish animately.co live` and `publish the site live`
-   hit, and `publish to staging`, `save as draft` and `push the branch, then check the live site` do not) and `delete
-   the` (delete in any form, an optional article, at most two words, then a repo, repository, user, account, bucket or
-   database, plural allowed). The credential and test-Login readings' deny list (parts 4 and 5) reads
+   `!`, `?`, a `.` or `:` before a space, a blank line, or a line that starts a list item (`-`, `*`, `+`, `1.` or
+   `1)` then a space), a heading (`#`) or a table row (`|`), while a paragraph's own line breaks run on, so
+   `publish animately.co live` and `publish the site live` hit, and `publish to staging`, `save as draft`, `push the
+   branch, then check the live site` and a list item under `push the branch` that names the live site do not) and
+   `delete the` (delete in any form, an optional article, at most two words, then a repo, repository, user, account,
+   bucket or database, plural allowed). The credential and test-Login readings' deny list (parts 4 and 5) reads
    IRREVERSIBLE_WORDS alone, unchanged. Accepted residual: a gate whose note names neither (smart-slider
    p8-2's staging key, reached only through its dependency's hook) is still first seen at the plan gate; the
    Reflection counts each gate signed mid-run whose note the sweep does hit as a miss (reflect.py's `sweepMiss`).
@@ -496,9 +498,10 @@ CREDENTIAL_THINGS = (
     _case(".env", r"(?<![A-Za-z0-9_.])\.env(?![A-Za-z0-9_])"),
     *(_case(s, WS + r"\s+".join(re.escape(p) for p in s.split(" ")) + WE_) for s in SERVICES),
 )
-# The live publish's clause (p56-1): words joined by spaces and at most one line break (a blank line ends it), each
-# word free of clause punctuation, a `.` or `:` inside one (`animately.co`) kept.
-_SEP = r"(?:[ \t]+|[ \t]*\n[ \t]*)"
+# The live publish's clause (p56-1): its words are joined by spaces or a line break, any gap between two words. A blank
+# line ends it, and so does a line that starts a list item, a heading or a table row. Each word is free of clause
+# punctuation, a `.` or `:` inside one (`animately.co`) kept.
+_SEP = r"(?:[ \t]+|[ \t]*\n[ \t]*(?!(?:[-*+]|\d+[.)])[ \t]|[#|]))"
 _CLAUSE_WORD = r"(?:[^\s.,;:!?]|[.:](?=\S))+"
 IRREVERSIBLE_THINGS = (
     _anycase("scratch repo", WS + r"scratch\s+(?:[A-Za-z0-9-]+\s+){0,2}repo(?:s|sitory|sitories)?" + WE_),

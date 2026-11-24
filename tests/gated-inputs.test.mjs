@@ -480,32 +480,31 @@ test('p51-3: each credential and irreversible thing flags by its word; near miss
     ['irreversible', 'then force-push the branch', 'force-push'], ['irreversible', 'git push --force', 'force-push'],
     ['irreversible', 'DROP TABLE gifs', 'drop table'], ['irreversible', 'deploying the app to production', 'to production'],
     ['irreversible', 'then deletes the throwaway staging user', 'delete the'],
+    // p56-1: the first four rows are the gates the Legs of four chains (seo-rollout-2026-11-16-3,
+    // website-re-design-rollout-2026-11-10, -11-16-2 and -11-17) wrote when they set their tasks aside, each verbatim
+    // less its `irreversible: ` prefix; the fifth is the noun shape of seo-tools-hub-title-meta-refresh's gate, asked
+    // ahead. Each `irreversible:` prefix was always read (IRREVERSIBLE_WORDS): the miss was that no gate text was in
+    // the note when schedule swept it, so the sweep now reads the live-publish act itself. The last row is a note as
+    // schedule swept it, before its first Slot: animately-search-page-noindex's body line (vault 445d4b05), which hit
+    // nothing before p56-1.
+    ['irreversible', 'publish the /tools/change-speed-gif rewrite for the button screen (/app/speed) live to animately.co via Webflow: drop smart frame removal, the file-size readout, edit history/undo, the desktop runtime readout and side-by-side compare from the visible copy and the FAQPage JSON-LD, and drop \'smart frame removal\' from the meta and OG description', 'live publish'],
+    ['irreversible', 'publish animately.co live to ship the footer Icons8 attribution restyle and the .s2-sub mobile gutter fix (Webflow has no staging on this site, so any publish is live)', 'live publish'],
+    ['irreversible', 'switch the Body (All Pages) font on animately.co from Montserrat to Inter, remove Montserrat from the WebFont.load call, and publish the site live (every publish on this site is live and also ships any other unpublished Designer changes)', 'live publish'],
+    ['irreversible', 'publish animately.co live to test whether includeInSitemap: false on a throwaway, non-ranking page also renders noindex (no staging: any publish ships every pending edit)', 'live publish'],
+    ['irreversible', 'a live publish of this title/meta', 'live publish'],
+    ['irreversible', 'Note every publish on this site is LIVE (no staging) — gate the publish.', 'live publish'],
   ]
   const quiet = ['the KEY_COUNT and KEYS map', 'a desk_test_ prefix', 'the .environment var', 'stripe the rows',
-    'supabase in lower case', 'the scratch dir', 'promote the default branch', 'delete the branch', 'a striped AWSOME']
+    'supabase in lower case', 'the scratch dir', 'promote the default branch', 'delete the branch', 'a striped AWSOME',
+    'publish to staging', 'save as draft', 'publish a preview link', 'push the branch, then check the live site',
+    'push the commit and live-reload', 'a deploy to staging.\n\nThe live site stays', 'push the branch\n- check the live site',
+    'push the branch\n## The live site', 'push the branch\n| the live site |']
   const got = py([...flag.map(([, text]) => ({ op: 'sweep_text', text })), ...quiet.map((text) => ({ op: 'sweep_text', text }))])
   flag.forEach(([kind, text, word], i) => assert.deepEqual(words(got[i][kind]), [word], text))
   quiet.forEach((text, i) => {
     const s = got[flag.length + i]
     assert.deepEqual([s.credential, s.irreversible], [[], []], text)
   })
-})
-
-// p56-1: the four chains' unsigned gates (seo-rollout-2026-11-16-3, website-re-design-rollout-2026-11-10, -11-16-2 and
-// -11-17), each verbatim from its note less its `irreversible: ` prefix: a live Webflow publish no word read.
-test('p56-1: a live publish flags as `live publish`; a publish to staging, a preview or a draft stays quiet', () => {
-  const flag = [
-    'publish the /tools/change-speed-gif rewrite for the button screen (/app/speed) live to animately.co via Webflow: drop smart frame removal, the file-size readout, edit history/undo, the desktop runtime readout and side-by-side compare from the visible copy and the FAQPage JSON-LD, and drop \'smart frame removal\' from the meta and OG description',
-    'publish animately.co live to ship the footer Icons8 attribution restyle and the .s2-sub mobile gutter fix (Webflow has no staging on this site, so any publish is live)',
-    'switch the Body (All Pages) font on animately.co from Montserrat to Inter, remove Montserrat from the WebFont.load call, and publish the site live (every publish on this site is live and also ships any other unpublished Designer changes)',
-    'publish animately.co live to test whether includeInSitemap: false on a throwaway, non-ranking page also renders noindex (no staging: any publish ships every pending edit)',
-    'a live publish of this title/meta',
-  ]
-  const quiet = ['publish to staging', 'save as draft', 'publish a preview link', 'push the branch, then check the live site',
-    'push the commit and live-reload', 'a deploy to staging.\n\nThe live site stays']
-  const got = py([...flag, ...quiet].map((text) => ({ op: 'sweep_text', text })))
-  flag.forEach((text, i) => assert.deepEqual(words(got[i].irreversible), ['live publish'], text))
-  quiet.forEach((text, i) => assert.deepEqual(got[flag.length + i].irreversible, [], text))
 })
 
 test('p51-3: the credential readings still deny only the old irreversible words, never the things the sweep reads', () => {
