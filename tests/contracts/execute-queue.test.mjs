@@ -13,7 +13,7 @@
 // once asked the lead to build or pass a value of a seeded revise or an integrate call by hand, now naming
 // `lead-integrate.py call` as the one builder (`must`), with the old phrase that may not come back (`gone`). The list is
 // finite: § 3's opening, its `unreachable_paths`, `touched` and `security_checks` rows, its round-budget, verify_timeout
-// and ladder paragraphs, § 4's opening and three jsonc comments, § 4.5 steps 1.2, 1.3 and 3, and the Don'ts.
+// (and its mid-entry edit sentence) and ladder paragraphs, § 4's opening and three jsonc comments, § 4.5 steps 1.2, 1.3 and 3, and the Don'ts.
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
@@ -142,6 +142,7 @@ const CALL_ARGS = [
   { at: 's3', must: "never assembled by hand, on a task's own call; `lead-integrate.py call` reads the same script and slots for a seeded revise and an integrate call", gone: [] },
   { at: 's3', must: "the lead copies it verbatim onto a task's own call, and `lead-integrate.py call` reads the same key for the other two.",
     gone: ['integrate calls pass it, verbatim, as `args.securityCheck`'] },
+  { at: 's3', must: "A seeded revise and an integrate call do not wait for the next entry: `lead-integrate.py call` reads `verify_slots` and `security_checks` fresh from disk at each launch, so an edit of either inside an entry makes `call`'s `args.verifySlot` or `args.securityCheck` differ from this entry's `verify-timeout` line, and § 4's check halts the rollout at that launch (an integrate call's lane freed first).", gone: [] },
   { at: 'ladder', must: "a seeded revise's and an integrate call's `args.ladder` is `lead-integrate.py call`'s own read of the same file", gone: ['before its `startedAt` stamp'] },
   { at: 's4', must: "Build the args object for a task's own call (a start, or a restart's own call). A seeded revise's and an integrate call's args are `lead-integrate.py call`'s, whole",
     gone: ['Build the args object for each task call:'] },
@@ -1878,6 +1879,7 @@ test('control: each CALL_ARGS sentence restored to its old text, or removed, fai
     [" For a seeded revise and an integrate call this validation is `lead-integrate.py call`'s own: a task-level violation is its `budgetError` (the lead's row is `--kind revise-stopped` or `--kind integration`, § 4.5 steps 1.2 and 3), and a rollout-level one is its exit 2 (*lead-integrate's exit 2*).", ''],
     ["never assembled by hand, on a task's own call; `lead-integrate.py call` reads the same script and slots for a seeded revise and an integrate call (§ 4.5 steps 1.2 and 3);", 'never assembled by hand;'],
     ["carry it as `args.securityCheck` (§ 4): the lead copies it verbatim onto a task's own call, and `lead-integrate.py call` reads the same key for the other two.", 'pass it, verbatim, as `args.securityCheck` (§ 4).'],
+    [" A seeded revise and an integrate call do not wait for the next entry: `lead-integrate.py call` reads `verify_slots` and `security_checks` fresh from disk at each launch, so an edit of either inside an entry makes `call`'s `args.verifySlot` or `args.securityCheck` differ from this entry's `verify-timeout` line, and § 4's check halts the rollout at that launch (an integrate call's lane freed first).", ''],
     ['for an integrate call before `call` (step 3\'s', 'for an integrate call before its `startedAt` stamp (step 3\'s'],
     ["Build the args object for a task's own call (a start, or a restart's own call). A seeded revise's and an integrate call's args are `lead-integrate.py call`'s, whole (§ 4.5 steps 1.2 and 3, ADR 0085 d7): the lead builds no part of them, and where a comment below names those two calls it says which calls carry the key, never who types it:",
       'Build the args object for each task call:'],
