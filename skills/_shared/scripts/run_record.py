@@ -197,12 +197,13 @@ Kinds (T: a task is required; `?` marks an optional field; every enum is closed)
   merged          T  pr?; readOnly? (bool); stamp?; reconciledAt? (as slot-freed)
   paused             mode (soft | hard | sign-off: reconcile-rollout.py await-sign-off, the queue left only gates for
                      Lachy and closed, ADR 0034 | catch-up: `next` drained an Engine catch-up, p54-14, the engine's own
-                     pause, never his)
+                     pause, never his | hand-over: `next` drained a Lead hand-over, or stamped its `paused:` at the
+                     drain's bound, p55-5, ADR 0085, the engine's own pause, never his)
   resumed            (no fields)
   hold-started       hold (merge | git-env | race)
   hold-ended         hold (merge | git-env | race)
   idle-slots         reason (dependency | solo | pause-drain | catch-up-drain: an Engine catch-up's drain, p54-14 |
-                     queue-tail | awaiting-hand-back |
+                     hand-over-drain: a Lead hand-over's drain, p55-5 | queue-tail | awaiting-hand-back |
                      hold-merge | hold-git-env | hold-race | hold-trickle: a row waits on the machine-wide Trickle,
                      execute away.md | hold-away-cap: a row waits on the machine-wide Away cap, execute away.md |
                      hold-last-start: a row the last starts hold toward the Morning, p28-2 | hold-pr: a row waits
@@ -437,8 +438,9 @@ Kinds (T: a task is required; `?` marks an optional field; every enum is closed)
   lead-entry         by (lachy | stage | watchdog | heartbeat | repair | catch-up: what opened the lead's entry,
                      catch-up the lead's own self-Reinstate at an Engine catch-up, p54-14); session? (its
                      CLAUDE_CODE_SESSION_ID), stop? (usage-limit | dead-lead | mac-restart | halt | watchdog | pause |
-                     catch-up: the stop this entry resumes from, absent when the lead was alive; catch-up an Engine
-                     catch-up's pause). p29-10:
+                     catch-up | hand-over: the stop this entry resumes from, absent when the lead was alive; catch-up an
+                     Engine catch-up's pause; hand-over a Lead hand-over's pause, p55-5, the fresh lead's Reinstate).
+                     p29-10:
                      reconcile-rollout.py record-entry, one per loop entry and per heartbeat tick. ledger.py reads a
                      lead-entry only by its ts (stop_spans), so neither value feeds a sum.
   lead-error         site (args-refusal | pre-check | merge-step | command: execute § 4.5 *Lead error*'s four sites),
@@ -448,7 +450,10 @@ Kinds (T: a task is required; `?` marks an optional field; every enum is closed)
                      CLAUDE_CODE_SESSION_ID), call? (task | revise | integrate), evidence? (at most 200 characters: the
                      refusal's or the stderr's first line), row? ({startedAt, finishedAt?}: the integrate row's
                      metrics, the key a replay is read by), passed?, named? (40 lowercase hex each: the value the lead
-                     passed and the one the engine names). Site merge-step carries row, passed and named; no other
+                     passed and the one the engine names), handOver? (a bool, only beside over: true: true while the
+                     task's total, every session's count with this line, is below reconcile-rollout.py's
+                     LEAD_ERROR_HANDOVER_TOTAL, so the lead hands over at its bound, p55-5; false from it on, where the
+                     site's old route stands). Site merge-step carries row, passed and named; no other
                      site carries any of them. A task is optional. p55-3, ADR 0085 d8: reconcile-rollout.py
                      `lead-error` writes sites args-refusal, pre-check and command (the lead's call), and its reconcile
                      writes merge-step; a Reflection lists each (reflect.py's friction), never alerted.
@@ -573,6 +578,14 @@ Kinds (T: a task is required; `?` marks an optional field; every enum is closed)
                      d5), the Engine catch-up: engine-snapshot.py adopt (moved), reconcile-rollout.py `next` (bound) and
                      `catch-up --abort` (not-moved). An older reader skips the kind, as every reader skips one it does
                      not know.
+  hand-over          outcome (drain | bound | handed | not-handed); cause? (compactions | lead-error: what started it),
+                     session? (the handing lead's CLAUDE_CODE_SESSION_ID), count? (an int >= 0: its compaction count
+                     at the start), drainMinutes? (an int >= 0: the drain's minutes to its bound), listed? (a bool:
+                     handed onto the Waiting list, or by the manual needs-you line), gated? (a bool: the run was
+                     --gated), why? (at most 200 characters: a not-handed line's words). p55-5 (ADR 0085 d3, d5, d6
+                     and d9), the Lead hand-over: reconcile-rollout.py `next` (drain at its start, bound at the drain's
+                     bound, not-handed when it lifts a drain), `stamp-start --hand-over` and `hand-over --manual`
+                     (handed) and `hand-over --abort` (not-handed). An older reader skips the kind.
   master-run         repo (owner/name, lowercased), outcome (red | unconfirmed | rerun-pass | green | unproven), sha
                      (the run's head, or the Green tip commit for unproven), at (a UTC Z stamp: the row's time, above);
                      runId?, attempt? (ints >= 1: the run and the decided attempt), suites?, newSuites? (at most
@@ -1187,7 +1200,7 @@ TIME_LOST_CAUSES = {
     "plan-rejected": ("plan-rejected",),
 }
 TIME_LOST_OTHER = ("pause", "pause-drain", "dependency", "solo", "queue-tail", "hold-last-start", "hold-pr", "revise",
-                   "hold-surface", "catch-up", "catch-up-drain")
+                   "hold-surface", "catch-up", "catch-up-drain", "hand-over", "hand-over-drain")
 TIME_LOST_SOURCES = ("record", "audit", "baseline")
 AUDIT_SOURCES = ("transcripts", "suite-logs", "pause-logs", "mac-history")
 MAX_TL_ROLLOUTS = 8        # contributors kept per class on a time-lost line
@@ -1540,7 +1553,7 @@ INERT_OPTIONAL = {"base": _str, "main": _str, "head": _str, "globs": _capped(MAX
 
 STOP_CAUSES = ("usage-limit", "dead-lead", "mac-restart", "mac-sleep", "halt", "watchdog")
 ENTRY_BYS = ("lachy", "stage", "watchdog", "heartbeat", "repair", "catch-up")
-ENTRY_STOPS = ("usage-limit", "dead-lead", "mac-restart", "halt", "watchdog", "pause", "catch-up")
+ENTRY_STOPS = ("usage-limit", "dead-lead", "mac-restart", "halt", "watchdog", "pause", "catch-up", "hand-over")
 CALL_KINDS = ("task", "revise", "integrate", "resume")      # run-bound's `call`
 # role-call's `role` (p46-2): the engine's dispatch roles, from each label's prefix; first-reviewer (p52-2, ADR 0081 d2)
 # is a doubled master review's first reviewer, which sits outside the draw.
@@ -1836,11 +1849,12 @@ KINDS = {
     "lane-freed": (True, {"release": _enum("merge", "set-aside", "reject", "halt", "origin")},
                    {"path": _str, "triggers": _strlist, "conflict": _bool, "origin": _str}),
     "merged": (True, {}, {"pr": _pr, "readOnly": _bool, **CALL_END}),
-    "paused": (False, {"mode": _enum("soft", "hard", "sign-off", "catch-up")}, {}),
+    "paused": (False, {"mode": _enum("soft", "hard", "sign-off", "catch-up", "hand-over")}, {}),
     "resumed": (False, {}, {}),
     "hold-started": (False, {"hold": _enum(*HOLDS)}, {}),
     "hold-ended": (False, {"hold": _enum(*HOLDS)}, {}),
-    "idle-slots": (False, {"reason": _enum("dependency", "solo", "pause-drain", "catch-up-drain", "queue-tail",
+    "idle-slots": (False, {"reason": _enum("dependency", "solo", "pause-drain", "catch-up-drain", "hand-over-drain",
+                                           "queue-tail",
                                            "awaiting-hand-back",
                                            "hold-surface",
                                            "hold-merge", "hold-git-env", "hold-race", "hold-pr", "hold-heat", "hold-trickle",
@@ -1951,7 +1965,7 @@ KINDS = {
     "lead-error": (False, {"site": _enum(*LEAD_ERROR_SITES), "n": _int(1), "bound": _int(1)},
                    {"over": _true, "session": _str, "call": _enum(*LEAD_ERROR_CALLS),
                     "evidence": _short(LEAD_ERROR_EVIDENCE_MAX), "row": _lead_error_row, "passed": _hex40,
-                    "named": _hex40}),
+                    "named": _hex40, "handOver": _bool}),
     "suite-started": (False, dict(SUITE_REQUIRED, sha=_str, dirty=_bool),
                       {"load": _load3, "diff": _hex12, "waited": _seconds, "running": _int(0),
                        "runningWeight": _room(False)}),
@@ -1989,6 +2003,11 @@ KINDS = {
     "catch-up": (False, {"from": _str, "shape": _enum("parallel", "serial"),
                          "outcome": _enum("moved", "bound", "not-moved")},
                  {"to": _str, "fixes": _strlist, "release": _str, "drainMinutes": _int(0), "why": _short(REASON_MAX)}),
+    # p55-5 (ADR 0085 d3, d5, d6 and d9), the Lead hand-over: reconcile-rollout.py next, stamp-start --hand-over and
+    # hand-over.
+    "hand-over": (False, {"outcome": _enum("drain", "bound", "handed", "not-handed")},
+                  {"cause": _enum("compactions", "lead-error"), "session": _str, "count": _int(0),
+                   "drainMinutes": _int(0), "listed": _bool, "gated": _bool, "why": _short(REASON_MAX)}),
     # p54-7 (ADR 0084 Decided for you 3, 11, 13): reconcile-rollout.py master-runs, in master-runs.jsonl.
     "master-run": (False, {"repo": _str, "outcome": _enum(*MASTER_OUTCOMES), "sha": _str, "at": _stampz},
                    {"runId": _int(1), "attempt": _int(1),
@@ -2161,6 +2180,8 @@ def _check_fields(kind, fields):
             raise Refused("lead-error: site merge-step carries %s" % ", ".join(LEAD_ERROR_ROW_FIELDS))
         if fields["site"] != "merge-step" and pair:
             raise Refused("lead-error: only site merge-step carries %s" % ", ".join(LEAD_ERROR_ROW_FIELDS))
+        if "handOver" in fields and fields.get("over") is not True:
+            raise Refused("lead-error: handOver is carried only beside over: true (p55-5)")
     if kind == "review-round" and "open" in fields and "blocking" in fields and fields["open"] > fields["blocking"]:
         raise Refused("review-round: open (%d) exceeds blocking (%d)" % (fields["open"], fields["blocking"]))
     if kind == "review-round" and "findings" in fields and ("filed" in fields or "unconfirmed" in fields):

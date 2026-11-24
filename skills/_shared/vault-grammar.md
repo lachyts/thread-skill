@@ -66,7 +66,10 @@ no stamp; `started:` and `started_unattended:` are other keys.
   `reconcile-rollout.py stamp-start` on a never-begun chain, from schedule § Serial path S7 (a standalone run),
   orient § 9, orient-all § 7's Leg item and the Backlog orient B8 (`stamp-start --backlog`); and, on a running chain,
   a Leg's `leg.py handed --listed` and repair's `leg.py restarted --listed`.
-  Off the Stage nothing stamps a serial note: its Leg 1 is a paste-ready prompt.
+  Off the Stage nothing stamps a serial note: its Leg 1 is a paste-ready prompt. And, on a parallel note that has run,
+  `reconcile-rollout.py stamp-start --hand-over`, a Lead hand-over's finish on the Stage (p55-5, execute § 4.5 step 5's
+  `hand-over` arm), only under the `paused:` its `next` stamped with `paused_for: hand-over`: it lists the note for a
+  fresh lead. Off the Stage the hand-over stamps nothing (`hand-over --manual` prints a needs-you start line).
 - **Readers**: the Chorus Stage (`src/stage/unattended.py` in the Chorus repo, Chorus ADR 0052 d6 as
   amended). It starts one lead (`/thread:execute [[<rollout>]]`) in the note's Project root, the
   rollout clone for every rollout scheduled after P26 (ADR 0042), so its launch passes execute § 2.8,
@@ -76,13 +79,26 @@ no stamp; `started:` and `started_unattended:` are other keys.
   (its § 4 action 13). And `/thread:orient-all`'s `estate-dispatch.py plan`, through
   reconcile-rollout's `_start_unattended`, loaded: a stamped note it neither starts nor relays (the
   Stage starts it). And, on a serial note, `unfinished-rollout.py waiting` (leg.py's `waiting_listed`, the Waiting
-  list's one rule), which lists the chain, and the Stage's start of that list's `next` (Chorus ADR 0115).
+  list's one rule), which lists the chain, and the Stage's start of that list's `next` (Chorus ADR 0115). And, on a
+  parallel note under a Lead hand-over's `paused:`, `unfinished-rollout.py waiting`'s `leads` and `needs-you`'s
+  `hand-over` item, until a fresh lead's `lead-entry` follows its `paused` line (p55-5).
 - **Clearers**: `reconcile-rollout.py next`, on every call off `--dry-run` that exits 0 (the lead's,
   execute § 4.5 step 1), which removes every top-level `start:` line reading `unattended` and reports
   `startCleared`, so a running rollout clears it; a refused `next` (exit 1) writes nothing, so the stamp
   waits. And schedule's **Supersede prep**, which removes it from a prior it is about to supersede
   (and step 1's report names the clear). None on a serial note: its stamp stands until the chain is done or dropped,
-  with `started_unattended:` beside it once the Stage has started a Leg (Chorus ADR 0115 R1).
+  with `started_unattended:` beside it once the Stage has started a Leg (Chorus ADR 0115 R1). A Lead hand-over's
+  stamp stays under its `paused:`: `next` clears nothing while `paused_for: hand-over` and `paused:` stand (only the
+  spent session's re-entries reach it there; a fresh lead's `next` follows its `clear-pause`, then clears it), and
+  `reconcile-rollout.py hand-over --abort` removes it with the hand-over's stamps (his pause, execute § Pausing).
+- **A Lead hand-over's `## Pause log` lines** (p55-5; `reconcile-rollout.py`'s `_hand_over_open` is their one reader):
+  `- <stamp> hand-over: ` and then `draining (<cause>; session <id | none>; count <n>)` (`next`, the cause
+  `compactions` or `lead-error`), `bound after <m> min: stopping <slug> (<runId>), …; lane <slug>` (`next` at the
+  drain's bound), `listed` or `manual`, each with an optional ` (gated)` (the finish: `stamp-start --hand-over`,
+  `hand-over --manual`), `lifted (<why>)` (`next`), `not handed over (<why>)` (`hand-over --abort`) and `taken by
+  session <id | none>` (`clear-pause`). The open hand-over runs from the last `draining` line until one of the last
+  three. No line holds a wikilink: `_schedule_positions` ranks the first wikilink on any list line (a `## Pause log`
+  above `## Queue` would reorder the queue), and `unfinished-rollout.py`'s wait-phrase reader reads links there.
 
 ## Hold until
 
@@ -160,11 +176,15 @@ note, on a serial note or on a note with no rollout `hold_until` is read by noth
   Chorus Stage's room-stop lines (execute § Room stop; step-boundary.py's, one regex) are never Lachy's run, so a
   queue whose only marks are room stops, each one ended, reads as unrun to the verdict, to `approve-queue`, to
   `carry` and to unfinished-rollout.py, all through `approved_unrun`. A room stop that stands makes the verdict
-  wait (`waits: room-stop`), and the next loop entry's `end` closes it. His own `paused:` or `pause_requested`, a
-  `## Pause log` line that is no room stop, `completed:`, a `## Completion log` or `## Leg log`, and a task's
-  `owner:` still read as run: the verdict then releases it as a plain hold, with one `WARN: on_merge:` line the
-  lead relays as a needs-you item. A task's `integrating:` is an Integration in flight, and the verdict waits for
-  it (`waits: integration`); one with no Integration in flight reads as run.
+  wait (`waits: room-stop`), and the next loop entry's `end` closes it. A Lead hand-over (p55-5) is the engine's own
+  pause, so it is no run mark either: its `paused:` or `pause_requested` while it stands (`paused_for: hand-over`)
+  and its `## Pause log` lines, standing or ended. Under its `paused:` the verdict keeps the hold and `next` halts
+  `hand-over`; the fresh lead's `next` regenerates after its `clear-pause`. While it stands `approved_unrun` still
+  reads the queue as run (`carry` refuses it, schedule joins it). His own `paused:` or `pause_requested`, a
+  `## Pause log` line that is neither a room stop nor a hand-over's, `completed:`, a `## Completion log` or
+  `## Leg log`, and a task's `owner:` still read as run: the verdict then releases it as a plain hold, with one
+  `WARN: on_merge:` line the lead relays as a needs-you item. A task's `integrating:` is an Integration in flight,
+  and the verdict waits for it (`waits: integration`); one with no Integration in flight reads as run.
 - **Never carried.** Of an approved queue's keys, `carry` copies only the `hold_until` block: the new note keeps a plain hold, released at its
   first `next`. A plain `--regenerate` of an approved queue drops the approval.
 - **Fails closed, only at the merge.** While the PR is open an unreadable `on_merge` waits as any hold does, and
@@ -354,7 +374,8 @@ neither: a hold blocks starts, and an approved queue's verdict has outcomes a tr
   gh error or timeout waits; a bare number is unreadable, since a trigger fires with no lead and a bare number needs a
   repo to be read in), `paused` (a valued `paused:` on the note, or on the rollout a task note's `rollout:` links, and
   only while that note is not closed or superseded; `pause_requested`, a room stop and an Engine catch-up's `paused:`
-  (`paused_for: catch-up`, the engine's own move, p54-14) do not count, a sign-off pause does) and `landed [[task]]` (as a dependency lands, `_dep_status`, so a merged tombstone and Archive resolve).
+  (`paused_for: catch-up`, the engine's own move, p54-14) do not count, nor does a Lead hand-over's `paused:`
+  (`paused_for: hand-over`, p55-5), a sign-off pause does) and `landed [[task]]` (as a dependency lands, `_dep_status`, so a merged tombstone and Archive resolve).
 - **`do`** is one of `regenerate`, `regenerate --tasks a,b` (slugs or wikilinks), `schedule [[task]]`, `reset-primary`.
   A `do` target that is not found keeps the trigger waiting, and so does a list whose every target is closed (done,
   dropped or a merged tombstone); a partly landed `--tasks` list still fires, since schedule's skip rule drops the
@@ -384,7 +405,8 @@ neither: a hold blocks starts, and an approved queue's verdict has outcomes a tr
   own status does not count. In order: a `shape: serial` anchor is unreadable (a serial rollout supersedes nothing); no
   anchor waits; a valued `superseded_by:` waits; on a task note, an anchor with a valued `supersedes:` waits, because
   `carry` moves a task's `rollout:` and leaves its `when:`, and an entry written against the prior cannot be told from
-  one written since; a done or dropped anchor waits; one neither paused (an Engine catch-up's `paused:` reads running)
+  one written since; a done or dropped anchor waits; one neither paused (an Engine catch-up's `paused:` reads running, and
+  so does a Lead hand-over's, p55-5)
   nor never started (`approved_unrun`) waits, since schedule regenerates no running rollout: it joins its queue,
   `--regenerate` not applied (ADR 0078 d6). So a successor
   is never touched by the prior's merge, whether the entry sits on the prior or on a carried task, and one written on a

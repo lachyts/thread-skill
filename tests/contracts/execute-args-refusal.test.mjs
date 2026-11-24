@@ -86,7 +86,7 @@ const LE_REDO = ["(a) back to loop step 1, where *Restart routing*, or step 1.4'
   '(b) rebuild the args (§ 4 for a task call, `call` again for a seeded revise or an integrate call) and check again',
   '(c) back to step 1: the note reads `review`, so step 1.4 runs `prepare` then `call`, and the lead types no sha',
   '(d) run the command as the step writes it', 'No set-aside row, no retry counter, no halt, no `## Needs you` item.']
-const LE_INTERIM = "until p55-5 wires the lead's hand-over (ADR 0085 *Left to the build*), the stop takes the route its site had before, (a) and (b) the § 7 halt with today's reason, (c) the engine's set-aside row (reconcile writes it), (d) the exit's existing route"
+const LE_INTERIM = "the lead hands over (*Lead hand-over*) while the line's `handOver` is true, that is while the task's `total` (every session's count, this line included) is below `LEAD_ERROR_HANDOVER_TOTAL` (6, twice the bound), so a refusal every fresh lead repeats is handed over once, and the task's sixth Lead error (the fresh lead's third) is not; from it the line reads `handOver: false` and the stop takes the route its site had before, (a) and (b) the § 7 halt with today's reason, (c) the engine's set-aside row (reconcile writes it), (d) the exit's existing route"
 const LE_EXIT1 = "A `lead-error` exit 1 (its line not written: the Run record unreadable or unwritable) is no Lead error: the site's old route stands"
 
 // Named failures; [] means every rule holds.
@@ -148,8 +148,8 @@ function check(skill, rr = realRr) {
 
   // lead-error (p55-3, ADR 0085 d8): § 4.5's *Lead error* sits right before *Args refusal*, with only its own two labels
   // between; it names the four sites, the four signatures and what is never one, the precedence sentence, the lead's
-  // `lead-error` command and the redo per site, the bound against reconcile-rollout.py's LEAD_ERROR_BOUND, the interim
-  // route at the bound until p55-5's hand-over, and `lead-error`'s exit 1.
+  // `lead-error` command and the redo per site, the bound against reconcile-rollout.py's LEAD_ERROR_BOUND, the hand-over at
+  // the bound while `handOver` holds (p55-5) and the old route from LEAD_ERROR_HANDOVER_TOTAL, and `lead-error`'s exit 1.
   const iLe = lines.findIndex((l) => l.startsWith(LE_HEAD))
   const labels = iLe < 0 || iAr < iLe ? [] : lines.slice(iLe, iAr).filter((l) => /^\*\*[A-Z`]/.test(l))
   const le = labels.length ? collapse(lines.slice(iLe, iAr).join('\n')) : ''

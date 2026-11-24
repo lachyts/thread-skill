@@ -1,7 +1,7 @@
 # 0085 — A rollout's lead hands over at its second compaction
 
 Date: 2026-11-24
-Status: accepted, not built. Lachy's rulings of 2026-11-18, on the two questions of the grill note
+Status: accepted, built (p55-2 to p55-5; the Stage opening a handed-over rollout's fresh lead is the Chorus task's). Lachy's rulings of 2026-11-18, on the two questions of the grill note
 `thread-skill-grill-a-rollout-lead-hands-over-before-compaction-costs`; the technical calls were decided for him at the
 orient grill of 2026-11-24 (ADR 0054) and are listed last, each overturnable. Written by Phase 55 · Task 1
 (`thread-skill-p55-1-adr-0085-a-rollouts-lead-hands-over-at-its-second-compaction`); p55-2 to p55-5 and one Chorus
@@ -81,7 +81,7 @@ The count of two and the hand-over stay p55-5's: nothing routes on the count yet
   With no stop standing it orders the re-entry at § 1 before the next launch, and the hook writes `told = count`.
   Under his pause, a standing room stop or an open halt the line says to start nothing now and to take the entry that
   ends the stop from § 1 of that text; the count rises and `told` stays, so the order is deferred, never dropped. A
-  soft pause's drain and an Engine catch-up's pause are no stop.
+  soft pause's drain, an Engine catch-up's pause and (p55-5) a Lead hand-over's own pause are no stop.
 - **A deferred order is given once.** The entry that ends the stop takes the order when it is the session's own,
   its `--by` is not `heartbeat` and it is dated after the hook's write (the file's `by: hook` and `at`): the first
   tick after it writes `told = count` and reads `reenter: false`, so the skill file is read once. Otherwise that
@@ -117,6 +117,95 @@ The count of two and the hand-over stay p55-5's: nothing routes on the count yet
   line) and once more at the next tick's order, a second read of a 453 KB file (about 110k tokens) that brings the
   next compaction closer. An entry that takes the order does so on its Run record line alone: nothing checks that
   the lead read the file at it.
+
+Built so far: items 3's line, 5, 6 and 9, and the hand-over at a Lead error's bound, by p55-5
+(`thread-skill-p55-5-at-its-second-compaction-the-lead-drains-and-hands-over`; execute § 4.5 **Lead hand-over (ADR 0085
+d3, d5, d6, d9).**):
+- **D1, the line.** `LEAD_HANDOVER_COMPACTIONS = 2` in `reconcile-rollout.py`, named in execute SKILL.md and bound to it
+  by a contract test. No setting.
+- **D2, `next` starts it.** Off `--dry-run`, at the caller's count of 2 or more, or at D10's cause, with no pause of any
+  kind standing and an unlanded row to hand, `next` stamps `pause_requested: true` and `paused_for: hand-over`, appends
+  `- <stamp> hand-over: draining (<cause>; session <id | none>; count <n>)` to the `## Pause log` in the same save, and
+  writes a Run record `hand-over` line (outcome drain). The soft pause's drain follows: nothing starts or restarts,
+  hold reason `hand-over: draining (a Lead hand-over)`, idle reason `hand-over-drain`. Drained, it stamps `paused:`,
+  keeps `paused_for`, writes `paused` mode hand-over and reports `halt: hand-over`. Its JSON carries `handOver` {due,
+  cause, state, at, count, session, since, open, held, stop, why}. `--dry-run` never stamps and never lifts.
+- **D3, the bound.** `HAND_OVER_DRAIN_MINUTES = 160` from the open `draining` line. Past it with work in flight `next`
+  stamps `paused:`, writes one `hand-over: bound after <m> min: stopping <slug> (<runId>), …; lane <slug>` line (the
+  Pause log entry hard-pause step 1 names, written by the engine), a `hand-over` line (outcome bound), and a hard stop's
+  record (each `in_progress` Slot `slot-freed outcome=stopped`, the lane freed), through the helper `record-pause`
+  shares; `halt` is `hand-over` at once with `state: bound` and `stop`. The bound never lifts the drain.
+- **D4, calls the lead may no longer know** (this ADR's open point in item 5). From the first `next` that reports the
+  hand-over, step 1.1's `--running` is every task call and seeded revise of the rollout /workflows lists in flight; a
+  call the summary lost is reconciled on its return and starts nothing (nothing restarts in a hand-over); step 5's
+  `hand-over` arm finishes only when /workflows lists none and no background Integration command is unreported, else
+  ends `waiting` with `reason="lead hand-over: <n> still in flight"`; at the bound it stops them (TaskStop) and
+  finishes. `handOver.open` names the calls the Run record still shows in flight that `--running` and the lane do not
+  account for, with their runIds. The engine does not block `paused:` on `open`.
+- **D5, the finish.** On the Stage `reconcile-rollout.py stamp-start --hand-over [--gated]` stamps `start: unattended`,
+  appends `hand-over: listed[ (gated)]` and prints a `state=done` line; off it `hand-over --manual [--gated]` stamps
+  nothing, appends `hand-over: manual[ (gated)]` and prints the needs-you start line and a `state=halted` line; then
+  `CronDelete`. The first finish logged inside the open hand-over (the Pause log lines after its last `draining` line)
+  wins; a repeat writes nothing and prints the logged lines again.
+- **D6.** `STATUS_RE` is not edited: both closing lines and the arm's `waiting` line already match, and under `halted`
+  the Stop hook records no halt because `paused:` stands.
+- **D7, the spent session never reinstates itself.** `clear-pause` under `paused_for: hand-over` called by the handing
+  session (D14's strict match) writes nothing, prints `HAND-OVER-OWED: …` and exits 4; any other caller clears and
+  appends `hand-over: taken by session <id | none>`. A `next` under the hand-over's `paused:` keeps `start: unattended`.
+- **D8, a drain no lead owns.** A `next` of a session that strictly differs from the drain's (both known) lifts it
+  (`hand-over: lifted (another session leads)`, outcome not-handed) and goes on in the same call. A null never lifts.
+- **D9, his pause takes over.** `hand-over --abort --why "his pause"` removes the stamps and a listing's `start:
+  unattended`, appends `hand-over: not handed over (<why>)`, writes `resumed` when the open paused line is the
+  hand-over's and outcome not-handed. It consumes neither the count nor a Lead error's cause.
+- **D10, a Lead error at its bound hands over.** A `lead-error` line at `over: true` carries `handOver: true` while the
+  task's total over every session (this line included) is below `LEAD_ERROR_HANDOVER_TOTAL` (6, twice the bound), else
+  `handOver: false` and the site's old route stands. `next` reads such a line of the caller's session after the
+  record's last `hand-over` handed line as cause `lead-error`; under it the drain is the surface wait's rule (what is
+  in flight goes on to its end, nothing new begins): an awaiting row and an `integrating:` row are held
+  (`handOver.held`) unless the Run record's lane is held on it, and `mark-integrating` refuses them with exit 5 and one
+  `HAND-OVER:` line; the lane's holder stays in the drain whatever its stamp (awaiting between its integrate call and
+  its merge). Site (c) at the bound with `handOver` is taken as below it (no set-aside).
+- **D11, the Waiting list row.** `unfinished-rollout.py waiting` gains a top-level `leads` list after `next`: [{slug,
+  cwd, title, prompt, harness, since}] for each root parallel note with `paused:`, `paused_for: hand-over`, `start:
+  unattended` and a Project root that no fresh lead has opened (a `lead-entry` after its open `paused` line whose
+  session is not the handing session; the handing session's own entries never open it). `waiting[]`, `next`, `room`
+  and `running` are unchanged.
+- **D12.** Readers that must not call it his pause: record-entry's gap stop `hand-over`; join accepts and carry refuses;
+  the `when: paused` and regenerate gates read it as running; `catch-up` says a Lead hand-over stands; `unfinished-rollout.py`
+  reads `handing over since <stamp>`, never eligible, its Project root kept; estate-dispatch holds `handing over`;
+  `moving` judges the drain as work, an unfinished or opened `paused:` by silence (cause `hand-over`), a listed and
+  unopened one `waiting hand-over` until `paused:` plus 45 minutes, then `waiting you`, and a manual one `waiting you`.
+- **D13, the Time-lost ledger.** Two `other` causes, `hand-over` (the `paused` mode hand-over .. `resumed` span) and
+  `hand-over-drain` (the drain's idle Slots), held to the reading's window; the pause stays in `own` for every
+  subtraction.
+- **D14, the identity rule.** The open hand-over is read from the Pause log alone (`_hand_over_open`); two sessions are
+  the same only when both are valid ids and equal, so a session-less lead (Codex) is refused nothing and lifts
+  nothing, and can reinstate itself: a stated residual. No hand-over line holds a wikilink.
+- **D15, the carrier.** `unfinished-rollout.py needs-you` lists one `hand-over` item per handed-over note no fresh lead
+  opened: a manual one at once, a listed or unfinished one once `paused:` is 45 minutes old (HAND_OVER_UNOPENED_MINUTES,
+  the lease lapse), until a fresh lead enters. The Stage's machinery line already shows every needs-you item.
+- **D16, nothing to hand.** No hand-over starts on a superseded note, nor where the verdict would be `empty`, `done` or
+  `complete`; a drain whose last row merges is lifted (`hand-over: lifted (nothing left to hand)`).
+- **D17.** Under the hand-over's `paused:`, `halt` is `hand-over` right after the whole git-env and main-red verdicts,
+  ahead of `regenerate` and the rest. A hand-over is no run mark of an Approved queue (`_approved_marks`: its stamps
+  while it stands, its Pause log lines always), so a queue that has not run keeps its hold and `on_merge:` through
+  it, and the fresh lead's `next` regenerates after its `clear-pause`; while it stands `approved_unrun` still reads
+  the queue as run, so `carry` refuses it and schedule joins it.
+
+**For the Chorus task** (`chorus-the-stage-opens-a-handed-over-rollouts-fresh-lead`, item 11). The interface is
+`waiting`'s `leads`: each row {slug, cwd (the Project root), title, prompt (`/thread:execute [[<slug>]]`, plus
+` --gated` when logged), harness (`claude`), since (its `paused:`)}, listed until a fresh lead's `lead-entry` follows
+its open `paused` line. A row the Stage opened must not be opened twice before it drops (its fresh lead's first
+`record-entry` drops it). Until that task lands, nothing opens a listed hand-over: `needs-you`'s `hand-over` item is
+the carrier, on the Stage's machinery line after 45 minutes, a manual one at once. What the Stage still owns:
+(1) opening a `leads` row, once; (2) its own pause (`_stamp_pause`) takes over an Engine catch-up only, so a pause he
+makes through the Stage during a hand-over's drain is absorbed by it until the Stage runs `hand-over --abort` first
+(typed to the lead, it takes over); (3) `needs-you-board` has no card rule for source `hand-over`; (4) the Stage reads
+any `paused:` as his pause and a `done` line as an ended lead, so no resume of the spent session is counted on.
+Residuals of this build: the /workflows gate is prose the lead follows (no script reads /workflows); the bound costs
+the in-flight context of at most `parallel_ceiling` tasks past 160 minutes; `--gated` rests on the lead's recall
+(p55-4's residual); a session-less lead has no identity; past 45 minutes a listed hand-over asks him to start a session
+even when the Stage only waits for room.
 
 ## Context
 
@@ -207,26 +296,28 @@ How each is built is technical, and is the list under *Decided for him (overturn
   still be taken, by an Engine catch-up at the fresh lead's first loop entry, with nothing running.
 - **Left to the build.** Named here and not decided; the task that builds each records it back into this ADR's Status:
   - the hook's event, the count file's shape and the heartbeat backstop (p55-4; built, its Status above);
-  - the drain's bound and what follows it, the Run record's lines and the Time-lost ledger's cause (p55-5);
+  - the drain's bound and what follows it, the Run record's lines and the Time-lost ledger's cause (p55-5; built, its
+    Status above);
   - a Lead error's Run record line and the bound on repeats; whether the lead-caused halts that stand today (item 8's
     *In the code* note: the *Args refusal* halt and § 4's two pre-check halts) become Lead errors; and the rewording of
     execute's "a lead bug" at those sites (§ 4.5's **Args refusal (p32-1)** and § 7's halt list), a wording
     CONTEXT.md's **Lead error** entry lists under _Avoid_ (p55-3; built, its Status above);
   - at a Lead error's bound (its line's `over: true`) the lead hands over in place of the interim route p55-3 left
     (the site's old halt, set-aside or exit route), and `lead-error`'s `total` (every session's count) stops a
-    hand-over loop on a refusal every fresh lead repeats (p55-5; the seam is `over`, `total` and
-    `reconcile-rollout.py`'s `_lead_errors()`);
+    hand-over loop on a refusal every fresh lead repeats (p55-5; built, its Status above: `handOver` on the `over`
+    line, LEAD_ERROR_HANDOVER_TOTAL);
   - ADR 0076's in-place amendment note (its d3, d4 and Decided for Lachy 4) and CONTEXT.md's **Waiting list** wording,
-    when p55-5 builds the row.
-- Until those tasks land, no hand-over runs: CONTEXT.md's **Lead hand-over** entry says the count and the § 1
-  re-entry are built (p55-4) and the hand-over is not yet (p55-5), and its **Waiting list** entry still reads as
-  serial chains only. Its **Lead error** entry is built (p55-3).
+    when p55-5 builds the row (built by p55-5).
+- The hand-over runs since p55-5: CONTEXT.md's **Lead hand-over** entry says the count and the § 1 re-entry are
+  p55-4's and the hand-over p55-5's, and its **Waiting list** entry holds the `leads` row. Its **Lead error** entry
+  is built (p55-3) and hands over at its bound (p55-5). The Stage opening a listed hand-over is the Chorus task's.
 
 ## Decided for him (overturnable)
 
 Technical calls made in his place at the orient grill of 2026-11-24 (ADR 0054). Each stands unless the code shows it
 wrong, and he can overturn any. The numbers carry on from the Decision's two rulings. None of it is built: each item's
-*In the code* note says what stands today and which task builds the rest.
+*In the code* note says what stands today and which task builds the rest. (Each note is as the orient grill wrote it; p55-2 to
+p55-5 have since built items 3 to 9, and the Status above records what each built.)
 
 3. **The count is two.** After its first compaction a lead will re-enter execute § 1 from its engine root; at its
    second it will hand over. Why: all six launch errors of the incident followed the third compaction, so two leaves

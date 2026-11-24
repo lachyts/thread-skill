@@ -129,7 +129,8 @@ rollout body, i.e. the `## Queue` table; unlisted tasks after). Status reads the
 - top level: `paused` (the pause stamp; null when not paused), `pause_requested` (a soft pause is draining:
   execute → *Pausing + reinstating a rollout*), `pausedFor` (`sign-off` under execute § 4.5 step 5's sign-off
   pause, ADR 0034: the run finished everything else and only gates wait on Lachy; `catch-up` under an Engine catch-up's
-  drain or move, execute § 4.5 *Engine catch-up*, the engine's own pause; null otherwise), `incomplete` (§ 1), `counts` (`setAsideAtIntegration`
+  drain or move, execute § 4.5 *Engine catch-up*, the engine's own pause; `hand-over` under a Lead hand-over's drain or
+  its wait for a fresh lead, execute § 4.5 *Lead hand-over*, the engine's own pause too; null otherwise), `incomplete` (§ 1), `counts` (`setAsideAtIntegration`
   included), `progress`, `timeline` and `ladder`, plus `gitEnvHold` (the unacked git-env trips, each
   `{slug, kind, line, scope}`, `scope` `rollout` for a bare checkout, else `lane`; § 3's Git-env trip flag), `laneLog`
   (the unacked Lane holds, each `{slug, cause, stamp, line}`, execute § 4.5 *Lane hold*; § 3's Lane hold flag), `mainRed`
@@ -448,7 +449,8 @@ offline too, and so does the Hold until flag, its state unchecked.
 `pausedFor: sign-off`, `AWAITING SIGN-OFF since <stamp>: [[a]], [[b]]`, the tasks set aside at `gate`; with
 `pausedFor: catch-up`, `CATCHING UP (draining | moving since <stamp>): [[R]] at <green12>`, draining under
 `pause_requested` and moving under `paused:`, `[[R]]` and `<green12>` read off the `## Catch-up log`'s last line, a take
-naming its first fix in R's place),
+naming its first fix in R's place; with `pausedFor: hand-over`, `HANDING OVER (draining | waiting for a fresh lead since
+<stamp>)`, draining under `pause_requested` and waiting under `paused:`),
 `pause pending (draining)`, `ROOM STOP since <stamp>: awaiting the Stage's resume` or
 `room stop since <stamp> lapsed: the owner's heartbeat re-enters` (§ 2's *Room stop*, exit 0 or 4),
 `INCOMPLETE: <reason>`, `GIT-ENV HOLD: [[a]], [[b]]` (each slug `gitEnvHold`
@@ -679,7 +681,9 @@ the run finished everything else and closed, and the rest is Lachy's sign-off. `
 approved tasks integrate and merge, nothing new starts, and once nothing runs, awaits Integration or
 integrates, the lead's next step stamps `paused:`. With `pausedFor: catch-up` either stamp is an Engine catch-up (execute
 § 4.5 *Engine catch-up*, ADR 0084 d5): the engine's own drain or move onto the Green tip, never a pause he made, so it
-renders `CATCHING UP` and never `PAUSED` or `pause pending`.
+renders `CATCHING UP` and never `PAUSED` or `pause pending`. With `pausedFor: hand-over` either stamp is a Lead hand-over
+(execute § 4.5 *Lead hand-over*, ADR 0085 d5): the lead drains at its second compaction and hands the queue to a fresh
+lead, never a pause he made, so it renders `HANDING OVER` and never `PAUSED` or `pause pending`.
 
 **Room stop.** A standing room stop (§ 2's `stands`, exit 0) renders as a room stop, not a stall: headline
 `ROOM STOP since <stamp>: awaiting the Stage's resume`, what's left listed as usual, and no stalled framing.
@@ -808,9 +812,13 @@ Keep the whole report scannable: it's a glance, not a wall of text.
    then /thread:execute [[<rollout>]]; until then it is this project's one unfinished rollout on this repo" (execute's
    *Reinstate* runs the standing approval first, then `clear-pause`, which refuses while a gate is unsigned). With
    `pausedFor: catch-up` → "the lead is moving onto the Green tip; with no live lead, `/thread:execute [[<rollout>]]`
-   finishes the move" (an Engine catch-up: its self-Reinstate cuts, adopts and clears it).
+   finishes the move" (an Engine catch-up: its self-Reinstate cuts, adopts and clears it). With `pausedFor: hand-over`
+   → "a fresh lead takes it: the Stage opens one from the Waiting list's `leads`, or start one in a new session with
+   `/thread:execute [[<rollout>]]`" (a Lead hand-over: the fresh lead's entry is its Reinstate; the session that handed
+   it over never reinstates it).
 9. `pause_requested` → "the live lead drains it; nothing to do." With `pausedFor: catch-up` → "the live lead drains it
-   for an Engine catch-up; nothing to do." Repair may only record escalations and
+   for an Engine catch-up; nothing to do." With `pausedFor: hand-over` → "the live lead drains it for a Lead
+   hand-over; nothing to do." Repair may only record escalations and
    decisions, or defer. Check `/workflows` in the owner session (`<owner tag>`): if no run shows there, that
    session has ended, or no task carries an `owner:`, nothing is draining it, and
    `/thread:execute [[<rollout>]]` resumes the drain (*Cold resume*: its `next` integrates what awaits,
@@ -1037,6 +1045,7 @@ look (`ERROR: moving: <why> (a lost look, never a stall)`: the note, the Run rec
   `usage-limit` (a usage-limit stop is open: a room stop past its 6 h bound included) or `halt` (an open halt holds
   more than it threatens: work appeared beside a halt that is not on execute § 7's *Whole-rollout halts kept*).
 - `waiting`, its cause the meant wait: `sign-off`, `paused`, `catch-up` (an Engine catch-up drained or moving, p54-14),
+  `hand-over` (a Lead hand-over drained and unfinished, opened by a fresh lead, or listed and unopened, p55-5),
   `room-stop`, `not-started`, `merge-hold`,
   `regenerating`, `surface-wait` (P41-3), `leg-wait` (a serial note's waiting Leg, below), `cool-down`, `heat`, `quota`
   (ADR 0067 d8), `away-cap`, `trickle`, `last-start`, `approved-queue`, `pr-hold`, or `you`
@@ -1075,6 +1084,10 @@ is **120** minutes from the last life sign instead (the Approved-queue route's o
     only the Leg's own session ends its wait, so a dead session's wait is a stall);
   - `catch-up` (at `--stall-after`: an Engine catch-up drained or moving; the lead's own turn makes the move, so a dead
     lead's catch-up is a stall);
+  - `hand-over` (at `--stall-after`: a Lead hand-over drained and not yet finished, or finished and opened by a fresh
+    lead; a lead's own next turn is what ends it, so a dead lead's is a stall). A listed hand-over no fresh lead has
+    opened is no lead's turn (the Stage owes it a fresh lead, and Chorus owes an ended lead no resume): `waiting
+    hand-over` with `until` its `paused:` plus 45 minutes, then `waiting you`; a manual one is `waiting you` at once;
 - judged by its own bound: `room-stop`, 6 h from its stamp, then by silence as `usage-limit`;
 - judged by a condition `next` or the clock reads live, never by silence: `cool-down`, `heat`, `quota`, `away-cap`, `trickle` (a
   cap-held seeded revise included), `last-start`, `approved-queue`, `pr-hold`. Once the condition clears, the work it
@@ -1125,6 +1138,9 @@ reads beside it:
 | `room stop: stopping calls at a step boundary`, `room stop: nothing mid-step, awaiting the Stage resume` | `waiting room-stop` |
 | `lane held: the shared checkout changed`, `lane held: RACE undecided: [[slug]]`, `lane held: <cause> on [[<slug>]]` (other work moves, the lead's own RACE re-verify or its landing tail included) | `moving`, judged by silence |
 | `paused at user request` | `waiting paused` |
+| `lead hand-over: <n> still in flight` (execute § 4.5 step 5's `hand-over` arm waits on a call /workflows still lists) | `waiting hand-over`, judged by silence |
+| `handed over: listed on the Waiting list for a fresh lead` (a `done` line: the session's part is done, the rollout's is not) | `waiting hand-over`, `until` its `paused:` plus 45 minutes, then `waiting you`; opened by a fresh lead, judged by silence |
+| `lead hand-over: start a fresh lead with /thread:execute [[<slug>]]` (the manual finish) | `waiting you` |
 | `superseded by [[<supersededBy>]]` | `skip` |
 | `RACE undecided: [[<slug>]]`, `lane held: <cause> on [[<slug>]]`, `git-env trip: the shared checkout changed` (a lane trip), `hold_until needs you on [[<note>]]: <pr> closed unmerged`, `hold_until needs you on [[<note>]]: unreadable`, `the rollout links no task` (end-of-run verdicts) | `waiting you`; `stalled halt` once work appears beside it |
 | lead-integrate.py failed on [[slug]], lane hold not written on [[<slug>]]: <its ERROR line> (kept whole) | `waiting you`, work or none |

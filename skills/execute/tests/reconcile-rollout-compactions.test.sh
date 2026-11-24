@@ -203,6 +203,8 @@ mkro h6c "pause_requested: true"; ent h6c --by stage --session s-h6c --now "$T0"
 row h6c now '[1,1]' "a soft pause's drain is no stop: the order is now"
 mkro h6d "paused: 2026-10-26T10:30+00:00" "paused_for: catch-up"; ent h6d --by stage --session s-h6d --now "$T0"
 row h6d now '[1,1]' "an Engine catch-up's pause is no stop"
+mkro h6d2 "paused: 2026-10-26T10:30+00:00" "paused_for: hand-over"; ent h6d2 --by stage --session s-h6d2 --now "$T0"
+row h6d2 now '[1,1]' "a Lead hand-over's pause is no stop (its arm waits on a call in flight)"
 lead h6e; begin h6e
 row h6e room '[1,0]' "a room stop begun now: the room-stop form"
 lead h6f; roomline h6f "- 2026-10-01T00:00+00:00 room stop: Login at its week's line"

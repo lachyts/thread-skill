@@ -4,7 +4,7 @@
 # `lane` entry and halt), prepare's and merge-task's task-scoped set-asides, the lead's infra set-asides, a task-level
 # invalid round budget (H12, never a halt) and the wait clauses' inputs.
 #   S1 stop_spans' reason and index   M1-M23 the verdicts (M23 a surface wait, P41-3; M20w a revise the budget's weight
-#   holds, p53-4; M3c-M3d an Engine catch-up, p54-14)   N1-N9b the narrowings, each
+#   holds, p53-4; M3c-M3d an Engine catch-up, p54-14; M3e-M3i a Lead hand-over, p55-5)   N1-N9b the narrowings, each
 #   through the real verbs   W1-W2 a due settings block (ADR 0080): reentry, or a cool-down until a try's retry
 # Each scenario builds its own tasks dir, Run record (run_record.py emit --ts for the past), HOME and THREAD_MACHINE_TIMES,
 # so nothing reads this machine's history; a stub gh stands in for every PR read. Temp notes only; no vault, no network.
@@ -173,6 +173,38 @@ entry 2026-10-26T11:40:00Z
 ok "$(j "$(nx)" 'd["halt"]')|$(vcr)" '"catch-up"|["waiting","catch-up","an Engine catch-up drained: the lead'"'"'s next turn moves it"]' \
   "M3d: a drained catch-up (next's dry run halts catch-up) → waiting catch-up"
 ok "$(MNOW=2026-10-26T12:40:00Z vc)" '["stalled","silent"]' "M3d: … past stall-after → stalled"
+# M3e-M3i (p55-5): a Lead hand-over's paused:. Unfinished, or opened by a fresh lead, it is a lead's own next turn,
+# judged by silence; listed and unopened it waits for the Stage until 45 min past paused:, then for him; manual and
+# unopened it waits for him at once; its drained dry run is judged by silence too.
+HOL=$'\n## Pause log\n\n- 2026-10-26T11:00+00:00 hand-over: draining (compactions; session S; count 2)\n'
+hoscen() {  # hoscen <name> [extra Pause log lines...]: a hand-over's paused: at 11:30, its record's paused line
+  scen "$1"; shift
+  mkro "paused: 2026-10-26T11:30+00:00" "paused_for: hand-over" "start: unattended"; running a
+  { printf '%s' "$HOL"; for l in "$@"; do printf '%s\n' "$l"; done; } >> "$D/$RO.md"
+  em paused - '{"mode":"hand-over"}' 2026-10-26T11:30:00Z
+}
+hoscen m3e
+entry 2026-10-26T11:40:00Z
+ok "$(vcr)" '["waiting","hand-over","a Lead hand-over: its lead finishes it, paused since 2026-10-26T11:30+00:00"]' \
+  "M3e: drained, never finished, with life signs → waiting hand-over"
+ok "$(MNOW=2026-10-26T12:40:00Z vc)" '["stalled","silent"]' "M3e: … past stall-after → stalled"
+hoscen m3f "- 2026-10-26T11:31+00:00 hand-over: listed"
+entry 2026-10-26T11:31:00Z
+ok "$(j "$(mv)" '[d["verdict"], d["cause"], d["until"]]')" '["waiting","hand-over","2026-10-26T12:15+00:00"]' \
+  "M3f: listed, unopened → waiting hand-over until paused: + 45 min (the handing session's own entry opens nothing)"
+ok "$(MNOW=2026-10-26T12:20:00Z vcr)" "[\"waiting\",\"you\",\"lead hand-over: no fresh lead opened it since 2026-10-26T11:30+00:00: start one with /thread:execute [[$RO]]\"]" \
+  "M3f: … past it → waiting you"
+hoscen m3g "- 2026-10-26T11:31+00:00 hand-over: manual"
+ok "$(vcr)" "[\"waiting\",\"you\",\"lead hand-over: start a fresh lead with /thread:execute [[$RO]]\"]" "M3g: manual, unopened → waiting you at once"
+hoscen m3h "- 2026-10-26T11:31+00:00 hand-over: listed"
+em lead-entry - '{"by":"stage","session":"S2","stop":"hand-over"}' 2026-10-26T11:40:00Z
+ok "$(vcr)" '["waiting","hand-over","a Lead hand-over: a fresh lead opened it"]' "M3h: opened by a fresh lead → judged by silence"
+ok "$(MNOW=2026-10-26T12:40:00Z vc)" '["stalled","silent"]' "M3h: … past stall-after → stalled"
+scen m3i
+mkro "pause_requested: true" "paused_for: hand-over"; mkt a open "owner: lead"; printf '%s' "$HOL" >> "$D/$RO.md"
+entry 2026-10-26T11:40:00Z
+ok "$(j "$(nx)" 'd["halt"]')|$(vcr)" '"hand-over"|["waiting","hand-over","a Lead hand-over drained: the lead'"'"'s next turn finishes it"]' \
+  "M3i: a drained hand-over (next's dry run halts hand-over) → waiting hand-over"
 
 # ── M4 / M5: held only by the Trickle → trickle; only by the Away cap → away-cap ────────────────────────────────
 scen m4

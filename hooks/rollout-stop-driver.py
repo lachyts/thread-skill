@@ -30,10 +30,16 @@ falling back to a transcript scan for history, and:
               0067 d8), or a surface wait stands (`surface wait: …`: the
               parallel lead's own Surface re-check refused or went unanswered,
               so `next` launches nothing until a check passes, execute §4.5,
-              ADR 0060 as P41-3 amends it); its notification or the heartbeat
+              ADR 0060 as P41-3 amends it), or a Lead hand-over's arm waits on
+              a call still in flight (`lead hand-over: <n> still in flight`,
+              execute §4.5 step 5, p55-5); its notification or the heartbeat
               cron is the wake signal)
-  halted   -> allow + clear driver state (a §7 stop condition; human's turn)
-  done     -> allow + clear driver state (completion ceremony performed)
+  halted   -> allow + clear driver state (a §7 stop condition; human's turn;
+              a Lead hand-over finished off the Stage, `lead hand-over: start a
+              fresh lead with …`, whose `paused:` stands, so no halt is recorded)
+  done     -> allow + clear driver state (completion ceremony performed, or a
+              Lead hand-over listed on the Waiting list, `handed over: listed on
+              the Waiting list for a fresh lead`: the session's part is done)
   (none)   -> allow (not a rollout-driving session)
 
 A line without `merged=` and `running=` (a cursor-shaped one included) never
@@ -44,6 +50,7 @@ STATUS_RE is a cross-version contract (ADR 0043; skills/_shared/engine-snapshot.
 rollout's lead runs on its own Engine snapshot and prints the line from that
 version's prose. So the line's form only ever widens: a change that stops
 matching a line an older snapshot prints is a migration, never a silent rewrite.
+The Lead hand-over (p55-5) added no form: its three lines already match.
 
 The halt's Run-record line (p29-10, ADR 0051; run_record.py's stop model). On
 `state=halted`, and only when the match came from the payload's

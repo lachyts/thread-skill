@@ -167,6 +167,10 @@ included) or under a stamped pause, where no call is live; otherwise they wait f
 - Under `paused_for: catch-up` (an Engine catch-up, execute § 4.5 *Engine catch-up*), repair reports "catching up:
   the lead's own move", never clears its stamps or its `## Catch-up log`, and with no live lead points at
   `/thread:execute [[<rollout>]]`, whose self-Reinstate finishes the move.
+- Under `paused_for: hand-over` (a Lead hand-over, execute § 4.5 *Lead hand-over*), repair reports "handing over to a
+  fresh lead", never clears its stamps, its `start: unattended` or its `## Pause log` lines by hand, and its own
+  hand-off to execute is a fresh session's Reinstate (the session that handed it over never reinstates it: its
+  `clear-pause` exits 4).
 - Beyond the every-mode writes it never runs `hand-back`, `approve-gates`, § 3d's `descope`, a raise beyond the one
   an answer's entry carries, `resume` or the loop, and it never clears the stamp or the flag.
 - One exception, the sign-off pause (ADR 0034): under a stamped pause whose `paused_for` is `sign-off` (execute

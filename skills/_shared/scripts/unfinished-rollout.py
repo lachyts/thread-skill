@@ -62,13 +62,18 @@ Rules.
   lower-cased, every run of non-alphanumerics turned into `-`, trimmed.
 - Complete: at least one linked task and every one merged (reconcile-rollout.py's queue states).
 - Never started: reconcile-rollout.py's never_started (only execute's own marks), widened for an approved queue whose
-  only marks are the Stage's ended room stops (reconcile-rollout.py's approved_unrun; vault-grammar § Approved queue).
+  only marks are the Stage's ended room stops and an ended Lead hand-over's lines (reconcile-rollout.py's
+  approved_unrun; vault-grammar § Approved queue).
 - Eligible: this project's, and paused (`paused:`) or never started.
 - Catching up (p54-14, ADR 0084 d5): `paused_for: catch-up` on the note with one of its stamps (`pause_requested` or
   `paused:`), an Engine catch-up's drain or move, the engine's own pause (rr._catching_up; a dangling one is none). It
   is never paused or pausing here: never eligible, never refused as pausing, its state `catching up since <its stamp,
   else its open Catch-up log line's ts>`, so schedule joins it; and it is not paused for parallel_hold, so an idle one
   keeps its Project root against serial chains (it resumes by itself).
+- Handing over (p55-5, ADR 0085 d5): `paused_for: hand-over` on the note with one of its stamps, a Lead hand-over's
+  drain or its wait for a fresh lead, the engine's own pause (rr._handing_over; a dangling one is none). As a catch-up:
+  never paused or pausing here, never eligible, its state `handing over since <its paused:, else its open draining
+  line's stamp>`, so schedule joins it, and it keeps its Project root against serial chains (a fresh lead resumes it).
 - What a serial note holds (ADR 0060 d1, d2; leg.py's header, *The hold*): its whole `surfaces:`, but while leg.py
   reads its chain state as `stuck` only its unlanded rows' Queue `Surfaces` cells (set-aside rows, rows held behind
   them, a missing note's row) plus any `surfaces:` token no row's cell names; the rest, done rows on the next Leg's
@@ -546,8 +551,19 @@ naive one reads local) is the clock for the Capacity, Away and lease reads; defa
   it would leave the room 0 until a repair; no lease file, or an unreadable one, still counts. A closing Leg counts
   until LEG_LEASE_LAPSE (90 min) after its `closed:` stamp (close deletes its lease; an unparseable stamp counts), so
   one that died inside /thread:close frees the room, though its chain stays off the list until repair lists it.
+- Leads (p55-5, ADR 0085 d5; CONTEXT.md **Lead hand-over**): a parallel rollout whose lead handed over waits for a
+  fresh lead, never a Leg, so it is its own list, `leads`, never a `waiting` row (the Stage starts every `waiting` row
+  as a Leg). Listed: each root parallel note neither done, dropped nor superseded with `paused:`, `paused_for:
+  hand-over` and `start: unattended` (stamp-start --hand-over's listing) and a Project root, that no fresh lead has
+  opened: rr._hand_over_opened, a `lead-entry` after the record's open `paused` line whose session is not the handing
+  session's (a lead-entry of the handing session, its Watchdog resume or his paste, is ignored, so it stays listed
+  while clear-pause refuses that session). An unreadable record reads not opened, with a WARN. Each row {slug, cwd
+  (the Project root), title (`Lead hand-over: <slug>`), prompt (`/thread:execute [[<slug>]]`, plus ` --gated` when
+  the listing logged it), harness (`claude`), since (its `paused:`)}, in `since` order, then slug. Opening one is the
+  Chorus Stage's (ADR 0085 d11): a row it opened must not be opened twice before it drops.
 stdout is one JSON line, keys in this order: {"room": n, "running": n, "cap": {"n", "by", "why"}, "waiting": [{"slug",
-"rank", "held_by", "cwd", "title", "prompt", "harness"}], "next": <slug> | null}; cwd, title, prompt and harness are
+"rank", "held_by", "cwd", "title", "prompt", "harness"}], "next": <slug> | null, "leads": [{"slug", "cwd", "title",
+"prompt", "harness", "since"}]}; `room`, `running`, `waiting` and `next` read no lead row; cwd, title, prompt and harness are
 restart_of's (the Leg's launch folder, inside its Chain copy in a copy chain), but a Complete Leg's harness, which
 restart_of leaves null (anyLaunch: begin takes any), reads `claude`, so every entry names one the Stage can start.
 `next` is the first unheld chain, or null when room is 0 or every chain is held. `WARN:` lines (serial_notes', the
@@ -593,6 +609,14 @@ only), so an archived rollout, done or not, is never read. In each, its linked t
   (_resolve_holds' `waits: you`: an unreadable hold, or a PR CLOSED unmerged), act `remove or fix hold_until on
   [[<note>]]`; and each open merge hold in the rollout's Run record (_record_state's `merge` holds: a `--gated`
   merge or a `review required:` PR), act `go ahead or decline the merge`.
+- hand-over (kind `hands-on`, p55-5, ADR 0085 d5), parallel rollouts only, after its merge holds: a Lead hand-over's
+  `paused:` (rr._handing_over with `paused:`) that no fresh lead has opened (rr._hand_over_opened, `waiting`'s
+  `leads` rule; an unreadable record reads not opened, with a WARN), at once when its finish is `manual`, and once its
+  `paused:` is HAND_OVER_UNOPENED_MINUTES (45) old when it is listed or never finished. `text` `lead handed over at
+  <its paused:> (<cause>): no fresh lead yet`, act `start a fresh lead in a new session: /thread:execute [[<slug>]]`
+  (plus ` --gated` when its finish logged it), `detail` `manual`, `listed on the Waiting list, unopened for <m> min`
+  or `drained, never handed`. The carrier until the Stage opens `leads` rows (ADR 0085 d11), and after: it drops once
+  a fresh lead enters or the stamps go.
 Then, outside any rollout: each task directly in the tasks dir, tagged `task`, `status: open` and in no live rollout,
 whose `## Left out at schedule` section holds an entry (schedule § Serial path writes one for each row its final S2
 JSON's `leftOut` names, whether S3.7's re-run or a later S4 re-run left it out; S6 removes it once the row is
@@ -614,12 +638,12 @@ archived rollout's too, or null), `text` the row's, act `try it by hand, then re
 the exact command, `python3 -B <this tree's reconcile-rollout.py> felt-check --task <task> --tasks-dir <the tasks dir
 read> --passed|--failed "<what you saw>"`, shell-quoted: felt-check is guard-exempt, so this tree's copy (at p52-2 or
 later by construction) records it, never the rollout's snapshot. Nothing is pushed or notified.
-stdout is one JSON line: {"count": n, "items": [{"kind", "source": gate | set-aside | hold | left-out | take-out |
-felt-check, "rollout":
+stdout is one JSON line: {"count": n, "items": [{"kind", "source": gate | set-aside | hold | hand-over | left-out |
+take-out | felt-check, "rollout":
 <slug> | null, "project", "task": <slug> | null, "text", "act", "detail": <str> | null}], "warns": ["WARN: ...", ...]},
 `project` the task's `projects:` names comma-joined (the rollout's when it has none, `no project` with neither). Items
 run in rollout order (case-folded slug); within a rollout, its gates and set-asides by task, then its hold_until holds
-(the rollout's, then its tasks' by task), then its merge holds by task; the left-out rows come next, by task, then the
+(the rollout's, then its tasks' by task), then its merge holds by task, then its hand-over; the left-out rows come next, by task, then the
 take-out rows, by task, then the Felt checks, by task. `warns`
 holds every `WARN:` line, each also on stderr, so a list some note kept partial never reads as all clear, even at
 `"count": 0`. A note that cannot be read (an OSError) is one: _scan raises on the first such note anywhere under the
@@ -669,7 +693,9 @@ RR_NAMES = ("Note", "_scan", "_queue_state", "_counts", "_project_root", "_wikil
             "_engine_reads_take_out",   # needs-you's set-aside read on an engine from before p39-14
             # a task taken out more than once (p39-21): needs-you's row and the Pickup sweep's rule
             "TAKEN_OUT_KEY", "TAKEN_OUT_NEXT_KEY", "TAKEN_OUT_REWRITE", "_take_out_history",
-            "_take_out_recommendation")
+            "_take_out_recommendation",
+            # the Lead hand-over (p55-5): `waiting`'s leads, needs-you's hand-over item and the check's state line
+            "_handing_over", "_hand_over_open", "_hand_over_opened", "HAND_OVER_UNOPENED_MINUTES")
 SC_NAMES = ("parse_token", "fmt_token", "overlaps", "overlap_pairs", "read_surfaces", "norm_origin", "Git", "repo_parts",
             "checkout_of", "checkouts_of", "read_chain_copies", "rank_tokens", "read_estate_rank")
 GI_NAMES = ("sweep", "body_of", "SPEND", "CREDENTIAL", "IRREVERSIBLE")
@@ -961,9 +987,11 @@ def shape_of(rr, slug, note, warns, warned):
 
 def note_state(rr, path, note, tasks_dir, mine):
     """The read a candidate gets: this project's, its label, never started, paused, complete, incomplete, pausing
-    (pause_requested), its protocol_version and catchUp. An Engine catch-up (rr._catching_up, p54-14) is the
+    (pause_requested), its protocol_version, catchUp and handOver. An Engine catch-up (rr._catching_up, p54-14) is the
     engine's own move, never a pause someone made: under it `paused` reads "" and `pauseRequested` false, so a catch-up
-    is never superseded, never refused as pausing, and joined (its `catchUp` the stamp, else its open line's ts)."""
+    is never superseded, never refused as pausing, and joined (its `catchUp` the stamp, else its open line's ts). A Lead
+    hand-over (rr._handing_over, p55-5) reads the same way, its `handOver` the `paused:` stamp, else its open draining
+    line's."""
     linked, index = rr._scan(path, tasks_dir)
     fresh, why = rr.approved_unrun(note, linked)
     counts = rr._counts([dict(zip(("state", "setAsideAt"), rr._queue_state(t))) for _, t in linked])
@@ -974,7 +1002,13 @@ def note_state(rr, path, note, tasks_dir, mine):
             es = rr._engine_snapshot_mod()
             op = es.catch_up_open(note.render()) if es is not None and hasattr(es, "catch_up_open") else None
             catch_up = op["ts"] if op is not None else "its drain"
-    paused = rr._scalar(note.get("paused")) if rr._valued(note.get("paused")) and not catch_up else ""
+    hand_over = ""
+    if rr._handing_over(note):
+        ho = rr._hand_over_open(note)
+        hand_over = (rr._scalar(note.get("paused")) if rr._valued(note.get("paused")) else "") or \
+            (ho["since"] if ho is not None else "its drain")
+    paused = rr._scalar(note.get("paused")) if rr._valued(note.get("paused")) and not catch_up and not hand_over \
+        else ""
     sign_off = bool(paused) and rr._scalar(note.get("paused_for")).lower() == "sign-off"
     waiting = sorted(p.stem for p, t in linked if rr._queue_state(t) == ("set-aside", "gate")) if sign_off else []
     return {
@@ -983,15 +1017,17 @@ def note_state(rr, path, note, tasks_dir, mine):
         "signOff": sign_off, "waiting": waiting,
         "complete": counts["total"] >= 1 and counts["merged"] == counts["total"],
         "supersedes": link_slug(rr, note, "supersedes"), "incomplete": rr.incomplete(path, note, linked, index),
-        "pauseRequested": rr._truthy_flag(note.get("pause_requested")) and not catch_up,
+        "pauseRequested": rr._truthy_flag(note.get("pause_requested")) and not catch_up and not hand_over,
         "protocol": rr._scalar(note.get("protocol_version")),
         "catchUp": catch_up,
+        "handOver": hand_over,
     }
 
 
 def state_line(c) -> str:
     return (f"awaiting sign-off since {c['paused']}: {links(c['waiting'])}" if c["signOff"]
             else f"catching up since {c['catchUp']}" if c.get("catchUp")
+            else f"handing over since {c['handOver']}" if c.get("handOver")
             else f"paused {c['paused']}" if c["paused"] else "never started" if c["fresh"]
             else f"has run: {c['why']}")
 
@@ -1225,8 +1261,10 @@ def parallel_hold(rr, path, note, linked, marker=True):
       or `unreadable: <why>`."""
     states = [rr._queue_state(t)[0] for _, t in linked]
     stamped = rr._valued(note.get("paused"))
-    # An Engine catch-up (p54-14) resumes by itself: an idle one keeps its Project root against serial chains.
-    paused = (stamped or rr._truthy_flag(note.get("pause_requested"))) and not rr._catching_up(note)
+    # An Engine catch-up (p54-14) resumes by itself: an idle one keeps its Project root against serial chains. So does
+    # a Lead hand-over (p55-5): a fresh lead resumes it.
+    paused = (stamped or rr._truthy_flag(note.get("pause_requested"))) and not rr._catching_up(note) \
+        and not rr._handing_over(note)
     sign_off = stamped and rr._scalar(note.get("paused_for")).lower() == "sign-off"
     lines = rr._record_read(path.stem)
     halt = None
@@ -2736,12 +2774,46 @@ def cmd_waiting(args, rr) -> int:
                 "prompt": r["prompt"], "harness": r["harness"] or "claude"}
                for k, (_key, slug, held_by, r) in enumerate(listed, 1)]
     nxt = next((w["slug"] for w in waiting if w["held_by"] is None), None) if room > 0 else None
+    leads = lead_rows(rr, notes, warns)
     for w in dict.fromkeys(warns):
         print(w, file=sys.stderr)
     why = None if by == "capacity" else capacity["why"] or capacity["maxWhy"]
     print(json.dumps({"room": room, "running": running, "cap": {"n": cap["n"], "by": by, "why": why},
-                      "waiting": waiting, "next": nxt}, ensure_ascii=False))
+                      "waiting": waiting, "next": nxt, "leads": leads}, ensure_ascii=False))
     return 0
+
+
+def handed_over_unopened(rr, path, note, warns):
+    """A root parallel note under a Lead hand-over's `paused:` that no fresh lead has opened (p55-5; the module
+    docstring's `waiting` *Leads* rule, which `needs-you`'s hand-over item reads too): (open hand-over or None, True),
+    or (None, False) when it is anything else. An unreadable Run record reads not opened, with a WARN."""
+    if rr._status(note) in CLOSED or rr._shape(note) == "serial" or rr._valued(note.get("superseded_by")):
+        return None, False
+    if not (rr._handing_over(note) and rr._valued(note.get("paused"))):
+        return None, False
+    opened = rr._hand_over_opened(note, rr._record_read(path.stem))
+    if opened is None:
+        warns.append(f"WARN: {path.stem}: its Run record cannot be read: its Lead hand-over reads not opened")
+    return rr._hand_over_open(note), not opened
+
+
+def lead_rows(rr, notes, warns):
+    """`waiting`'s `leads` (p55-5, ADR 0085 d5): each handed-over parallel note listed for a fresh lead (the module
+    docstring's *Leads* rule), in `since` order, then slug."""
+    rows = []
+    for path, note, where in notes:
+        if where != "root" or not rr._start_unattended(note):
+            continue
+        ho, unopened = handed_over_unopened(rr, path, note, warns)
+        root = rr._project_root(note)
+        if not unopened or root is None:
+            continue
+        gated = " --gated" if ho is not None and ho["gated"] else ""
+        rows.append({"slug": path.stem, "cwd": str(root), "title": f"Lead hand-over: {path.stem}",
+                     "prompt": f"/thread:execute [[{path.stem}]]{gated}", "harness": "claude",
+                     "since": rr._scalar(note.get("paused"))})
+    return sorted(rows, key=lambda r: (rr._parse_ts(r["since"]) or datetime.max.replace(tzinfo=timezone.utc),
+                                       r["slug"].lower()))
 
 
 # ---- the needs-you list (p48-1) ----------------------------------------------------------------------------------------
@@ -2900,7 +2972,31 @@ def rollout_needs(rr, args, tasks_dir, path, note, now, standing, memo, warns):
         out.append(needs_you_item("hands-on", "hold", slug, project(t[1]) if t else label, t[0].stem if t else task,
                                   "merge hold: awaiting your go-ahead" + (f" ({pr})" if pr else ""),
                                   "go ahead or decline the merge"))
+    item = hand_over_item(rr, path, note, label, now, warns)
+    if item is not None:
+        out.append(item)
     return out
+
+
+def hand_over_item(rr, path, note, label, now, warns):
+    """`needs-you`'s hand-over item (p55-5; the module docstring's `needs-you`): a handed-over note no fresh lead has
+    opened, at once when its finish is manual, else once its `paused:` is HAND_OVER_UNOPENED_MINUTES old; else None."""
+    ho, unopened = handed_over_unopened(rr, path, note, warns)
+    if not unopened:
+        return None
+    stamp = rr._scalar(note.get("paused"))
+    t0 = rr._parse_ts(stamp)
+    mins = int((now - t0).total_seconds() // 60) if t0 is not None else None
+    finish = ho["finish"] if ho is not None else None
+    if finish != "manual" and (mins is None or mins < rr.HAND_OVER_UNOPENED_MINUTES):
+        return None
+    gated = " --gated" if ho is not None and ho["gated"] else ""
+    detail = ("manual" if finish == "manual" else f"listed on the Waiting list, unopened for {mins} min"
+              if finish == "listed" else "drained, never handed")
+    return needs_you_item("hands-on", "hand-over", path.stem, label, None,
+                          f"lead handed over at {stamp} ({ho['cause'] if ho is not None else 'its cause unlogged'}): "
+                          "no fresh lead yet",
+                          f"start a fresh lead in a new session: /thread:execute [[{path.stem}]]{gated}", detail)
 
 
 def taken_out_next(rr, note):

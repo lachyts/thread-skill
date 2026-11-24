@@ -311,3 +311,16 @@ schedule session's unfinished-rollout.py, the Trickle's count, an origin-lane re
 counts and holds nothing of a drained rollout, and for the move window (minutes) its join may refuse or its regenerate
 read the rollout as superseded-eligible. `carry` never copies the log. An older reader skips the Run record's `catch-up` kind, as every reader skips a kind
 it does not know, and reads a `paused` line of mode `catch-up` as a pause.
+
+The Lead hand-over (p55-5, ADR 0085 d3, d5, d6 and d9; execute § 4.5 *Lead hand-over*) adds `paused_for: hand-over`
+(with `pause_requested` while it drains, `paused:` once drained or at its bound), its `## Pause log` lines (`- <stamp>
+hand-over: draining (<cause>; session <id | none>; count <n>)`, `bound after <m> min: stopping …`, `listed[ (gated)]`,
+`manual[ (gated)]`, `lifted (<why>)`, `not handed over (<why>)`, `taken by session <id | none>`, none holding a
+wikilink), the Run record's `hand-over` kind (outcome drain, bound, handed or not-handed), `paused` mode `hand-over`,
+idle reason `hand-over-drain`, `lead-entry` stop `hand-over`, `lead-error`'s `handOver`, and the Time-lost ledger's
+`hand-over` and `hand-over-drain` causes. Cross-rollout readers run from the session's own root: `unfinished-rollout.py
+waiting`'s top-level `leads` (each row {slug, cwd, title, prompt, harness, since}, after `next`, so a reader that
+ignores unknown keys reads `waiting[]`, `next`, `room` and `running` as before) and `needs-you`'s `hand-over` source
+are the Chorus Stage's, cross-version contracts that only widen. An older reader reads the stamps as a pause: it holds
+nothing of the rollout and never lists it, the hand-over's needs-you line is then its one start path, and the move
+rule (engine-snapshot.py's header) reads `paused_for: hand-over` as the engine's own pause, never a move.

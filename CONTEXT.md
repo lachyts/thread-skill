@@ -920,7 +920,11 @@ through time, from attention to merged PRs. Terms only — no implementation.
   a paste-ready prompt. A chain is listed or has a paste-ready prompt, never
   both, so a manual hand-over or a manual restart keeps it off the list, and
   a closing Leg (closed with a handoff, no hand-over line yet) keeps its chain
-  off the list until its hand-over. Ruled with Lachy 2026-11-08,
+  off the list until its hand-over. A parallel rollout whose lead handed
+  over (**Lead hand-over**, p55-5) waits on it too, as its own row kind
+  (`waiting`'s `leads`, never a Leg): listed once its lead finished the
+  hand-over on the Stage, until a fresh lead opens it; opening that row is
+  the Stage's (ADR 0085 d11). Ruled with Lachy 2026-11-08,
   after `orient-all` left about 30 chains open as idle or stopped sessions
   with room for 2. _Avoid_:
   begin queue, backlog, queue (a parallel rollout's **Queue** is another
@@ -1683,7 +1687,9 @@ through time, from attention to merged PRs. Terms only — no implementation.
   them). `unfinished-rollout.py needs-you` reads that list (p48-1): each
   stop with its rollout, project and kind (`spend`, `irreversible`,
   `credential`, `hands-on`, `sign-in`), a spend gate the Standing approval
-  signs never on it, and a task **Taken out** three times on it too (p39-21). Only a
+  signs never on it, a task **Taken out** three times on it too (p39-21),
+  and a **Lead hand-over** no fresh lead has opened (at once off the Stage,
+  after 45 minutes on it; p55-5). Only a
   halt that stops the whole rollout can lead anywhere, and only through
   Chorus's Companion while he is at the Stage, when Chorus reads it as his
   (d3); a single set-aside stays listed. The rollout note's
@@ -1807,7 +1813,9 @@ through time, from attention to merged PRs. Terms only — no implementation.
   a **Sign-off pause**'s reinstate. An unstamped note is stamped at it, and an
   unstamped chain also at its first Leg or the first Leg begun after any close
   (ADR 0043, as amended). An **Engine catch-up**'s self-Reinstate is the same
-  path, run by the lead itself once its drain is done (ADR 0084 d5).
+  path, run by the lead itself once its drain is done (ADR 0084 d5). A
+  **Lead hand-over**'s Reinstate is a fresh lead's entry, never the session
+  that handed it over, and it moves no snapshot (p55-5).
   _Avoid_: restart, relaunch, unpause.
 - **Room stop** — on the Chorus Stage, at a Login's line: the lead starts
   nothing, stops each Workflow call at a step boundary (just after its running
@@ -1836,10 +1844,18 @@ through time, from attention to merged PRs. Terms only — no implementation.
   recall. It is no **Handoff**: it writes no doc and starts no session itself;
   the rollout waits on the **Waiting list** for its fresh lead, as a chain
   does between **Leg**s. A serial chain needs none: a Leg already hands over
-  (ADR 0085). Built so far (p55-4): the count, kept on disk per session and
-  rollout by the plugin's compaction hook and backed up by the heartbeat, and
-  the lead's re-entry at execute § 1 after each compaction (execute § 1.5
-  *After a compaction*). The hand-over itself is not yet built (p55-5).
+  (ADR 0085). The count, kept on disk per session and rollout by the
+  plugin's compaction hook and backed up by the heartbeat, and the lead's
+  re-entry at execute § 1 after each compaction are p55-4's (execute § 1.5
+  *After a compaction*). The hand-over is built by p55-5 (execute § 4.5
+  *Lead hand-over*): at the second compaction, or at a **Lead error**'s bound,
+  `next` drains the queue (`paused_for: hand-over`: nothing new starts, what
+  runs finishes, bounded at 160 minutes), then the lead lists the paused note
+  for a fresh lead (on the Stage) or prints one needs-you line with the
+  start command (off it), deletes its heartbeat and ends. The fresh lead's
+  entry is its **Reinstate**; the session that handed it over never
+  reinstates it. His pause takes over a hand-over's drain. Nothing to hand
+  (every row merged) is no hand-over.
   _Avoid_: handoff, rotation, restart, compaction limit.
 - **Lead error** — a stop the lead's own launch caused (a refused anchor, a
   flag a script does not take, a script path that is not there), which the
@@ -1851,8 +1867,10 @@ through time, from attention to merged PRs. Terms only — no implementation.
   never ran (`usage:`, `can't open file`, the shell's 126 or 127, or
   `set-aside`'s `lead error:`). Each writes one Run record `lead-error`
   line; from the third per task in one lead session (`LEAD_ERROR_BOUND`)
-  the line reads `over: true` and the stop takes its site's old route,
-  until the **Lead hand-over** takes it. A set-aside's reason after a
+  the line reads `over: true` and the lead hands over (**Lead hand-over**,
+  p55-5) while the task's total over every session is below six; from the
+  sixth the stop takes its site's old route, so a refusal every fresh lead
+  repeats is handed over once. A set-aside's reason after a
   merge-task stop is the engine's, cut from merge-task's own output
   (`set-aside --merge-task`), never the lead's words. Not an
   **Agent-fixable block** (an agent's stop, which the automatic retry

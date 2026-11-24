@@ -11,6 +11,11 @@
 // pins its text), § 2.7, § 2.8, *Cold resume* and Room stop item 9 naming the re-entry, the Codex residual, the `--by`
 // row, engine-snapshot.md's count-file paragraph and the hook's entry in hooks/hooks.json;
 // skills/execute/tests/reconcile-rollout-compactions.test.sh pins the mechanics.
+// The Lead hand-over (ADR 0085 d3, d5, d6, d9, p55-5): § 4.5's paragraph and its constant equal to reconcile-rollout.py's,
+// step 1.1's `--running` from /workflows, step 5's arm (its /workflows gate and the bound's stop), D17's order, the
+// heartbeat's clause (2) branch before "under any other pause", § Pausing's abort before his stamp, the Don'ts line,
+// *Lead error*'s four site rules, CONTEXT.md's entry and ADR 0085's Status with its Chorus block;
+// skills/execute/tests/reconcile-rollout-hand-over.test.sh pins the mechanics.
 //
 // Same shape as tests/contracts/execute-signed-gate.test.mjs: every rule lives in one function, check(texts), which
 // returns named failures, so the real tree and the controls run through identical logic; each control swaps one
@@ -35,6 +40,8 @@ const real = {
   tpl: read('skills/schedule/rollout-template.md'),
   serialTpl: read('skills/schedule/serial-rollout-template.md'),
   hooks: read('hooks/hooks.json'),
+  rr: read('skills/execute/scripts/reconcile-rollout.py'),
+  adr85: read('docs/adr/0085-a-rollouts-lead-hands-over-at-its-second-compaction.md'),
 }
 
 // The prose-id marker: bare in a tree checked out before the attribute, expanded in every later checkout.
@@ -246,6 +253,43 @@ function check(t) {
     hook?.matcher !== 'compact' || hook.hooks?.length !== 1 ||
     hook.hooks[0].command !== 'python3 "${CLAUDE_PLUGIN_ROOT}/hooks/rollout-compaction.py"') fail('compaction')
 
+  // hand-over (ADR 0085 d3, d5, d6, d9, p55-5): § 4.5's paragraph names the engine's own constant; D4's three sentences
+  // (step 1.1's --running from /workflows, the arm's gate, the bound's stop); D17's order; the heartbeat branch, before
+  // "under any other pause"; § Pausing's abort first; the Don'ts line; Lead error's four site rules; CONTEXT; ADR 0085.
+  const exLine = (head) => collapse(ex.split('\n').find((l) => l.startsWith(head)) ?? '')
+  const lho = exLine('**Lead hand-over (ADR 0085 d3, d5, d6, d9).**')
+  const k = (t.rr.match(/^LEAD_HANDOVER_COMPACTIONS = (\d+)$/m) ?? [])[1]
+  const step11 = exLine('   1. Run `python3 ${CLAUDE_PLUGIN_ROOT}/skills/execute/scripts/reconcile-rollout.py next')
+  const guard5 = exLine('   5. **Halt guard (last).**')
+  const leRead = exLine('**A Lead error is read first**')
+  const donts = collapse(section(ex, /^## Don'ts/) ?? '')
+  const branch = 'when it carries `paused_for: hand-over` (a Lead hand-over, execute § 4.5 *Lead hand-over*), re-enter /thread:execute [[<rollout-slug>]] §4.5 step 1 with `--running` the slugs /workflows lists in flight for this rollout and take its `hand-over` halt to step 5\'s `hand-over` arm, never CronDelete this cron before that arm does, and never clear the pause'
+  const RUNNING = '`--running` is the slug of every task call and seeded revise of this rollout that /workflows lists in flight, whether or not this session kept its handle (heartbeat clause (3)\'s source)'
+  const HANDOVER = [
+    [lho, k ? `The line is \`LEAD_HANDOVER_COMPACTIONS\` (${k}) compactions of this session as this rollout's lead` : '\0'],
+    [step11, RUNNING],
+    [lho, RUNNING],
+    [guard5, 'finish nothing: end the turn `ROLLOUT-STATUS: <slug> merged=<K>/<N> running=<R> state=waiting reason="lead hand-over: <n> still in flight"`'],
+    [guard5, 'stop, by hard-pause step 2 (TaskStop), every Workflow call of this rollout /workflows lists and every background Integration command this session launched (the verify, `merge-task.sh`, a backoff, a RACE re-verify), whatever `stop` names, the lane holder included'],
+    [guard5, '`python3 ${CLAUDE_PLUGIN_ROOT}/skills/execute/scripts/reconcile-rollout.py stamp-start --rollout <rollout-note> --hand-over [--gated]`'],
+    [guard5, '`python3 ${CLAUDE_PLUGIN_ROOT}/skills/execute/scripts/reconcile-rollout.py hand-over --rollout <rollout-note> --manual [--gated]`'],
+    [lho, '`halt` is `hand-over` right after the whole git-env and main-red verdicts and ahead of `regenerate` and every other verdict, so a spent lead never runs an Approved queue\'s regenerate'],
+    [lho, 'The bound never lifts the drain.'],
+    [hb, branch],
+    [pausing, 'run `python3 ${CLAUDE_PLUGIN_ROOT}/skills/execute/scripts/reconcile-rollout.py hand-over --rollout <rollout-note> --abort --why "his pause"`'],
+    [donts, '- Never stamp or clear `paused_for: hand-over` (a Lead hand-over\'s `pause_requested:`, `paused:`, its `start: unattended` or its `## Pause log` lines) by hand: `next`, `stamp-start --hand-over`, `hand-over` and `clear-pause` are its only writers'],
+    [leRead, '(a) *Args refusal* step (3) has already run `free-lane`: the note keeps `integrating:`, the lane is free, no runId'],
+    [leRead, '(b) the pre-check\'s own writes stand (no stamp, no call) and `free-lane --tasks <slug> || true` leaves the same state'],
+    [leRead, '(c) `reconcile` takes the row as below the bound: `integrating:` removed, the note `review`, `lane-freed release=halt`, no set-aside'],
+    [leRead, '(d) when the task holds the lane and nothing of its Integration is in flight, `free-lane --tasks <slug> || true`, the same state as (a)'],
+    [entry(t.context, 'Lead hand-over'), 'The hand-over is built by p55-5'],
+    [collapse(t.adr85), 'Built so far: items 3\'s line, 5, 6 and 9, and the hand-over at a Lead error\'s bound, by p55-5'],
+    [collapse(t.adr85), '**For the Chorus task** (`chorus-the-stage-opens-a-handed-over-rollouts-fresh-lead`, item 11). The interface is `waiting`\'s `leads`'],
+  ]
+  if (!k || HANDOVER.some(([hay, needle]) => !hay.includes(needle)) || entry(t.context, 'Lead hand-over').includes('not yet built') ||
+    !before(hb, branch, 'under any other pause CronDelete this cron and stop') ||
+    !before(pausing, '**His pause over a Lead hand-over.**', '**Soft pause (default).**')) fail('hand-over')
+
   const adr = collapse(t.adr)
   if (!collapse(section(t.adr, /^## Decision/) ?? '').includes('an unstamped note is stamped at its next Reinstate or Leg begin')) fail('adr')
   if (!adr.includes('its Reinstate is the first Leg begun after a Leg closed `stopped`') ||
@@ -255,7 +299,7 @@ function check(t) {
 }
 
 const RULES = ['ident', 'prose-id', 'schedule', 'execute', 'execute-pointers', 'sign-off', 'doc', 'legs', 'close', 'status', 'repair',
-  'plugin-root', 'context', 'adr', 'catch-up', 'compaction']
+  'plugin-root', 'context', 'adr', 'catch-up', 'compaction', 'hand-over']
 const CONTROLLED = new Set()
 
 // edit(key, from, to): the real texts with one swap in one file; asserts the swap applies.
@@ -413,7 +457,34 @@ test('control: each pinned sentence of a compaction\'s re-entry, removed in turn
   only(edit('execute', hbLine, moved), 'compaction', '(2e) ahead of (2d)')
 })
 
-test('the rules are all named (16) and each has a control', () => {
-  assert.equal(RULES.length, 16)
+test('control: each pinned sentence of the Lead hand-over, removed or moved in turn, fails hand-over', () => {
+  const swaps = [
+    ['rr', 'LEAD_HANDOVER_COMPACTIONS = 2', 'LEAD_HANDOVER_COMPACTIONS = 3', 'the engine\'s constant differs from the one named'],
+    ['execute', 'The line is `LEAD_HANDOVER_COMPACTIONS` (2) compactions', 'The line is two compactions', 'the constant unnamed'],
+    ['execute', '`next`\'s `handOver` routes on it (*Lead hand-over*): from the first `next` whose `handOver.state` is non-null, and at every later `next` of that hand-over (the drain\'s, the heartbeat\'s, the arm\'s), `--running` is the slug of every task call and seeded revise of this rollout that /workflows lists in flight, whether or not this session kept its handle (heartbeat clause (3)\'s source)',
+      '`next`\'s `handOver` routes on it (*Lead hand-over*)', 'step 1.1 without --running from /workflows'],
+    ['execute', 'finish nothing: end the turn `ROLLOUT-STATUS: <slug> merged=<K>/<N> running=<R> state=waiting reason="lead hand-over: <n> still in flight"`', 'finish', 'the arm without its /workflows gate'],
+    ['execute', ', whatever `stop` names, the lane holder included, then finish.', ', then finish.', 'the bound stopping only what it recalls'],
+    ['execute', 'ahead of `regenerate` and every other verdict, so a spent lead never runs an Approved queue\'s regenerate', 'after `regenerate`', 'D17\'s order'],
+    ['execute', 'when it carries `paused_for: hand-over` (a Lead hand-over, execute § 4.5 *Lead hand-over*), re-enter', 'when it carries `paused_for: hand-over`, CronDelete this cron and re-enter', 'the heartbeat branch'],
+    ['execute', '**His pause over a Lead hand-over.**', '**His pause over the hand-over.**', '§ Pausing\'s paragraph'],
+    ['execute', '- Never stamp or clear `paused_for: hand-over`', '- Never stamp `paused_for: hand-over`', 'the Don\'ts line'],
+    ['execute', '(a) *Args refusal* step (3) has already run `free-lane`: the note keeps `integrating:`, the lane is free, no runId', '(a) the lane is free', 'site (a)\'s lane rule'],
+    ['execute', '(c) `reconcile` takes the row as below the bound: `integrating:` removed, the note `review`, `lane-freed release=halt`, no set-aside', '(c) the row is set aside', 'site (c)\'s lane rule'],
+    ['context', 'The hand-over is built by p55-5', 'The hand-over itself is not yet built (p55-5)', 'CONTEXT\'s entry'],
+    ['adr85', '**For the Chorus task**', '**The Chorus task**', 'ADR 0085 without its Chorus block'],
+  ]
+  for (const [key, from, to, why] of swaps) only(edit(key, from, to), 'hand-over', why)
+  // the heartbeat branch sits before "under any other pause": moved after it, the tick would CronDelete first
+  const hbLine = real.execute.split('\n').find((l) => l.startsWith('> ROLLOUT-HEARTBEAT'))
+  const br = hbLine.indexOf('when it carries `paused_for: hand-over`')
+  const other = hbLine.indexOf('under any other pause CronDelete this cron and stop;')
+  const brText = hbLine.slice(br, other)
+  const moved = hbLine.slice(0, br) + hbLine.slice(other, other + 'under any other pause CronDelete this cron and stop;'.length) + ' ' + brText + hbLine.slice(other + 'under any other pause CronDelete this cron and stop;'.length)
+  only(edit('execute', hbLine, moved), 'hand-over', 'the branch after "under any other pause"')
+})
+
+test('the rules are all named (17) and each has a control', () => {
+  assert.equal(RULES.length, 17)
   assert.deepEqual(RULES.filter((r) => !CONTROLLED.has(r)), [])
 })

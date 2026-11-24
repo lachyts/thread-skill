@@ -80,6 +80,8 @@
 #           chain with the take-over prompt (P36-15); WL11 a parallel rollout in a surface wait (P41-3); WL12 what it
 #           reads after a begin wait (P41-3): a successor of a started hand-over still off the list, its place counted;
 #           WL15 LEG_LEASE_LAPSE checked at load (RR_NAMES)
+#   LH4     a Lead hand-over (p55-5, ADR 0085 d5): the state line `handing over since`, its Project root kept (the
+#           `leads` row and the needs-you item are skills/execute/tests/reconcile-rollout-hand-over-leads.test.sh's)
 #   NY1-NY12 `needs-you` (p48-1): every open needs-you item as one list: each gate kind verbatim, a spend gate the
 #           standing approval signs never listed (its limit and month line read as approve-gates --standing reads them),
 #           a gate-pending task with no gate listed as one item (fail closed), a set-aside only a person moves on (a
@@ -2957,7 +2959,7 @@ capf 4
 wl
 ok "$rc|$(wj '[w["slug"] for w in d["waiting"]]')" "0|['wf', 'wb', 'wa']" "WL1: stamped chains with no Leg wait in order_key's order (one that has begun, then estate rank 1, 2)"
 ok "$(wj '[w["rank"] for w in d["waiting"]]')|$(wj '[w["held_by"] for w in d["waiting"]]')" "[1, 2, 3]|[None, None, None]" "WL1: … each its place on the list, none held"
-ok "$(wj 'list(d)')" "['room', 'running', 'cap', 'waiting', 'next']" "WL1: … the JSON's keys, in order"
+ok "$(wj 'list(d)')" "['room', 'running', 'cap', 'waiting', 'next', 'leads']" "WL1: … the JSON's keys, in order"
 ok "$(wj 'd["running"]')|$(wj 'd["cap"]')|$(wj 'd["room"]')" "2|{'n': 4, 'by': 'capacity', 'why': None}|2" \
   "WL1: an open Leg and a started hand-over each hold a place: Capacity 4, 2 running, room 2"
 ok "$(wj 'd["next"]')" "wf" "WL1: … and next is the first chain on the list"
@@ -3047,7 +3049,7 @@ ok "$rc|$(wj '[w["slug"] for w in d["waiting"]]')|$(wj 'd["next"]')" "0|['wo']|w
   "WL5: a paused, stuck, incomplete or halted chain needs Lachy: off the list"
 scen wl6
 wl
-ok "$rc|$out" '0|{"room": 2, "running": 0, "cap": {"n": 2, "by": "trickle", "why": "no file"}, "waiting": [], "next": null}' \
+ok "$rc|$out" '0|{"room": 2, "running": 0, "cap": {"n": 2, "by": "trickle", "why": "no file"}, "waiting": [], "next": null, "leads": []}' \
   "WL6: an empty vault waits on nothing"
 python3 "$CHECK" waiting --tasks-dir "$S/none" > "$S.out" 2> "$S.err"; rc=$?
 ok "$rc|$(cat "$S.out")" "2|" "WL7: a missing tasks dir is exit 2, with no stdout"
@@ -3619,6 +3621,18 @@ ok "$(rows)" "$(printf '%s\n%s' \
 ok "$(nyj 'd["items"][0]["detail"]')" "python3 -B $RR felt-check --task u1 --tasks-dir $T --passed|--failed \"<what you saw>\"" \
   "NY14: … its detail is the exact command: this tree's reconcile-rollout.py, the tasks dir read"
 ok "$(nyj 'd["items"][0]["project"]')" "Demo" "NY14: … with its project"
+
+# ── LH4 (p55-5, ADR 0085 d5): a Lead hand-over's state line and the Project root it keeps. The state goes through the
+# engine's own writers: next at a planted count of 2 drains and stamps paused:. (`waiting`'s `leads` row and
+# `needs-you`'s hand-over item, LH1-LH3, are skills/execute/tests/reconcile-rollout-hand-over-leads.test.sh's.)
+scen lh4
+mkro ro-d.md "$R" "$DEMO"; mkt ro-d-t.md ro-d open "$DEMO"
+mkdir -p "$EH/.config/thread/compactions/ro-d"; printf '{"version": 1, "count": 2, "told": 2}\n' > "$EH/.config/thread/compactions/ro-d/s-d.json"
+HOME="$EH" CLAUDE_CODE_SESSION_ID=s-d python3 "$RR" record-entry --rollout "$T/ro-d.md" --by stage --now 2026-11-08T08:00:00Z >/dev/null
+HOME="$EH" CLAUDE_CODE_SESSION_ID=s-d python3 "$RR" next --rollout "$T/ro-d.md" --tasks-dir "$T" --running "" --now 2026-11-08T09:00:00Z >/dev/null 2>&1
+chs --surface "repo:$R" --project Other
+ok "$rc" 3 "LH4: a serial check on a handing-over rollout's Project root refuses (it keeps its root)"
+has "$err" "[[ro-d]] (Demo; handing over since 2026-11-08T09:00+00:00) is an unfinished parallel rollout" "LH4: … its state line handing over since its paused:"
 
 echo
 if [ "$fail" -eq 0 ]; then echo "unfinished-rollout: ALL PASS"; else echo "unfinished-rollout: FAILED"; fi
