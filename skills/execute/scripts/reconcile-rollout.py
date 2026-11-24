@@ -40,6 +40,19 @@ Subcommands:
               revise and a re-approval keep one. An `unreachable` that is neither null nor an object with a boolean
               `marked` is one ERROR (exit 1) that skips only the stamp: the rest of the row lands, and the Felt check
               line still reads the note's own earlier stamp.
+              A Lead error (p55-3, ADR 0085 d8; execute § 4.5 *Lead error*, site merge-step): a `blocked` integrate row
+              set aside because its merge step STOPped on a value the lead passed while naming another
+              (LEAD_ERROR_STOPS: `anchor mismatch: recorded X, passed A`, `anchor A carries a merge — ANCHOR_RECIPE
+              gives R`, `taskBase TB is not merge-base(A, D) = MB`), each passed value equal to the row's
+              integration.anchor, the named one 40 hex and another, with a `metrics.startedAt` and no `needsHuman`
+              (_lead_error_row). Read before any write for the row and keyed on it (_reconcile_lead_error): the first
+              pass on a lane holder writes one `lead-error` line, then, below LEAD_ERROR_BOUND in this lead session,
+              removes `integrating:`, keeps the note `review` (no `## Blocker diagnosis`, no Integration log line, no
+              counter, no rung) and frees the lane, its line `<slug>: lead error (merge-step n/3): passed <A>, the
+              engine names <R>; no set-aside, no retry spent; back to step 1`; at the bound its line reads `over:
+              true` and the row is set aside as before. A replay of the row writes no second line, finishing only a
+              cut first pass (`integrating:` standing, no `lane-taken` since); an unreadable Run record, a failed
+              emit, or a note that no longer holds the lane is today's set-aside.
 
   next        Which tasks start now. Given the rollout note, print one JSON object: the tasks to start and restart
               within the parallel ceiling, every held task with its reason, the running, awaiting-Integration,
@@ -534,6 +547,19 @@ Subcommands:
   free-lane   `--tasks <slug>`: the lead frees the lane at the lane-free rule or a § 7 halt (p15-2). Requires
               _holds_lane (else exit 1, nothing written); closes the task's open merge hold, then records
               `lane-freed release=halt`. The note is not changed.
+
+  lead-error  `--rollout <note> [--tasks <slug>] --site args-refusal|pre-check|command [--call task|revise|integrate]
+              [--session S] [--now] [--dry-run]`, the evidence on stdin (its first non-empty line, whitespace
+              collapsed, cut to 200 characters) (p55-3, ADR 0085 d8; execute § 4.5 *Lead error*): the lead's record of
+              a stop its own launch caused, which it redoes with no set-aside and no retry spent. One `lead-error` line
+              {site, n, bound, over?, session?, call?, evidence?}: n is this lead session's count (--session, else
+              CLAUDE_CODE_SESSION_ID; none on both sides counts together) of the task's lines, or of the rollout's
+              taskless ones with no --tasks, plus one; `over: true` from LEAD_ERROR_BOUND (3) on, where the lead takes
+              the site's old route instead of a redo. Prints one JSON line {rollout, task, site, n, bound, over, total}
+              (total: every session's count, this one included). Site merge-step is no choice: reconcile writes it
+              (below), so a lead cannot name its own set-aside away. Exit 1, one ERROR line and nothing written: no
+              rollout note, a Run record that cannot be read, or a line the writer did not write (the lead then takes
+              the site's old route). Exit 2: usage, more than one slug, or a slug run_record.py refuses.
 
   hold        `--tasks <slug> --hold merge|race --state start|end` (p15-2): the lead's hold transitions. A merge
               start requires _holds_lane; a race start requires the rollout's `## Race log` to name the task
@@ -1587,7 +1613,12 @@ integrate call's reconciled `integrated` row and the merge; a hand-back restamps
                     capacity.py peak() for the task tree (_slot_peak: the row's absolute worktreePath, else the
                     engine's <Project root>/.claude/worktrees/<slug>), read once per Slot-ending row and never
                     under --dry-run; with no fresh slot-peaks.json or no entry since the Slot was taken it carries
-                    none.
+                    none. A Lead error row (p55-3, the reconcile entry above) records lead-error {site: merge-step, n,
+                    bound, over?, session?, call: integrate, evidence?, row, passed, named} and, below the bound,
+                    a merge-hold close and lane-freed release=halt, and none of this list's other events; at the
+                    bound, the line then the row's own set-aside events; a replay none, or a cut first pass's
+                    lane-freed when none followed its line.
+  lead-error        (p55-3) lead-error {site, n, bound, over?, session?, call?, evidence?}, unless --dry-run.
   hand-back         (p21-2) race-decided {mark, by=hand-back} when a `RACE decided:` line lifted the task's hold
                     (_record_decision: once per task per record); then handed-back {via, arm}: via, first match,
                     descope (a `descope_armed:` stamp standing, read before the transition), answer (--answer, a live
@@ -5039,6 +5070,11 @@ def cmd_reconcile(args) -> int:
         pr = (task.get("prUrl") or "").strip()
         # The Run record reads the note as it was before this row (p15-2): its status, whether it held the lane.
         prior, held, rollout = _status(note), _holds_lane(note), _note_rollout(note)
+        # p55-3 (ADR 0085 d8): a merge step that STOPped on the anchor pair the lead passed is a Lead error, the lead's
+        # to redo, before any write for the row: no set-aside row and no retry spent (_reconcile_lead_error).
+        le = _lead_error_row(task)
+        if le is not None and _reconcile_lead_error(args, note, slug, rollout, held, le, errors):
+            continue
         lane_fields = _lane_fields_from_log(note) if held else {}
         ready_stamped = False
         # p29-12: a row that ends a Slot (its note read in_progress, and no integrate row) is its call's end, and the
@@ -11441,6 +11477,242 @@ def _free_lane(rollout, slug, args, state, release, extra=None):
 def _halt_lane(rollout, slug, args, state):
     """A halt frees the lane: the task's open merge hold ends, then lane-freed release=halt."""
     _free_lane(rollout, slug, args, state, "halt")
+
+
+# ---- the Lead error (p55-3, ADR 0085 d8; execute § 4.5 *Lead error*) ----------------------------------------------
+# A stop the engine can show came from the lead's own launch is the lead's to redo: no set-aside row, no retry spent, no
+# halt, until LEAD_ERROR_BOUND in one lead session (CLAUDE_CODE_SESSION_ID) per task (a Lead error with no task counts
+# under the rollout); from that one on its line reads `over: true` and the stop takes its site's old route. Every Lead
+# error writes one Run record `lead-error` line: this verb's `lead-error` for sites args-refusal, pre-check and command
+# (the lead's call), and cmd_reconcile for site merge-step (_reconcile_lead_error), which no lead can name.
+LEAD_ERROR_BOUND = 3
+LEAD_ERROR_SITES = ("args-refusal", "pre-check", "merge-step", "command")
+LEAD_ERROR_VERB_SITES = ("args-refusal", "pre-check", "command")
+LEAD_ERROR_MERGE_STEP = "merge-step"
+LEAD_ERROR_EVIDENCE_MAX = 200     # run_record.py's LEAD_ERROR_EVIDENCE_MAX
+LEAD_ERROR_HEX40 = re.compile(r"[0-9a-f]{40}\Z")
+# The engine's merge step STOPs that name the value to pass (task.workflow.js integrationMergeStep, the three of its 16
+# merge_stop texts), read off an integrate row's diagnosis, its first line with one `integration:` dropped. Each named
+# group but `named` is a value the lead passed, held to the row's integration.anchor (headSha, taskBase); `named` is
+# the value the engine names, which must be 40 hex and differ from the passed one (passed: taskBase when the text
+# carries it, else headSha). Pinned against task.workflow.js by the record suite.
+LEAD_ERROR_STOPS = (
+    re.compile(r"merge step STOP: anchor mismatch: recorded (?P<named>\S*), passed (?P<headSha>\S+) — pass the "
+               r"recorded anchor"),
+    re.compile(r"merge step STOP: anchor (?P<headSha>\S+) carries a merge — ANCHOR_RECIPE gives (?P<named>\S*)"),
+    re.compile(r"merge step STOP: taskBase (?P<taskBase>\S+) is not merge-base\((?P<headSha>[^,\s]+), [^)]*\) = "
+               r"(?P<named>\S*) — pass the task's own base"),
+)
+
+
+def _lead_errors(rollout, slug, session, lines=None):
+    """(this session's count, every session's count) of the `lead-error` lines the rollout's Run record holds for one
+    task (`slug`), or for its taskless ones (`slug` None): this session's are the lines whose `session` is `session`,
+    an absent one on both sides reading as the same (an unset CLAUDE_CODE_SESSION_ID counts together). Read through
+    _record_read unless `lines` (a read already made) is given; None when the record cannot be read."""
+    if lines is None:
+        lines = _record_read(rollout)
+    if lines is None:
+        return None
+    me = slug.lower() if slug else None
+    mine = total = 0
+    for d in lines:
+        if d.get("kind") != "lead-error" or (d.get("task") or None) != me:
+            continue
+        total += 1
+        if (d.get("session") or None) == (session or None):
+            mine += 1
+    return mine, total
+
+
+def _lead_error_evidence(text):
+    """A Lead error's `evidence`: the first non-empty line of `text`, whitespace collapsed, cut to
+    LEAD_ERROR_EVIDENCE_MAX characters; '' when there is none."""
+    for line in str(text or "").splitlines():
+        s = " ".join(line.split())
+        if s:
+            return s[:LEAD_ERROR_EVIDENCE_MAX].rstrip()
+    return ""
+
+
+def _lead_error_row(task):
+    """An integrate row whose merge step STOPped on a value the lead passed while naming another (site merge-step):
+    {row, passed, named, evidence}, else None (today's set-aside). It holds only a `blocked` row with
+    integration.outcome `set-aside`, no question (`needsHuman`), a `metrics.startedAt` (the row's key: `row` is
+    {startedAt, finishedAt?}), and a diagnosis whose first line, one `integration:` dropped, opens one of
+    LEAD_ERROR_STOPS; every passed value the text names must equal the row's own integration.anchor field (a STOP
+    the integrator relayed that disagrees with the anchor it was passed is no Lead error), and the named value must be
+    40 hex and differ from the passed one."""
+    integ = task.get("integration")
+    if task.get("status") != "blocked" or not isinstance(integ, dict) or integ.get("outcome") != "set-aside":
+        return None
+    ask = task.get("needsHuman")
+    if (isinstance(ask, str) and ask.strip()) or task.get("gatedInputs"):
+        return None
+    metrics = integ.get("metrics") if isinstance(integ.get("metrics"), dict) else {}
+    anchor = integ.get("anchor") if isinstance(integ.get("anchor"), dict) else {}
+    started = metrics.get("startedAt")
+    if not isinstance(started, str) or not started.strip():
+        return None
+    first = str(task.get("blockerDiagnosis") or "").strip().split("\n", 1)[0].strip()
+    first = re.sub(r"^integration:\s*", "", first, flags=re.I)
+    found = next((m for m in (rx.match(first) for rx in LEAD_ERROR_STOPS) if m), None)
+    if found is None:
+        return None
+    g = found.groupdict()
+    for key in ("headSha", "taskBase"):
+        if g.get(key) is not None and (g[key] != anchor.get(key) or not LEAD_ERROR_HEX40.match(g[key])):
+            return None
+    passed = g.get("taskBase") or g["headSha"]
+    named = g["named"]
+    if not LEAD_ERROR_HEX40.match(named) or named == passed:
+        return None
+    row = {"startedAt": started}
+    finished = metrics.get("finishedAt")
+    if isinstance(finished, str) and finished.strip():
+        row["finishedAt"] = finished
+    return {"row": row, "passed": passed, "named": named, "evidence": _lead_error_evidence(first)}
+
+
+def _reconcile_lead_error(args, note, slug, rollout, held, le, errors) -> bool:
+    """cmd_reconcile's site merge-step (execute § 4.5 *Lead error*, site (c)), before any note write for the row; True
+    when it took the row, False for today's path (the row's set-aside, as before p55-3). A row is recorded once, by its
+    key (_lead_error_row's `row`), against the Run record read here (unreadable, or no rollout: today's path):
+      - no earlier merge-step line for the task's row: the note must hold the lane (`held`, read before the row), else
+        today's path. The `lead-error` line is emitted first (n: this session's count of the task's lines plus one,
+        _lead_errors); a failed emit is today's path. Below LEAD_ERROR_BOUND: `integrating:` removed and the note kept
+        `review` (no `## Blocker diagnosis`, no Integration log line, no counter, no rung), then `lane-freed
+        release=halt` (_free_lane), and one line, `<slug>: lead error (merge-step n/B): passed <A>, the engine names
+        <R>; no set-aside, no retry spent; back to step 1`. At the bound the line reads `over: true` and today's path
+        sets the task aside;
+      - an earlier line for the row with `over: true`: today's path, no second line;
+      - an earlier line without it (a replay): no second line, and the note never goes blocked. Only while the note
+        still reads `review` with `integrating:` and no `lane-taken` for the task follows that line (the first pass was
+        cut short) does it finish the outcome: `integrating:` removed, and `lane-freed` emitted when none followed.
+        Otherwise it writes nothing (the redo's own lane hold is left alone), its line `… already recorded for this
+        row; no change`.
+    --dry-run writes nothing (a first pass below the bound prints its line with ` (dry-run)`); --no-verdict is no
+    exception, since a Lead error's outcome is a `void` row's (the lane frees, the task waits for Integration)."""
+    if not rollout:
+        return False
+    lines = _record_read(rollout)
+    if lines is None:
+        return False
+    me = slug.lower()
+    at = [i for i, d in enumerate(lines) if d.get("kind") == "lead-error" and d.get("task") == me
+          and d.get("site") == LEAD_ERROR_MERGE_STEP and d.get("row") == le["row"]]
+    if at:
+        if any(lines[i].get("over") is True for i in at):
+            return False
+        last, after = lines[at[-1]], lines[at[-1] + 1:]
+        said = f"{slug}: lead error (merge-step {last.get('n')}/{last.get('bound')}) already recorded for this row"
+        retaken = any(d.get("kind") == "lane-taken" and d.get("task") == me for d in after)
+        if retaken or _status(note) != "review" or not _scalar(note.get("integrating")):
+            print(f"{said}; no change")
+            return True
+        note.remove("integrating")
+        try:
+            note.save(dry_run=args.dry_run)
+        except OSError as e:
+            errors.append(f"{slug}: cannot write {note.path}: {e} — nothing written for this row")
+            return True
+        freed = any(d.get("kind") == "lane-freed" and d.get("task") == me for d in after)
+        if not freed:
+            _free_lane(rollout, slug, args, _record_state(rollout), "halt")
+        flag = " (dry-run)" if args.dry_run else ""
+        print(f"{said}; its cut first pass finished: integrating: removed{'' if freed else ', lane freed'}{flag}")
+        return True
+    if not held:
+        return False
+    session = os.environ.get("CLAUDE_CODE_SESSION_ID") or None
+    mine, _total = _lead_errors(rollout, slug, session, lines)
+    n = mine + 1
+    over = n >= LEAD_ERROR_BOUND
+    fields = {"site": LEAD_ERROR_MERGE_STEP, "n": n, "bound": LEAD_ERROR_BOUND, "call": "integrate",
+              "row": le["row"], "passed": le["passed"], "named": le["named"]}
+    if over:
+        fields["over"] = True
+    if session:
+        fields["session"] = session
+    if le["evidence"]:
+        fields["evidence"] = le["evidence"]
+    head = f"{slug}: lead error (merge-step {n}/{LEAD_ERROR_BOUND})"
+    line = (f"{head}: passed {le['passed']}, the engine names {le['named']}; no set-aside, no retry spent; "
+            "back to step 1")
+    if args.dry_run:
+        if over:
+            return False
+        print(f"{line} (dry-run)")
+        return True
+    if not _event(rollout, "lead-error", slug, fields, args):
+        return False
+    if over:
+        print(f"{head}: at the bound, so no redo: set aside as before")
+        return False
+    note.remove("integrating")
+    try:
+        note.save()
+    except OSError as e:
+        errors.append(f"{slug}: cannot write {note.path}: {e} — its lead-error line is written; the replay finishes it")
+        return True
+    _free_lane(rollout, slug, args, _record_state(rollout), "halt")
+    print(line)
+    return True
+
+
+def cmd_lead_error(args) -> int:
+    """execute § 4.5 *Lead error* (p55-3, ADR 0085 d8): the lead's record of a Lead error at site args-refusal, pre-check
+    or command (merge-step is cmd_reconcile's own, never a choice here). One `lead-error` line {site, n, bound, over?,
+    session?, call?, evidence?} for --tasks's task, or for the rollout with no --tasks; n is this session's count of
+    those lines plus one (_lead_errors: --session, else CLAUDE_CODE_SESSION_ID) and `over` true from LEAD_ERROR_BOUND
+    on; the evidence is stdin's first non-empty line (_lead_error_evidence). Prints one JSON line {rollout, task, site,
+    n, bound, over, total}, total every session's count with this one. Exit 1 (one ERROR line, nothing written): no
+    rollout note, a Run record that cannot be read, or a line the writer did not write; the lead then takes the site's
+    old route, so a count is never lost into an endless redo. Exit 2: more than one slug, or a slug run_record.py
+    refuses. --dry-run prints the line and writes nothing."""
+    rollout_path = Path(os.path.expanduser(args.rollout))
+    if not rollout_path.is_file():
+        print(f"ERROR: lead-error: rollout note not found at {rollout_path}", file=sys.stderr)
+        return 1
+    ro = rollout_path.stem
+    slugs = [s.strip() for s in (args.tasks or "").split(",") if s.strip()]
+    if len(slugs) > 1:
+        print("ERROR: lead-error: --tasks takes one slug: a Lead error is one task's, or the rollout's", file=sys.stderr)
+        return 2
+    slug = None
+    if slugs:
+        try:
+            slug = _run_record().normalise_slug(slugs[0], "task")
+        except Exception as e:  # noqa: BLE001 — run_record.py's Refused, or a writer that will not load
+            print(f"ERROR: lead-error: --tasks {slugs[0]!r}: {e}", file=sys.stderr)
+            return 2
+    session = args.session if args.session is not None else os.environ.get("CLAUDE_CODE_SESSION_ID")
+    session = session or None
+    evidence = _lead_error_evidence("" if sys.stdin is None or sys.stdin.isatty() else sys.stdin.read())
+    lines = _record_read(ro)
+    if lines is None:
+        print(f"ERROR: lead-error: the Run record of {ro} cannot be read: no Lead error recorded; take the site's old "
+              "route", file=sys.stderr)
+        return 1
+    mine, total = _lead_errors(ro, slug, session, lines)
+    n = mine + 1
+    over = n >= LEAD_ERROR_BOUND
+    fields = {"site": args.site, "n": n, "bound": LEAD_ERROR_BOUND}
+    if over:
+        fields["over"] = True
+    if session:
+        fields["session"] = session
+    if args.call:
+        fields["call"] = args.call
+    if evidence:
+        fields["evidence"] = evidence
+    if not args.dry_run and not _event(ro, "lead-error", slug, fields, args):
+        print(f"ERROR: lead-error: the line was not written to the Run record of {ro}: no Lead error recorded; take the "
+              "site's old route", file=sys.stderr)
+        return 1
+    print(json.dumps({"rollout": ro, "task": slug, "site": args.site, "n": n, "bound": LEAD_ERROR_BOUND, "over": over,
+                      "total": total + 1}))
+    return 0
 
 
 _RESOLVED_CAPS = {}
@@ -22929,6 +23201,21 @@ def _parser():
     fl.add_argument("--now", type=_iso_arg, default=None, help=now_help)
     fl.add_argument("--dry-run", action="store_true")
     fl.set_defaults(func=cmd_free_lane)
+
+    le = sub.add_parser("lead-error", help="the lead's Lead error (p55-3, ADR 0085 d8; execute § 4.5 *Lead error*): one "
+                                           "lead-error line, the evidence on stdin; prints {rollout, task, site, n, "
+                                           "bound, over, total}; exit 1 not written: take the site's old route")
+    le.add_argument("--rollout", required=True, help="path to the rollout note")
+    le.add_argument("--tasks", default=None, help="the task the launch was for (none: a command of no task, counted "
+                                                  "under the rollout)")
+    le.add_argument("--site", required=True, choices=list(LEAD_ERROR_VERB_SITES),
+                    help="the site (merge-step is reconcile's own, never the lead's)")
+    le.add_argument("--call", default=None, choices=["task", "revise", "integrate"], help="the launch's call kind")
+    le.add_argument("--session", default=None, help="the lead's session id (default: CLAUDE_CODE_SESSION_ID)")
+    le.add_argument("--tasks-dir", default=str(DEFAULT_TASKS_DIR), help=tasks_dir_help + " (the guard's only read)")
+    le.add_argument("--now", type=_iso_arg, default=None, help=now_help + " (the line's ts)")
+    le.add_argument("--dry-run", action="store_true")
+    le.set_defaults(func=cmd_lead_error)
 
     ho = sub.add_parser("hold", help="the lead's merge or race hold starts or ends (hold-started / hold-ended; p15-2)")
     ho.add_argument("--tasks", required=True, help="the task slug")

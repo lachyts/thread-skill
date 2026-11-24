@@ -2399,7 +2399,8 @@ function rungName(s) {
 // securityCheck, integration or task.resume) is thrown as argsRefused(why): its message starts with ARGS_REFUSED, so a notification the runtime wraps
 // (`Error: …`) or cuts still carries it, and the lead matches it by contains. Such a call dispatched nothing and the
 // same args are refused again, so the lead never reads it as a *Lost call* (a resume, a dead-call set-aside, an
-// automatic retry): it drops the runId and halts the entry once. A throw after dispatch is caught into a row instead.
+// automatic retry): it drops the runId and redoes the launch as a Lead error (a halt only at its bound). A throw after
+// dispatch is caught into a row instead.
 const ARGS_REFUSED = 'thread:args-refused'
 function argsRefused(why) {
   return new Error(`${ARGS_REFUSED}: ${why}`)
@@ -4499,9 +4500,10 @@ function integrationResult(task, out, a, trace) {
 // ---- Orchestration: one task per call; the lead holds the calls (ADR 0030) ---
 
 // Every refusal below is thrown before any dispatch through argsRefused (p32-1): its message starts with the sentinel
-// `thread:args-refused`, which execute § 4.5 *Args refusal* matches by contains, so the lead halts the entry once
-// (the runId dropped, an integrate call's lane freed) instead of resuming, setting aside or retrying a call that
-// dispatched nothing and would be refused again. Each message keeps its own text after the sentinel.
+// `thread:args-refused`, which execute § 4.5 *Args refusal* matches by contains, so the lead redoes the launch as a
+// Lead error (a halt only at its bound; the runId dropped, an integrate call's lane freed) instead of resuming,
+// setting aside or retrying a call that dispatched nothing and would be refused again. Each message keeps its own
+// text after the sentinel.
 // The Workflow tool passes `args` to a scriptPath workflow JSON-stringified, not as a live
 // object (confirmed empirically: the script sees `typeof args === 'string'`). Parse defensively
 // so the engine works whether args arrives as a string or an object; args that are not JSON, or not one

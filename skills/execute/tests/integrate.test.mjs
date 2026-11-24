@@ -273,7 +273,8 @@ test('b4b: the step-back reviser and the integrator agree — the plan is refere
 })
 
 // p27-1: the integrate args carry no plan; a stray one (an old lead habit, a hand-built Lost-call relaunch) is
-// tolerated and ignored, never rendered: refusing it would be an *Args refusal*, which halts the entry.
+// tolerated and ignored, never rendered: refusing it would be an *Args refusal*, a Lead error the lead redoes (a halt
+// only at its bound).
 test('p27-1: a stray integration.plan is ignored and never rendered', async () => {
   const I = mkI({ plan: 'STRAY ' + 'y'.repeat(61000) })
   assert.equal(T.integrationArgsError(mkArgs(I)), '')

@@ -236,6 +236,11 @@ test('span: every friction kind, a Human fix as movedBy unrecorded with its task
     [W(4, '08:50'), 'take-out', 'dep', { cause: 'dependant', fingerprint: 'abcdef012345', with: 'taken' }],
     [W(4, '08:50'), 'take-out', 'taken', { cause: 'spent', fingerprint: 'abcdef012345', stage: 'review', overtimeUsed: 3, overtimeBudget: 3 }],
     ['2026-09-02T10:00:00Z', 'take-out', 'old', { cause: 'spent', fingerprint: '0123456789ab', stage: 'plan', overtimeUsed: 3, overtimeBudget: 3 }],
+    // p55-3 (ADR 0085 d8): a Lead error in the window, one of no task at its bound, and one before since
+    [W(4, '09:00'), 'lead-error', 'redone', { site: 'merge-step', n: 1, bound: 3, call: 'integrate', row: { startedAt: '2026-09-04T08:55+00:00' },
+      passed: 'a'.repeat(40), named: 'b'.repeat(40) }],
+    [W(4, '09:10'), 'lead-error', null, { site: 'command', n: 3, bound: 3, over: true, evidence: 'usage: ladder.py' }],
+    ['2026-09-02T11:00:00Z', 'lead-error', 'old', { site: 'args-refusal', n: 1, bound: 3 }],
   ]
   emitAll(h, 'demo', byTs(ev))
   rolloutNote(h, 'demo', { notes: ['- 2026-09-05 repair: [[stuck]] deferred: later'] })
@@ -244,7 +249,9 @@ test('span: every friction kind, a Human fix as movedBy unrecorded with its task
   const s = span(h)
   const f = entryOf(s, 'demo').friction
   const kinds = [...new Set(f.map((x) => x.kind))].sort()
-  assert.deepEqual(kinds, ['ask', 'churn', 'descope', 'repair', 'retry', 'set-aside', 'takeout'])
+  assert.deepEqual(kinds, ['ask', 'churn', 'descope', 'lead-error', 'repair', 'retry', 'set-aside', 'takeout'])
+  assert.deepEqual(f.filter((x) => x.kind === 'lead-error').map((x) => [x.task, x.site, x.n, x.over]),
+    [['redone', 'merge-step', 1, false], [null, 'command', 3, true]], 'each in-window Lead error, listed; the one before since is absent')
   assert.deepEqual(f.filter((x) => x.kind === 'takeout').map((x) => [x.task, x.cause, x.stage, x.overtimeUsed, x.with]),
     [['dep', 'dependant', null, null, 'taken'], ['taken', 'spent', 'review', 3, null]], 'each in-window take-out; the one before since is absent')
   assert.deepEqual(f.filter((x) => x.task === 'taken' && x.kind !== 'takeout').map((x) => [x.kind, x.movedBy ?? x.overtime]),

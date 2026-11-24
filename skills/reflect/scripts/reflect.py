@@ -154,6 +154,9 @@ parallel with no note). For each:
   retry     an auto-retry line in the window; an Overtime run's carries `overtime` (its overtime_used after it, p39-14).
   takeout   a take-out line in the window (p39-14, ADR 0070 d5 and d7: listed, never alerted): {rollout, task, at, cause,
             stage, overtimeUsed, with, fingerprint}, a dependant's with its `with` and no stage or overtimeUsed (null).
+  lead-error a lead-error line in the window (p55-3, ADR 0085 d8: listed, never alerted, as a take-out is): {rollout,
+            task, at, site, n, over}, task null for a Lead error of no task (it counts under the rollout), over
+            false unless the line reads `over: true` (the bound, where the stop took its site's old route).
   descope   a handed-back line with via descope in the window.
   repair    each line of the rollout note's `## Notes` matching `- <YYYY-MM-DD> repair: ...` whose date is in the
             window (date_in()): {date, tasks (every wikilink), text (at most 300), shape}. shape is the first match of
@@ -1760,6 +1763,9 @@ class Span:
                 items.append({"kind": "takeout", "rollout": slug, "task": task, "at": fmt(t), "cause": d.get("cause"),
                               "stage": d.get("stage"), "overtimeUsed": d.get("overtimeUsed"), "with": d.get("with"),
                               "fingerprint": d.get("fingerprint")})
+            elif kind == "lead-error":
+                items.append({"kind": "lead-error", "rollout": slug, "task": task if isinstance(task, str) else None,
+                              "at": fmt(t), "site": d.get("site"), "n": d.get("n"), "over": d.get("over") is True})
             elif kind == "handed-back" and task and d.get("via") == "descope":
                 items.append({"kind": "descope", "rollout": slug, "task": task, "at": fmt(t), "arm": d.get("arm")})
             elif kind == "review-verdict" and task and isinstance(d.get("regression"), int) and d["regression"] > 0:

@@ -19,7 +19,8 @@
 //                 UNVERIFIED task included, the arm's item listed; no UNVERIFIED exception on the cool-down; § 7's
 //                 bullets name the clauses
 //   exit2         *lead-integrate's exit 2*: its routes in order, § 7's bullet, step 3's exit 2, the marker raised
-//                 twice, the no-flag clause at four sites
+//                 twice, the no-flag clause at four sites, and a Lead error read first (p55-3: argparse's `usage:` and
+//                 set-aside's `lead error:` line, the marker lead-integrate.py prints)
 //   watchdog      status § The Watchdog's reading: the verb, the verdicts, the bounds, the safety wording, *Which waits
 //                 silence judges* bound to SILENCE_JUDGED; the Companion is the Watchdog alone (ADR 0075 d5): with
 //                 Chorus not running nothing watches, and the section names no launchd fallback, no watchdog.py and no
@@ -42,6 +43,8 @@ const FILES = {
   adr33: read('docs/adr/0033-execute-retries-agent-fixable-set-asides.md'),
   adr30: read('docs/adr/0030-a-rollout-is-a-queue-that-integrates-at-merge.md'),
 }
+// p55-3 (ADR 0085 d8): *lead-integrate's exit 2* reads a Lead error before its routes.
+const LEAD_FIRST = "A Lead error comes first (§ 4.5 *Lead error*): a stderr line that contains `usage:` (argparse's, S1), or `set-aside`'s `lead error:` line (S4: step 4's merge-task set-aside given the wrong file, `--repo` or moment), is the lead's own command, redone as its step writes it; the route below is taken only at its bound."
 const RULES = ['s7', 'kept', 'narrowed', 'lane-hold', 'needs-you', 'merge-task', 'task-scoped', 'moving-doc', 'wait-clauses',
   'exit2', 'watchdog', 'reason-table', 'repair-adrs']
 
@@ -201,6 +204,7 @@ function check(f) {
     c65.includes('no `--max-review-rounds` when the task\'s value is invalid, § 3'),
     s3.includes('A task whose resolved `max_review_rounds` is invalid is read with no `--max-review-rounds` wherever `inputs` takes it')]
   fail('exit2', !order.every((o, i) => exit2P.includes(collapse(o)) && (i === 0 || before(exit2P, collapse(order[i - 1]), collapse(o)))) ||
+    !before(exit2P, LEAD_FIRST, collapse(order[1])) || !f.li.includes('print(f"lead-integrate {args.cmd}: lead error: {e}", file=sys.stderr)') ||
     !leadBullet.includes('or a `lead-integrate.py` verb on a task that holds no lane exits 2 with neither an `engine-snapshot:` nor a `task note unreadable:` line') ||
     s7.includes('origin unreachable while integrating') ||
     !exit2Bullet.includes('the *Lane hold*') ||
@@ -335,6 +339,8 @@ test('control: a lane-site exit 2 routed to § 7, or the marker clause dropped, 
   only('execute', '  - A line holding `task note unreadable:` is that task\'s alone', '  - A line holding an unreadable note is that task\'s alone', 'exit2')
   only('li', 'raise EnvError(f"{NOTE_UNREADABLE} {e}")', 'raise EnvError(str(e))', 'exit2')
   only('execute', ' (none when N is invalid, § 3; an exit 2: *lead-integrate\'s exit 2*)', '', 'exit2')
+  only('execute', ` ${LEAD_FIRST}`, '', 'exit2')
+  only('li', 'print(f"lead-integrate {args.cmd}: lead error: {e}", file=sys.stderr)', 'print(f"lead-integrate {args.cmd}: {e}", file=sys.stderr)', 'exit2')
 })
 
 test('control: an absolute live-lead claim, a silence list off SILENCE_JUDGED, a launchd fallback back, or nothing-watches dropped, fails watchdog', () => {

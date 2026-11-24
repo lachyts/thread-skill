@@ -988,6 +988,158 @@ M=$(cnt ha)
 ok "$(arr 2026-10-05T10:20:00Z)" 0 "its next block (new feedback) is retried again"
 ok "$(since ha "$M")" "auto-retry:ar2" "a second auto-retry of the same decided task records no second race-decided"
 
+echo "== 27. a Lead error at the merge step (p55-3, ADR 0085 d8): no set-aside, no retry spent, one line, one relaunch (rollout le)"
+# The p54-6 incident replayed: the task's retries are spent (2 of 2), and its integrate call comes back set aside on the
+# merge step's anchor STOP, which names the anchor ANCHOR_RECIPE gives. reconcile reads it as a Lead error (site
+# merge-step): the note stays review, nothing is set aside or spent, the lane frees, one `lead-error` line is written,
+# and `next` queues it for Integration again (the one relaunch). Side rollout le, so ro's legs and leg 24 are untouched.
+H40=$A40; TB40=eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee; R40=dddddddddddddddddddddddddddddddddddddddd
+MB40=ffffffffffffffffffffffffffffffffffffffff
+D_CARRIES="integration: merge step STOP: anchor $H40 carries a merge — ANCHOR_RECIPE gives $R40"
+D_MISMATCH="integration: merge step STOP: anchor mismatch: recorded $R40, passed $H40 — pass the recorded anchor"
+D_BASE="integration: merge step STOP: taskBase $TB40 is not merge-base($H40, origin/main) = $MB40 — pass the task's own base"
+RRPY="$HERE/../../_shared/scripts/run_record.py"
+lerow() {  # lerow <slug> <diag> [anchor json] [metrics json] [needsHuman]: a blocked integrate set-aside row file
+  python3 - "$TMP/lerow-$1.json" "$@" <<'PY'
+import json, sys
+out, slug, diag = sys.argv[1:4]
+extra = sys.argv[4:] + ["", "", ""]
+anchor = json.loads(extra[0]) if extra[0] else {"headSha": "a" * 40, "taskBase": "e" * 40}
+metrics = json.loads(extra[1]) if extra[1] else {"startedAt": "2026-10-05T10:01+00:00", "finishedAt": "2026-10-05T10:03:00Z"}
+row = {"slug": slug, "status": "blocked", "prUrl": "https://github.com/o/r/pull/50", "reviewRoundsUsed": 1, "rung": "",
+       "blockerDiagnosis": diag, "needsHuman": extra[2] or None,
+       "integration": {"outcome": "set-aside", "path": "integrator", "anchor": anchor, "headSha": "", "baseSha": "",
+                       "triggers": [], "reason": diag, "metrics": metrics}}
+json.dump({"rolloutSlug": "le", "tasks": [row]}, open(out, "w"))
+PY
+  echo "$TMP/lerow-$1.json"
+}
+leup() {  # leup <slug> [frontmatter lines…]: a review task on le that holds the lane
+  local s=$1; shift
+  mkt "$s" le review "pr: $PR/50" "ready: 2026-10-05T09:00+00:00" "$@"
+  rrs mark-integrating --tasks "$s" --tasks-dir "$V" --now "$NOW" >/dev/null
+}
+leplant() {  # leplant <slug> <json fields>: a lead-error line already in le's record
+  python3 "$RRPY" emit --rollout le --task "$1" --kind lead-error --json "$2" >/dev/null
+}
+lecount() { since le 0 'd["kind"] == "lead-error" and d["task"] == "'"$1"'"' | tr ' ' '\n' | grep -c true; }
+LEROW='{"finishedAt":"2026-10-05T10:03:00Z","startedAt":"2026-10-05T10:01+00:00"}'   # sorted, as since() prints it
+mkro le "parallel_ceiling: 2" "auto_retries: 2"
+leup l1 "auto_retries_used: 2"
+M=$(cnt le)
+out=$(row "$(lerow l1 "$D_CARRIES")" 2026-10-05T10:05:00Z); rc=$?
+ok "$rc" 0 "27a: reconcile exits 0"
+ok "$out" "l1: lead error (merge-step 1/3): passed $H40, the engine names $R40; no set-aside, no retry spent; back to step 1" \
+  "27a: its line names the passed anchor and the one the engine names"
+ok "$(fm l1 status)|$(fm l1 integrating)|$(fm l1 auto_retries_used)" "status: review|<none>|auto_retries_used: 2" \
+  "27a: the note stays review, integrating: removed, the retry counter untouched (2 of 2)"
+ok "$(grep -c '^## Blocker diagnosis\|^## Integration log' "$V/l1.md")" 0 "27a: no Blocker diagnosis run, no Integration log line"
+ok "$(since le "$M")" "lead-error:l1 lane-freed:l1" "27a: one lead-error line and the lane freed, no set-aside"
+ok "$(since le "$M" '[d["site"], d["n"], d["bound"], "over" in d, d["call"], d["row"], d["passed"], d["named"]] if d["kind"] == "lead-error" else d["release"]')" \
+  "[\"merge-step\",1,3,false,\"integrate\",$LEROW,\"$H40\",\"$R40\"] \"halt\"" "27a: site merge-step, n 1 of 3, its row, passed and named"
+nx=$(rrs next --rollout "$V/le.md" --tasks-dir "$V" --running "" --now "$NOW" --dry-run 2>/dev/null)
+ok "$(printf '%s' "$nx" | python3 -c 'import json,sys; d=json.load(sys.stdin); print([d["awaitingIntegration"].count("l1"), [e["slug"] for e in d["setAside"]]])')" \
+  "[1, []]" "27a: next queues it for Integration once (the one relaunch) and sets nothing aside"
+ok "$(python3 "$LI" inputs --note "$V/l1.md" | python3 -c 'import json,sys; d=json.load(sys.stdin); print(d["autoRetry"], d["autoRetryWhy"].startswith("not set aside ("))')" \
+  "False True" "27a: inputs reads no automatic retry: not set aside"
+
+echo "== 27b. the other two STOP texts, each with its own passed value"
+leup l2; leup l3
+ok "$(row "$(lerow l2 "$D_MISMATCH")")" "l2: lead error (merge-step 1/3): passed $H40, the engine names $R40; no set-aside, no retry spent; back to step 1" \
+  "27b: anchor mismatch: passed the head, named the recorded anchor"
+ok "$(row "$(lerow l3 "$D_BASE")")" "l3: lead error (merge-step 1/3): passed $TB40, the engine names $MB40; no set-aside, no retry spent; back to step 1" \
+  "27b: taskBase not merge-base: passed the task base, named the merge-base"
+ok "$(fm l2 status)|$(fm l3 status)" "status: review|status: review" "27b: neither is set aside"
+
+echo "== 27c. a row is recorded once: a replay, a replay under the redo, a cut first pass"
+M=$(cnt le)
+ok "$(row "$TMP/lerow-l1.json")" "l1: lead error (merge-step 1/3) already recorded for this row; no change" "27c: a replay writes no second line"
+ok "$(fm l1 status)|$(fm l1 auto_retries_used)|$(grep -c '^## Blocker diagnosis' "$V/l1.md")|$(since le "$M")" "status: review|auto_retries_used: 2|0|" \
+  "27c: the replay leaves the note review, no diagnosis, the counter unchanged, nothing recorded"
+rrs mark-integrating --tasks l1 --tasks-dir "$V" --now "$NOW" >/dev/null
+M=$(cnt le)
+row "$TMP/lerow-l1.json" >/dev/null
+ok "$(fm l1 integrating)|$(since le "$M")" "integrating: 2026-10-05T10:00+00:00|" "27c: a replay under the redo leaves its integrating: and adds no lane-freed"
+leup l4
+leplant l4 "{\"site\":\"merge-step\",\"n\":1,\"bound\":3,\"call\":\"integrate\",\"row\":$LEROW,\"passed\":\"$H40\",\"named\":\"$R40\"}"
+M=$(cnt le)
+ok "$(row "$(lerow l4 "$D_CARRIES")")" "l4: lead error (merge-step 1/3) already recorded for this row; its cut first pass finished: integrating: removed, lane freed" \
+  "27c: a cut first pass is finished"
+ok "$(fm l4 integrating)|$(fm l4 status)|$(since le "$M")|$(lecount l4)" "<none>|status: review|lane-freed:l4|1" \
+  "27c: integrating: removed, one lane-freed, and still one lead-error line"
+
+echo "== 27d. fail closed: each is an ordinary set-aside"
+lefail() {  # lefail <slug> <label> <diag> [anchor] [metrics] [needsHuman]: a lane holder whose row sets it aside as today
+  local s=$1 label=$2 m; shift 2
+  leup "$s"; m=$(cnt le)
+  row "$(lerow "$s" "$@")" >/dev/null
+  ok "$(fm "$s" status)|$(since le "$m")" "status: blocked|lane-freed:$s set-aside:$s" "27d: $label: set aside as today, no lead-error line"
+}
+lefail lf1 "the named sha equals the passed anchor" "integration: merge step STOP: anchor $H40 carries a merge — ANCHOR_RECIPE gives $H40"
+lefail lf2 "a STOP that names no value to pass" "integration: merge step STOP: anchor $H40 is not an ancestor of audit-fix/lf2's head $R40 (rewritten?)"
+lefail lf3 "no metrics.startedAt" "$D_CARRIES" "" '{"finishedAt":"2026-10-05T10:03:00Z"}'
+lefail lf4 "a question for a person" "$D_CARRIES" "" "" "Which anchor?"
+lefail lf5 "a STOP that disagrees with the row's anchor" "$D_CARRIES" "{\"headSha\":\"$C40\",\"taskBase\":\"$TB40\"}"
+leup lf6
+: > "$TMP/le-file"
+THREAD_EVENTS_DIR="$TMP/le-file/events" python3 "$SCRIPT" reconcile --result "$(lerow lf6 "$D_CARRIES")" --tasks-dir "$V" --now "$NOW" >/dev/null 2>&1
+ok "$(fm lf6 status)|$(grep -c '^## Blocker diagnosis' "$V/lf6.md")" "status: blocked|1" "27d: an unreadable Run record: set aside as today"
+
+echo "== 27e. the bound: the third in one session reads over and sets aside as today; another session's lines count only in total"
+leup l5
+for k in 1 2; do leplant l5 "{\"site\":\"command\",\"n\":$k,\"bound\":3}"; done
+M=$(cnt le)
+out=$(row "$(lerow l5 "$D_CARRIES")")
+has "$out" "l5: lead error (merge-step 3/3): at the bound, so no redo: set aside as before" "27e: the third says it is at the bound"
+ok "$(fm l5 status)|$(since le "$M")" "status: blocked|lead-error:l5 lane-freed:l5 set-aside:l5" "27e: its line, then today's set-aside"
+ok "$(since le "$M" 'd["over"] if d["kind"] == "lead-error" else None' | cut -d' ' -f1)" "true" "27e: the third line reads over: true"
+M=$(cnt le)
+row "$TMP/lerow-l5.json" >/dev/null
+ok "$(since le "$M")|$(lecount l5)" "|3" "27e: its replay writes no second line"
+leup l6
+for k in 1 2; do leplant l6 "{\"site\":\"command\",\"n\":$k,\"bound\":3,\"session\":\"other\"}"; done
+has "$(row "$(lerow l6 "$D_CARRIES")")" "l6: lead error (merge-step 1/3)" "27e: another session's two lines do not count toward n"
+ok "$(rrs lead-error --rollout "$V/le.md" --tasks l6 --site command --dry-run </dev/null | python3 -c 'import json,sys; d=json.load(sys.stdin); print(d["n"], d["total"])')" \
+  "2 4" "27e: … and do count toward total"
+
+echo "== 27f. --no-verdict reads the same Lead error; --dry-run writes nothing"
+leup l7
+M=$(cnt le)
+has "$(rrs reconcile --result "$(lerow l7 "$D_CARRIES")" --tasks-dir "$V" --now "$NOW" --no-verdict)" "l7: lead error (merge-step 1/3)" \
+  "27f: --no-verdict gives the same Lead error"
+ok "$(fm l7 status)|$(since le "$M")" "status: review|lead-error:l7 lane-freed:l7" "27f: … with the same writes"
+leup l8
+M=$(cnt le)
+ok "$(rrs reconcile --result "$(lerow l8 "$D_CARRIES")" --tasks-dir "$V" --now "$NOW" --dry-run)" \
+  "l8: lead error (merge-step 1/3): passed $H40, the engine names $R40; no set-aside, no retry spent; back to step 1 (dry-run)" "27f: --dry-run prints its line"
+ok "$(fm l8 integrating)|$(since le "$M")" "integrating: 2026-10-05T10:00+00:00|" "27f: … and writes nothing"
+for frag in 'anchor mismatch: recorded $X, passed $A — pass the recorded anchor' 'carries a merge — ANCHOR_RECIPE gives $R' \
+            'is not merge-base($A, $D) = $MB — pass the task'"'"'s own base'; do
+  ok "$(grep -c -F -- "$frag" "$HERE/../task.workflow.js" | awk '{print ($1 > 0)}')" 1 "27: \"$frag\" is the engine's merge_stop text (LEAD_ERROR_STOPS)"
+done
+
+echo "== 28. the lead-error verb (sites args-refusal, pre-check and command)"
+lev() { rrs lead-error --rollout "$V/le.md" "$@"; }
+M=$(cnt le)
+ok "$(printf 'thread:args-refused: verifySlot: missing\nmore\n' | lev --tasks l9 --site args-refusal --call task)" \
+  '{"rollout": "le", "task": "l9", "site": "args-refusal", "n": 1, "bound": 3, "over": false, "total": 1}' "28: its JSON line"
+ok "$(since le "$M" '[d["task"], d["site"], d["n"], d["bound"], d["call"], d["evidence"], "over" in d, "session" in d]')" \
+  '["l9","args-refusal",1,3,"task","thread:args-refused: verifySlot: missing",false,false]' "28: its line: evidence the first line, no session unset"
+lev --tasks l9 --site pre-check </dev/null >/dev/null
+ok "$(CLAUDE_CODE_SESSION_ID=s9 lev --tasks l9 --site command </dev/null)" \
+  '{"rollout": "le", "task": "l9", "site": "command", "n": 1, "bound": 3, "over": false, "total": 3}' "28: another session counts from 1"
+ok "$(lev --tasks l9 --site command </dev/null)" '{"rollout": "le", "task": "l9", "site": "command", "n": 3, "bound": 3, "over": true, "total": 4}' \
+  "28: the third in this session is over the bound"
+ok "$(since le "$M" 'd.get("over")' | tr ' ' '\n' | tail -1)|$(since le "$M" 'd.get("session")' | tr ' ' '\n' | sed -n 3p)" 'true|"s9"' \
+  "28: the over line reads over: true; a session's line carries it"
+ok "$(lev --site command </dev/null)" '{"rollout": "le", "task": null, "site": "command", "n": 1, "bound": 3, "over": false, "total": 1}' \
+  "28: a command of no task counts under the rollout"
+out=$(THREAD_EVENTS_DIR="$TMP/le-file/events" lev --tasks l9 --site command </dev/null 2>"$TMP/le-err"); rc=$?
+ok "$rc|$out" "1|" "28: an unreadable or unwritable events dir: exit 1, nothing on stdout"
+has "$(cat "$TMP/le-err")" "no Lead error recorded; take the site's old route" "28: … its ERROR line says take the old route"
+M=$(cnt le)
+ok "$(lev --tasks l9 --site merge-step </dev/null >/dev/null 2>&1; echo $?)|$(since le "$M")" "2|" "28: --site merge-step is no choice (exit 2)"
+
 echo "== 23. an unwritable events dir changes no exit, stdout or non-record stderr"
 S="$TMP/s23"
 # scenario <events dir> <transcript>: a fresh vault at the same path, every verb once, each call's rc and stdout

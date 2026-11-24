@@ -20,6 +20,36 @@ names it as the only way to build either launch. A task-level round-budget stamp
 `budgetError` (exit 0, `args: null`, the lead's own set-aside row, ADR 0048); a fault of the rollout or the machine is its
 exit 2. `call` joins the Engine snapshot guard, since its args carry paths built from its own root.
 
+Built so far: item 8, by p55-3 (`thread-skill-p55-3-a-stop-the-lead-caused-is-the-leads-to-redo`), and the three
+lead-caused halts *Left to the build* named become Lead errors (execute § 4.5 **Lead error (ADR 0085 d8).**):
+- **D1, the sites.** (a) an *Args refusal*; (b) § 4's pre-check mismatch (`args.verifySlot`, `args.securityCheck`),
+  only when a second `verify-timeout` still prints the entry's line (a moved line is an operator's edit: today's halt,
+  no line); (c) an integrate row whose merge step STOPped on the value it was passed while naming another (the three
+  `merge_stop` texts `anchor mismatch`, `carries a merge — ANCHOR_RECIPE gives` and `is not merge-base`, held to the
+  row's `integration.anchor`, the named sha 40 hex and another), read by `reconcile` itself; (d) a loop command that
+  never ran, by four signatures on the lead's own command: S1 exit 2 with `usage:`, S2 exit 2 with `can't open file`,
+  S3 the shell's 126 or 127, S4 `set-aside`'s `lead error:`. Never one: an `engine-snapshot:` exit 2, or `verify`
+  once its `<out>.rc` exists. A Lead error is read before any route the skill gives a command's exit.
+- **D2, the three halts.** The *Args refusal* halt and § 4's two pre-check halts are Lead errors, a halt only at the
+  bound.
+- **D3, the redo, in place.** Record it, re-read the step, then: (a) loop step 1; (b) the args rebuilt and checked
+  again; (c) step 1, where step 1.4's `prepare` then `call` builds the launch; (d) the command as the step writes it.
+  No set-aside row, no retry counter, no halt, no `## Needs you` item.
+- **D4, the bound.** `LEAD_ERROR_BOUND` = 3 per task per lead session (`CLAUDE_CODE_SESSION_ID`), a taskless one under
+  the rollout. Every Lead error writes its line; from the third it reads `over: true`, there is no redo, and until
+  p55-5 wires the hand-over the stop takes its site's route from before: the § 7 halt for (a) and (b), the engine's
+  set-aside row for (c), the exit's own route for (d).
+- **D5, the line.** One Run record `lead-error` line per Lead error, {site, n, bound, over?, session?, call?,
+  evidence?, row?, passed?, named?} (run_record.py), written by `reconcile-rollout.py lead-error` (sites (a), (b) and
+  (d), the lead's call) and by `reconcile` (site (c)); the weekly Reflection lists each (`lead-error` friction), never
+  alerted.
+- **D6, merge-task's reason is the engine's.** `lead-integrate.py set-aside --repo <repoPath> --merge-task <F>`
+  reads the code from merge-task's sentinel and cuts the reason from `<F>`, merge-task's own output, with
+  `reconcile-rollout.py`'s constants; every mistake of the lead's typing is a `lead error:` line, exit 2. The stdin
+  form stays for every other lead-written set-aside.
+- **D7, a row is recorded once.** Site (c) is keyed on the integrate row's `metrics.startedAt` and `finishedAt`: a
+  replay writes no second line and never sets the task aside, finishing only a first pass cut short.
+
 ## Context
 
 One lead session (`22a01d17`) led `thread-skill-rollout-2026-11-12` from 12 Nov 11:16 to 17 Nov 22:31 AEDT: five and a
@@ -113,11 +143,15 @@ How each is built is technical, and is the list under *Decided for him (overturn
   - a Lead error's Run record line and the bound on repeats; whether the lead-caused halts that stand today (item 8's
     *In the code* note: the *Args refusal* halt and § 4's two pre-check halts) become Lead errors; and the rewording of
     execute's "a lead bug" at those sites (§ 4.5's **Args refusal (p32-1)** and § 7's halt list), a wording
-    CONTEXT.md's **Lead error** entry lists under _Avoid_ (p55-3);
+    CONTEXT.md's **Lead error** entry lists under _Avoid_ (p55-3; built, its Status above);
+  - at a Lead error's bound (its line's `over: true`) the lead hands over in place of the interim route p55-3 left
+    (the site's old halt, set-aside or exit route), and `lead-error`'s `total` (every session's count) stops a
+    hand-over loop on a refusal every fresh lead repeats (p55-5; the seam is `over`, `total` and
+    `reconcile-rollout.py`'s `_lead_errors()`);
   - ADR 0076's in-place amendment note (its d3, d4 and Decided for Lachy 4) and CONTEXT.md's **Waiting list** wording,
     when p55-5 builds the row.
-- Until those tasks land, nothing here runs: CONTEXT.md's **Lead hand-over** and **Lead error** entries say "not yet
-  built", and its **Waiting list** entry still reads as serial chains only.
+- Until those tasks land, nothing here runs: CONTEXT.md's **Lead hand-over** entry says "not yet built", and its
+  **Waiting list** entry still reads as serial chains only. Its **Lead error** entry is built (p55-3).
 
 ## Decided for him (overturnable)
 
@@ -169,12 +203,14 @@ wrong, and he can overturn any. The numbers carry on from the Decision's two rul
    (execute § 4.5 steps 3 and 1.2). A task's own call is still built by the lead (§ 4).
 8. **A stop the lead caused is a Lead error.** It is redone from the values the engine names, with no retry spent and
    never a set-aside; and a set-aside's reason is always the engine's own text, never the lead's summary. Why: ruling
-   2, and the retry rule read a lead's summary as a human's. *In the code:* the lead types a set-aside's reason today
-   (`lead-integrate.py set-aside`, on stdin). Three lead-caused stops already have a path of their own, and each is a
-   § 7 halt of the whole rollout, never a set-aside: the *Args refusal* halt (`engine refused the args of [[<slug>]]`)
-   and § 4's two pre-check halts (`args.verifySlot`, `args.securityCheck`). Execute § 7 calls each "a lead bug", fixed
-   by a re-invoke. p55-3 builds the Lead error and the engine's own reason text; whether those three halts become Lead
-   errors is listed under *Left to the build*.
+   2, and the retry rule read a lead's summary as a human's. *In the code:* built by p55-3 (Status above). A Lead error
+   is execute § 4.5's **Lead error (ADR 0085 d8).**: its four sites, its signatures, its redo in place and its bound
+   (`LEAD_ERROR_BOUND`, 3 per task per lead session), each recorded as one Run record `lead-error` line. The three
+   lead-caused § 7 halts (the *Args refusal*'s `engine refused the args of [[<slug>]]` and § 4's two pre-check halts)
+   are Lead errors, a halt only at the bound, and execute no longer calls them "a lead bug". A merge-task set-aside's
+   reason is the engine's own text: `lead-integrate.py set-aside --merge-task` cuts it from merge-task's output; the
+   lead still types the reason of every other set-aside it writes (`prepare`'s, a dead call's, a decline's, the RACE
+   landing tail's), on stdin.
 9. **His pause takes over** a hand-over's drain, as it does an Engine catch-up's. Why: the drain is the engine's own,
    never a pause he made. *In the code:* execute § Pausing's paragraph **His pause over an Engine catch-up.**
    (`catch-up --abort --why "his pause"`) is the rule today; p55-5 gives the hand-over's drain the same.

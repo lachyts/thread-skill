@@ -215,7 +215,7 @@ const HUMAN_FIX = ['For each `set-aside` item whose `movedBy` is `unrecorded`, r
   'is Lachy\'s sign-off with no `gate-signed` line: trace it as a sign-off `ask`',
   'A Human fix (ADR 0035) in `## Needs you`, `## Integration log` or the rollout note\'s `## Notes` is traced like a mid-run ask',
   'When none of them says what moved it, name it as unexplained']
-const KINDS8 = 'of nine kinds (`ask`, `set-aside`, `retry`, `takeout`, `descope`, `repair`, `escape`, `churn`, and a serial chain\'s `restart`)'
+const KINDS8 = 'of ten kinds (`ask`, `set-aside`, `retry`, `takeout`, `lead-error`, `descope`, `repair`, `escape`, `churn`, and a serial chain\'s `restart`)'
 // A serial chain in the weekly span (p27-2, ADR 0040): step 10 scores it through serial-score.py, never a knob, and step
 // 11 reads its friction by the chain's rules.
 const SERIAL_S10 = ['scores it through `serial-score.py`', 'never with fold-journals, the settings or score.py', 'never makes it a knob candidate']

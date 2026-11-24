@@ -409,7 +409,23 @@ Subcommands:
       integrator reads the same `## Approved plan` from the note itself (p27-1). Kept out of `inputs`, which
       every status and repair read prints. Read-only.
 
-  set-aside --note N --kind integration|revise-stopped|own     (the reason on stdin)
+  set-aside --note N (--kind integration|revise-stopped|own | --repo R --merge-task F)     (--kind: the reason on stdin)
+      Exactly one mode: --kind with the reason on stdin (every lead-written set-aside but merge-task's), or --repo and
+      --merge-task (p55-3, ADR 0085 d8: execute § 4.5 step 4's merge-task set-aside, rows 1, 2, 4, 8 and the signal
+      row), where the lead types neither the code nor the reason. --merge-task reads the code from
+      R/.claude/merge-task.status (absent: `missing`) and cuts the reason from F, merge-task's own output (stdout and
+      stderr together: the file the harness names for its background launch, or Codex's
+      <R>/.claude/integration/<slug>.merge-task.out), with reconcile-rollout.py's own constants (_merge_task_reason):
+      failed:1 its cause from the last `ERROR:` line (rr.ERROR_LINE_RE) to the end, kind integration with
+      `merge-task exit 1, GitHub-side: ` when rr._merge_task_infra_stop, else kind own with `merge-task: `;
+      failed:2 the last `ERROR: merge-task args:` line, kind own, `merge-task: <it>`; failed:4 the text after the
+      last `set-aside reason: `, kind integration; failed:8 `merge-task exit 8 three times: <the last non-blank
+      line>`, kind integration; failed:143, 130, 129 or missing `merge-task signalled twice (<code>): <the last "last
+      wait:" line, else the last non-blank line that is no shell kill notice>`, kind integration. Each mistake of the
+      lead's typing is `lead-integrate set-aside: lead error: <why>` on stderr, exit 2, nothing on stdout (execute
+      § 4.5 *Lead error*, signature S4): F unreadable, an R that is not the rollout's Project root (`call`'s check), a
+      code the table sets nothing aside on (ok, 3, 5, 6, 7, 11, 12, failed:abort, failed:git-env:*), an output that
+      lacks its code's marker. Both modes, or neither, is argparse's usage error.
       The lead's own set-aside row, for `reconcile-rollout.py reconcile --result -`: {rolloutSlug,
       tasks:[{slug, taskPath, scope, status: blocked, prUrl, blockerDiagnosis, reviewHistory, leadSetAside}]},
       with no `integration` key (so no Integration-log line) and no rung (so reconcile keeps the note's
@@ -429,7 +445,8 @@ Subcommands:
 
 Exit codes: 0 a verdict (or verify finished; its own exit is the rc; shards --jobs: an id reduced), 1 refused (push,
 undo, prepare without integrating:, revert's guard, mac's refused end of a verdict; shards --jobs: an unreadable FILE or a roll-up not proven), 3 no id
-reduced (shards --jobs), 2 usage or environment (an exit 2 from _load_note reads `task note unreadable: …`, p29-7;
+reduced (shards --jobs), 2 usage or environment, or set-aside --merge-task's `lead error:` (p55-3, a Lead error the lead
+redoes) (an exit 2 from _load_note reads `task note unreadable: …`, p29-7;
 execute § 4.5 *lead-integrate's exit 2* routes each exit 2 by verb and site), or the Engine snapshot guard (ADR 0043:
 prepare, set-aside, revert and call (both forms: it prints paths built from this root, verifySlot.script and
 securityCheck.script) first ask
@@ -647,6 +664,12 @@ class TaskScoped(Exception):
 
 class Retryable(Exception):
     """Exit 8: nothing decided; retry after a backoff."""
+
+
+class LeadError(Exception):
+    """Exit 2 with `lead-integrate <verb>: lead error: <why>` on stderr and nothing on stdout: a mistake of the lead's
+    own typing (p55-3, ADR 0085 d8; execute § 4.5 *Lead error*, signature S4), which the lead redoes as the step writes
+    it. Raised only by set-aside --merge-task."""
 
 
 def _scrubbed_env():
@@ -3836,11 +3859,106 @@ def _carried_reason(note):
     return f"{rr.LAST_REAL_REASON_MARK}Blocker diagnosis run {top['n']}, {stamp}): {body}"
 
 
+# set-aside --merge-task (p55-3, ADR 0085 d8): merge-task's own sentinel and output, read by the engine so the lead types
+# no code and no reason. MERGE_TASK_SENTINEL is merge-task.sh's result file under the Project root; the sentinel codes
+# step 4's table sets a task aside on are MERGE_TASK_ASIDE_CODES (a missing file reads `missing`, a signal's re-run's).
+MERGE_TASK_SENTINEL = (".claude", "merge-task.status")
+MERGE_TASK_SIGNALS = ("143", "130", "129")
+MERGE_TASK_ASIDE_CODES = (("failed:1", "failed:2", "failed:4", "failed:8") + tuple("failed:" + c for c in MERGE_TASK_SIGNALS)
+                          + ("missing",))
+SET_ASIDE_REASON_MARK = "set-aside reason: "                     # merge-task.sh's exit-4 line (its set_aside)
+MERGE_TASK_ARGS_RE = re.compile(r"\s*(?:merge-task:\s*)?ERROR: merge-task args:")   # its four exit-2 argument texts
+# A shell's notice that it killed a job (bash `… Terminated: 15 …`, zsh `zsh: terminated …`): never merge-task's last line.
+KILL_NOTICE_RE = re.compile(r"(?:[\w./-]+: (?:line \d+: )?)?(?:\d+\s+)?(?:terminated|killed|hangup|interrupt)\b", re.I)
+
+
+def _merge_task_reason(code, text, out):
+    """(kind, reason) of step 4's merge-task set-aside, cut from merge-task's own output `text` (stdout and stderr
+    together, CRLF and trailing blanks dropped) by the sentinel `code`, with reconcile-rollout.py's own constants:
+      failed:1  the cause, from the last `ERROR:` line (rr.ERROR_LINE_RE) to the end; a stop on GitHub's side
+                (rr._merge_task_infra_stop) is kind integration, `merge-task exit 1, GitHub-side: <cause>`
+                (rr.MERGE_TASK_GITHUB_OPENING), else kind own, `merge-task: <cause>`;
+      failed:2  the last `ERROR: merge-task args:` line, kind own, `merge-task: <it>`;
+      failed:4  the text after the last `set-aside reason: `, kind integration (it starts `integration: `);
+      failed:8  kind integration, `merge-task exit 8 three times: <the last non-blank line>`
+                (rr.MERGE_TASK_EXIT8_OPENING);
+      failed:143|130|129 or missing  kind integration, `merge-task signalled twice (<code>): <the last "last wait:"
+                line, else the last non-blank line that is no shell kill notice>` (`(no output)` when there is none).
+    An output that lacks the marker its code needs is a LeadError (`out` names the file)."""
+    lines = [l.rstrip() for l in text.replace("\r\n", "\n").replace("\r", "\n").split("\n")]
+    while lines and not lines[-1].strip():
+        lines.pop()
+    if code == "failed:1":
+        at = [i for i, l in enumerate(lines) if rr.ERROR_LINE_RE.match(l)]
+        if not at:
+            raise LeadError(f"{out} holds no `ERROR:` line, which merge-task's failed:1 prints; pass its own output file")
+        cause = "\n".join(lines[at[-1]:]).strip()
+        if rr._merge_task_infra_stop(cause):
+            return "integration", f"{rr.MERGE_TASK_GITHUB_OPENING} {cause}"
+        return "own", cause if cause.lower().startswith("merge-task:") else f"merge-task: {cause}"
+    if code == "failed:2":
+        hits = [l.strip() for l in lines if MERGE_TASK_ARGS_RE.match(l)]
+        if not hits:
+            raise LeadError(f"{out} holds no `ERROR: merge-task args:` line: any other exit 2 is step 4's row 2 Lane "
+                            "hold, never a set-aside")
+        return "own", hits[-1] if hits[-1].lower().startswith("merge-task:") else f"merge-task: {hits[-1]}"
+    if code == "failed:4":
+        hits = [l[l.rfind(SET_ASIDE_REASON_MARK) + len(SET_ASIDE_REASON_MARK):].strip() for l in lines
+                if SET_ASIDE_REASON_MARK in l]
+        if not hits or not hits[-1]:
+            raise LeadError(f"{out} holds no `{SET_ASIDE_REASON_MARK}` line, which merge-task's failed:4 prints; pass "
+                            "its own output file")
+        return "integration", hits[-1]
+    if code == "failed:8":
+        if not lines:
+            raise LeadError(f"{out} holds no line, which merge-task's failed:8 prints; pass its own output file")
+        return "integration", f"{rr.MERGE_TASK_EXIT8_OPENING} {lines[-1].strip()}"
+    signal = code[len("failed:"):] if code.startswith("failed:") else code
+    waits = [l.strip() for l in lines if l.strip().startswith(rr.MERGE_TASK_LAST_WAIT_MARK)]
+    rest = [l.strip() for l in lines if l.strip() and not KILL_NOTICE_RE.match(l.strip())]
+    last = waits[-1] if waits else rest[-1] if rest else "(no output)"
+    return "integration", f"{rr.KILL_OPENING} ({signal}): {last}"
+
+
+def _merge_task_set_aside(path, note, repo, out):
+    """set-aside --merge-task's (kind, reason): --repo held to the rollout's Project root (as `call` holds it), the
+    sentinel read from <repo>/.claude/merge-task.status (absent: `missing`) and the reason cut from the output file `out`
+    (_merge_task_reason). Each mistake of the lead's typing is a LeadError: a --repo that is not the Project root, a
+    sentinel code step 4's table sets nothing aside on (ok, 3, 5, 6, 7, 11, 12, failed:abort, failed:git-env:*), an
+    output file it cannot read, an output that lacks its code's marker. No rollout note beside the task note is the
+    rollout's fault, EnvError, as for `call`."""
+    ro = _rollout_note_of(path, note)
+    if ro is None:
+        raise EnvError(f"no rollout note for [[{path.stem}]]: its rollout: names none beside {path}; nothing written")
+    root = rr._project_root(ro)
+    if root is None or os.path.realpath(str(root)) != os.path.realpath(os.path.expanduser(repo)):
+        raise LeadError(f"--repo {repo} is not [[{ro.path.stem}]]'s Project root ({root or 'none'})")
+    sentinel = Path(os.path.realpath(os.path.expanduser(repo))).joinpath(*MERGE_TASK_SENTINEL)
+    try:
+        code = sentinel.read_text(errors="replace").strip() or "missing"
+    except FileNotFoundError:
+        code = "missing"
+    except OSError as e:
+        raise EnvError(f"cannot read {sentinel}: {_one_line(e)}")
+    if code not in MERGE_TASK_ASIDE_CODES:
+        raise LeadError(f"{sentinel} reads {code!r}: step 4's table sets nothing aside on it; route its own row")
+    try:
+        text = Path(os.path.expanduser(out)).read_text(errors="replace")
+    except OSError as e:
+        raise LeadError(f"cannot read the merge-task output {out}: {_one_line(e)}; pass the file the harness named for "
+                        "its launch")
+    return _merge_task_reason(code, text, out)
+
+
 def cmd_set_aside(args):
     path, note = _load_note(args.note)
-    reason = sys.stdin.read().rstrip("\r\n")
-    if not reason.strip():
-        raise EnvError("set-aside: the reason (on stdin) is empty")
+    if args.merge_task is not None:
+        # The kind is the sentinel's, read by the verb, so it stands in for --kind below (the row's leadSetAside too).
+        args.kind, reason = _merge_task_set_aside(path, note, args.repo, args.merge_task)
+    else:
+        reason = sys.stdin.read().rstrip("\r\n")
+        if not reason.strip():
+            raise EnvError("set-aside: the reason (on stdin) is empty")
     inp = task_inputs(path, note)
     if args.kind == "integration":
         diag = integration_marker("set-aside", reason, inp["history"])
@@ -3997,9 +4115,14 @@ def main(argv=None):
     pl = sub.add_parser("plan", help="the task note's approved plan, for a seeded revise's resume.plan")
     pl.add_argument("--note", required=True)
 
-    sa = sub.add_parser("set-aside", help="the lead's own set-aside row (reason on stdin) for reconcile --result -")
+    sa = sub.add_parser("set-aside", help="the lead's own set-aside row for reconcile --result -: --kind with the reason "
+                        "on stdin, or --repo and --merge-task, merge-task's set-aside cut from its own output (p55-3)")
     sa.add_argument("--note", required=True)
-    sa.add_argument("--kind", required=True, choices=["integration", "revise-stopped", "own"])
+    sa.add_argument("--kind", default=None, choices=["integration", "revise-stopped", "own"])
+    sa.add_argument("--repo", default=None, help="with --merge-task: the rollout's Project root, whose "
+                    ".claude/merge-task.status gives the code")
+    sa.add_argument("--merge-task", default=None, metavar="F", help="merge-task's output file (stdout and stderr): the "
+                    "verb reads the sentinel and cuts the reason itself (execute § 4.5 step 4)")
 
     rv = sub.add_parser("revert", help="the RACE revert (ADR 0046): open, find or land the revert PR of a RACE's merge")
     rv.add_argument("--repo", required=True)
@@ -4020,6 +4143,10 @@ def main(argv=None):
         sh.error("--job-id and --whole go with --jobs, and --jobs needs at least one --job-id")
     if args.cmd == "call" and args.revise and (args.row is not None or args.after is not None):
         cl.error("--revise takes no --row or --after: a seeded revise has no approving row and no Integration route")
+    if args.cmd == "set-aside" and (args.kind is None) == (args.merge_task is None and args.repo is None):
+        sa.error("give exactly one mode: --kind (the reason on stdin), or --repo and --merge-task")
+    if args.cmd == "set-aside" and args.kind is None and (args.merge_task is None or args.repo is None):
+        sa.error("--merge-task and --repo go together")
     if args.cmd in GUARDED:
         refusal = _engine_guard(args.note, getattr(args, "tasks_dir", None))
         if refusal:   # ADR 0043: before any git call; nothing fetched, merged or printed
@@ -4044,6 +4171,9 @@ def main(argv=None):
     except Refused as e:
         print(f"lead-integrate {args.cmd}: refused: {e}", file=sys.stderr)
         return 1
+    except LeadError as e:
+        print(f"lead-integrate {args.cmd}: lead error: {e}", file=sys.stderr)
+        return 2
     except EnvError as e:
         print(f"lead-integrate {args.cmd}: {e}", file=sys.stderr)
         return 2

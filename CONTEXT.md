@@ -1842,9 +1842,19 @@ through time, from attention to merged PRs. Terms only — no implementation.
   flag a script does not take, a script path that is not there), which the
   lead redoes from the values the engine names and no task pays for: it
   spends none of the task's retries and is never a set-aside, so it never
-  reaches Lachy. Not an **Agent-fixable block** (an agent's stop, which the
-  automatic retry budgets) nor a **Stop** (the run halting) (ADR 0085; not
-  yet built: Phase 55). _Avoid_: launch failure, lead bug, retry.
+  reaches Lachy. Four sites (execute § 4.5 *Lead error*): an Args refusal,
+  a pre-check mismatch the args make, a merge step's anchor STOP on the
+  pair it was passed (reconcile reads it itself), and a loop command that
+  never ran (`usage:`, `can't open file`, the shell's 126 or 127, or
+  `set-aside`'s `lead error:`). Each writes one Run record `lead-error`
+  line; from the third per task in one lead session (`LEAD_ERROR_BOUND`)
+  the line reads `over: true` and the stop takes its site's old route,
+  until the **Lead hand-over** takes it. A set-aside's reason after a
+  merge-task stop is the engine's, cut from merge-task's own output
+  (`set-aside --merge-task`), never the lead's words. Not an
+  **Agent-fixable block** (an agent's stop, which the automatic retry
+  budgets) nor a **Stop** (the run halting) (ADR 0085 d8, built by p55-3).
+  _Avoid_: launch failure, lead bug, retry.
 - **Stalled rollout** — a rollout with work it could do and nothing moving:
   its lead, session or Mac stopped, or a hold froze more than it threatens
   (ADR 0048): a recorded halt narrower than the work beside it. A wait that is

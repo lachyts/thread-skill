@@ -1,14 +1,17 @@
-// A pre-dispatch args refusal halts the entry once and is never a *Lost call* (p32-1). Pins the prose an LLM lead follows
-// in skills/execute/SKILL.md: § 4.5's *Args refusal* (an error whose text contains the engine's sentinel
-// `thread:args-refused`, matched by contains, for a call or a resume of any kind: the canary check, the runId and any
-// handle dropped, an integrate call's lane freed with `free-lane … || true` while the note keeps `integrating:`, no
-// set-aside row, the error line printed, the halt, then a fresh call by *Restart routing* or step 1.4's `prepare`);
+// A pre-dispatch args refusal is a Lead error the lead redoes, a halt only at its bound (p55-3, ADR 0085 d8), and is never a
+// *Lost call* (p32-1). Pins the prose an LLM lead follows in skills/execute/SKILL.md: § 4.5's *Lead error* (its place
+// right before *Args refusal*, its four signatures, the precedence sentence, the bound against reconcile-rollout.py's
+// LEAD_ERROR_BOUND and the interim route at the bound); § 4.5's *Args refusal* (an error whose text contains the engine's
+// sentinel `thread:args-refused`, matched by contains, for a call or a resume of any kind: the canary check, the runId
+// and any handle dropped, an integrate call's lane freed with `free-lane … || true` while the note keeps `integrating:`,
+// no set-aside row, the error line printed, the Lead error and its redo by *Restart routing* or step 1.4's `prepare`);
 // *Lost call*'s exclusion in its definition, its dead-call bullet and its git-env-hold bullet; the lead's three
 // decision points for a call that comes back (step 2, the integrate call's return, § 5's resume), each sending an error
 // that contains the sentinel to *Args refusal* before its *Lost call* clause; § Room stop item 6 and *Lost call*'s
 // room-stop bullet, each excluding such an error from room-stopped; § 3.7's fifth *Can no longer resume* case; § 4's
 // verifySlot check before the stamps (its halt, its integrate `free-lane`, the resume exemption) and the three launch
-// sequences that name it (step 1.2's seeded revise, step 1.3, the integrate call); the *Run record*'s free-lane bullet; § 7's three halts,
+// sequences that name it (step 1.2's seeded revise, step 1.3, the integrate call); the *Run record*'s free-lane bullet; § 7's three halts
+// (each a Lead error's bound),
 // each listed under ADR 0048's *Whole-rollout halts kept* and matched by reconcile-rollout.py's WHOLE_HALT_PATTERNS (so the
 // Watchdog's `moving` reads it as a wait on Lachy, never `stalled`); § 3's `verify-timeout` exit 4 and its shape
 // without `verifySlots`; and no "reads as a *Lost call*" left. The engine half (the sentinel on every refusal) is pinned
@@ -64,6 +67,28 @@ function wholeHalts(rr) {
   return [...lines.slice(i + 1, j).join('\n').matchAll(/r"((?:[^"\\]|\\.)*)"/g)].map((m) => new RegExp('^' + m[1].replace('{rollout}', 'ro')))
 }
 
+// § 4.5's *Lead error* (p55-3, ADR 0085 d8), its pinned clauses.
+const LE_HEAD = '**Lead error (ADR 0085 d8).**'
+const LE_SITES = ["(a) an *Args refusal* (below: an error that contains `thread:args-refused`)",
+  "(b) § 4's pre-check mismatch (`args.verifySlot`, `args.securityCheck`), only when a second `reconcile-rollout.py verify-timeout --rollout <rollout-note>` still prints this entry's line, so the args are what differ",
+  '(c) an integrate row whose merge step STOPped on a value it was passed while naming another',
+  "(d) a loop command that never ran, read on the lead's own engine command by four signatures"]
+const LE_SIGNATURES = ['**S1** exit 2 and a stderr line that contains `usage:` (under `|| true` the line alone counts)',
+  "**S2** exit 2 and a stderr line that contains `can't open file` (python's, for a script path that is not there)",
+  "**S3** the shell's exit 126 or 127 for the command typed (`command not found`, `No such file or directory`, `Permission denied`)",
+  // S4 and LE_NEVER are pinned without the script's name: this file reads the prose, never the script (tests/fast-tier.map)
+  'set-aside` exit 2 whose stderr line holds `lead error:`']
+const LE_NEVER = "Never a Lead error: an exit 2 whose line starts `engine-snapshot:` (re-run it from the root it names, § 1.5), and `"
+const LE_NEVER_VERIFY = " verify` once its `<out>.rc` exists (its exit is the verifier's)."
+const LE_FIRST = "**A Lead error is read first**, before any route the skill gives a command's exit (a halt, a *Lane hold*, a *Set aside*, a red, `|| true`)."
+const LE_CMD = "`printf '%s' \"<the refusal's or the stderr's first line>\" | python3 ${CLAUDE_PLUGIN_ROOT}/skills/execute/scripts/reconcile-rollout.py lead-error --rollout <rollout-note> [--tasks <slug>] --site args-refusal|pre-check|command [--call task|revise|integrate]`"
+const LE_REDO = ["(a) back to loop step 1, where *Restart routing*, or step 1.4's `prepare` then `call`, builds the fresh launch",
+  '(b) rebuild the args (§ 4 for a task call, `call` again for a seeded revise or an integrate call) and check again',
+  '(c) back to step 1: the note reads `review`, so step 1.4 runs `prepare` then `call`, and the lead types no sha',
+  '(d) run the command as the step writes it', 'No set-aside row, no retry counter, no halt, no `## Needs you` item.']
+const LE_INTERIM = "until p55-5 wires the lead's hand-over (ADR 0085 *Left to the build*), the stop takes the route its site had before, (a) and (b) the § 7 halt with today's reason, (c) the engine's set-aside row (reconcile writes it), (d) the exit's existing route"
+const LE_EXIT1 = "A `lead-error` exit 1 (its line not written: the Run record unreadable or unwritable) is no Lead error: the site's old route stands"
+
 // Named failures; [] means every rule holds.
 function check(skill, rr = realRr) {
   const fails = []
@@ -94,8 +119,9 @@ function check(skill, rr = realRr) {
 
   // args-refusal: the paragraph sits right before *Lost call*; it covers every call kind and its resumes; it matches the
   // sentinel by contains; it is never a Lost call; the six steps in order (the check, the drops, the integrate
-  // free-lane with `integrating:` kept, no row, the printed line, the halt); then the fresh call by Restart routing, the
-  // integrate call's `prepare` re-entry by step 1.4, and the signed-gate warning printed at the halt.
+  // free-lane with `integrating:` kept, no row, the printed line, the Lead error with its halt only at the bound); then the
+  // redo's fresh call by Restart routing, the integrate call's `prepare` re-entry by step 1.4, and the signed-gate warning
+  // printed before the redo.
   const lines = s45raw.split('\n')
   const iAr = lines.findIndex((l) => l.startsWith('**Args refusal (p32-1).**'))
   const iNext = lines.findIndex((l, k) => k > iAr && /^\*\*[A-Z`]/.test(l))
@@ -110,13 +136,30 @@ function check(skill, rr = realRr) {
     !ar.includes('writes no set-aside row, reconciles nothing and resumes nothing') ||
     !ar.includes("prints the error's first line verbatim above the status line") || !ar.includes(HALT) ||
     !inOrder(ar, ["(1) runs the canary `check`", '(2) drops the runId', '(3) for an integrate call only', '(4) writes no set-aside row',
-      "(5) prints the error's first line", '(6) halts']) ||
-    !ar.includes("the next entry's *Restart routing* holds no runId, so it makes a fresh call with args built afresh (§ 4)") ||
-    !ar.includes("the next entry's step 1.4 takes its task through step 3's `prepare`") ||
-    !ar.includes("For a refused § 3.7 signed-gate resume, the lead prints § 3.7's fresh-call warning above the halt line") ||
-    !ar.includes('A fresh call refused again halts again') ||
+      "(5) prints the error's first line", '(6) takes it as a Lead error']) ||
+    !ar.includes('`lead-error --site args-refusal --call task|revise|integrate`') || !ar.includes('only at its bound does it halt (§ 7)') ||
+    !ar.includes("the redo's *Restart routing* holds no runId, so it makes a fresh call with args built afresh (§ 4)") ||
+    !ar.includes("the redo's step 1.4 takes its task through step 3's `prepare`") ||
+    !ar.includes("For a refused § 3.7 signed-gate resume, the lead prints § 3.7's fresh-call warning before the redo") ||
+    !ar.includes('A fresh call refused again is the next Lead error, and the one at the bound is the halt') ||
     !ar.includes('`securityCheck`, `unreachablePaths`, `task.arms`, `task.unreachable`, `integration` or `task.resume`')) {
     fails.push('args-refusal')
+  }
+
+  // lead-error (p55-3, ADR 0085 d8): § 4.5's *Lead error* sits right before *Args refusal*, with only its own two labels
+  // between; it names the four sites, the four signatures and what is never one, the precedence sentence, the lead's
+  // `lead-error` command and the redo per site, the bound against reconcile-rollout.py's LEAD_ERROR_BOUND, the interim
+  // route at the bound until p55-5's hand-over, and `lead-error`'s exit 1.
+  const iLe = lines.findIndex((l) => l.startsWith(LE_HEAD))
+  const labels = iLe < 0 || iAr < iLe ? [] : lines.slice(iLe, iAr).filter((l) => /^\*\*[A-Z`]/.test(l))
+  const le = labels.length ? collapse(lines.slice(iLe, iAr).join('\n')) : ''
+  const bound = (rr.match(/^LEAD_ERROR_BOUND = (\d+)$/m) ?? [])[1]
+  if (labels.length !== 2 || !labels[1].startsWith('**A Lead error is read first**') ||
+    !LE_SITES.every((s) => le.includes(s)) || !LE_SIGNATURES.every((s) => le.includes(s)) || !le.includes(LE_NEVER) || !le.includes(LE_NEVER_VERIFY) ||
+    !le.includes(LE_FIRST) || !le.includes(LE_CMD) || !LE_REDO.every((s) => le.includes(s)) ||
+    !bound || !le.includes(`\`LEAD_ERROR_BOUND\` (${bound}) Lead errors per task per lead session`) ||
+    !le.includes(LE_INTERIM) || !le.includes(LE_EXIT1)) {
+    fails.push('lead-error')
   }
 
   // lost-exclusion: *Lost call*'s definition, its dead-call bullet and its git-env-hold bullet each send an error that
@@ -132,12 +175,12 @@ function check(skill, rr = realRr) {
   // routing-sites: the lead's three decision points for a call that comes back each send an error that contains the
   // sentinel to *Args refusal* before their *Lost call* clause, so none resumes a refused call: step 2 (the check it ran
   // first is the refusal's step (1), never run twice), the integrate call's return (whatever the check's exit; its
-  // step (3) frees the lane) and § 5's resume procedure (never resumed).
-  const ST2_AR = `An error that contains ${SENTINEL}: *Args refusal*, never a *Lost call*: the check this step ran first is its step (1), never run twice, and it halts the entry.`
+  // step (3) frees the lane) and § 5's resume procedure (never resumed); each names the Lead error (a halt only at its bound).
+  const ST2_AR = `An error that contains ${SENTINEL}: *Args refusal*, never a *Lost call*: the check this step ran first is its step (1), never run twice, and it is a Lead error (a halt only at its bound).`
   const ST2_LOST = 'Any other error, no row, or a transient row after a usage limit: *Lost call*.'
-  const INT_AR = `An error that contains ${SENTINEL}, whatever the check's exit: *Args refusal*, never a *Lost call*: the check run first is its step (1), never run twice, its step (3) frees the lane while the note keeps \`integrating:\`, and it halts the entry.`
+  const INT_AR = `An error that contains ${SENTINEL}, whatever the check's exit: *Args refusal*, never a *Lost call*: the check run first is its step (1), never run twice, its step (3) frees the lane while the note keeps \`integrating:\`, and it is a Lead error (a halt only at its bound).`
   const INT_LOST = 'Any other error, or no row, after a check that exited 0: *Lost call*'
-  const S5_AR = `An error that contains ${SENTINEL} is an *Args refusal* (§ 4.5), never resumed: the engine refused the call's args before any dispatch, and the same args are refused again.`
+  const S5_AR = `An error that contains ${SENTINEL} is an *Args refusal* (§ 4.5), never resumed: the engine refused the call's args before any dispatch, and the same args are refused again, so it is a Lead error (a halt only at its bound).`
   const S5_LOST = 'If a call dies otherwise or its notification never arrives (§ 4.5 *Lost call*), re-run § 2.5'
   if (!step2.includes(ST2_AR) || !before(step2, ST2_AR, ST2_LOST) || /An error, no row, or a transient row/.test(step2) ||
     !integrateCall.includes(INT_AR) || !before(integrateCall, INT_AR, INT_LOST) || /An error, or no row, after a check/.test(integrateCall) ||
@@ -155,10 +198,10 @@ function check(skill, rr = realRr) {
   }
 
   // cannot-resume: § 3.7 counts five cases, the fifth the engine's refusal of a resumed call's args, whose fresh call
-  // the next entry's Restart routing makes after the halt.
+  // its Lead error's redo makes (Restart routing again), a halt only at its bound.
   if (!cannot.includes('Five cases') || /Four cases/.test(cannot) ||
     !cannot.includes("or the engine refuses the resumed call's args (*Args refusal*, § 4.5: e.g. a call launched without `verifySlot` before 5.0.0, resumed on a refusing engine)") ||
-    !cannot.includes("that fresh call is made by the next entry's *Restart routing*, after the halt")) {
+    !cannot.includes("that fresh call is made by its Lead error's redo (§ 4.5 *Lead error*: *Restart routing* again, a halt only at its bound)")) {
     fails.push('cannot-resume')
   }
 
@@ -180,9 +223,9 @@ function check(skill, rr = realRr) {
   // applies is routing's result: a resume is exempt), and the integrate call on `call`'s printed `args`, after
   // `mark-integrating` and before the canary arm.
   const CHECK = "§ 4's *Check verifySlot before the stamps*"
-  const SEEDED = `A launch is: § 2.5, § 3's config, ${CHECK} (a missing or different \`args.verifySlot\` writes nothing and halts), stamp \`status: in_progress\``
+  const SEEDED = `A launch is: § 2.5, § 3's config, ${CHECK} (a missing or different \`args.verifySlot\` writes nothing: a Lead error, a halt only at its bound), stamp \`status: in_progress\``
   const ST13 = `§ 2.5, § 3's config, for a restart resolve *Restart routing* (it writes nothing), then ${CHECK} for a fresh call (a start, or the own call or seeded revise that routing chose for a restart; a resume is exempt), stamp \`status: in_progress\``
-  const INT = `${CHECK} runs on \`call\`'s printed \`args\`, after step 3's \`mark-integrating\` and before the canary arm: a mismatch frees the lane and halts.`
+  const INT = `${CHECK} runs on \`call\`'s printed \`args\`, after step 3's \`mark-integrating\` and before the canary arm: a mismatch is a Lead error (\`call\` again, the lane still held), and only at its bound, or on an operator's edit, does it free the lane and halt.`
   if (!seeded.includes(SEEDED) || !before(seeded, SEEDED, '`mark-started --tasks <slug>') ||
     !step13.includes(ST13) || !before(step13, ST13, 'mark-started --tasks <slug>') ||
     !integrateCall.includes(INT) || !before(integrateCall, INT, 'The canary arm (*Git-env canary*: `--kind integrate`) runs right before its launch') ||
@@ -204,8 +247,8 @@ function check(skill, rr = realRr) {
     fails.push('halts')
   }
 
-  // kept: each of the three is a whole-rollout halt by design (a missing script every entry repeats, a lead bug in the
-  // args § 4 builds for every call), so ADR 0048 lists it under § 7's *Whole-rollout halts kept* and WHOLE_HALT_PATTERNS
+  // kept: each of the three is a whole-rollout halt by design (a missing script every entry repeats, a Lead error at its
+  // bound in the args § 4 builds for every call), so ADR 0048 lists it under § 7's *Whole-rollout halts kept* and WHOLE_HALT_PATTERNS
   // matches its reason; without both, `moving` reads the halt beside pending work as `stalled`.
   const keptEvery = lineAt(section(skill, S7), '- *Threatens every task*')
   const pats = wholeHalts(rr)
@@ -225,7 +268,7 @@ function check(skill, rr = realRr) {
   // prose-sites: no args refusal reads as a *Lost call* any more: the integrate call's prUrlError and rung clauses and
   // *Verify slots* name an *Args refusal*.
   if (/reads as a \*Lost call\*/.test(skill) ||
-    !integrateCall.includes('with `prUrlError` as the reason, since the engine would refuse that call before dispatch (an *Args refusal*, which halts the entry)') ||
+    !integrateCall.includes('with `prUrlError` as the reason, since the engine would refuse that call before dispatch (an *Args refusal*, a Lead error)') ||
     !integrateCall.includes("fails the engine's args check before dispatch, an *Args refusal*") ||
     !slotsP.includes('refuses a call without it before any dispatch (an *Args refusal*, above;')) {
     fails.push('prose-sites')
@@ -239,7 +282,7 @@ test('execute § 3, § 3.7, § 4, § 4.5, § 5 and § 7 hold every args-refusal 
 
 // ---- controls: each mutates the real text in one place and must fail with exactly its rule ---------
 
-const RULES = ['args-refusal', 'lost-exclusion', 'routing-sites', 'room-stop', 'cannot-resume', 'pre-check', 'launch-sites', 'free-lane', 'halts', 'kept', 'verify-timeout', 'prose-sites']
+const RULES = ['args-refusal', 'lead-error', 'lost-exclusion', 'routing-sites', 'room-stop', 'cannot-resume', 'pre-check', 'launch-sites', 'free-lane', 'halts', 'kept', 'verify-timeout', 'prose-sites']
 const CONTROLLED = new Set()
 
 function edit(text, from, to) {
@@ -280,11 +323,11 @@ test('control: Lost call without its Args refusal exclusion fails lost-exclusion
 })
 
 test('control: a decision point that sends every error to Lost call again fails routing-sites', () => {
-  only(edit(real, `An error that contains ${SENTINEL}: *Args refusal*, never a *Lost call*: the check this step ran first is its step (1), never run twice, and it halts the entry. Any other error, no row,`,
+  only(edit(real, `An error that contains ${SENTINEL}: *Args refusal*, never a *Lost call*: the check this step ran first is its step (1), never run twice, and it is a Lead error (a halt only at its bound). Any other error, no row,`,
     'An error, no row,'), 'routing-sites', 'step 2')
-  only(edit(real, `An error that contains ${SENTINEL}, whatever the check's exit: *Args refusal*, never a *Lost call*: the check run first is its step (1), never run twice, its step (3) frees the lane while the note keeps \`integrating:\`, and it halts the entry. Any other error, or no row, after a check`,
+  only(edit(real, `An error that contains ${SENTINEL}, whatever the check's exit: *Args refusal*, never a *Lost call*: the check run first is its step (1), never run twice, its step (3) frees the lane while the note keeps \`integrating:\`, and it is a Lead error (a halt only at its bound). Any other error, or no row, after a check`,
     'An error, or no row, after a check'), 'routing-sites', 'integrate return')
-  only(edit(real, `An error that contains ${SENTINEL} is an *Args refusal* (§ 4.5), never resumed: the engine refused the call's args before any dispatch, and the same args are refused again. If a call dies otherwise or`,
+  only(edit(real, `An error that contains ${SENTINEL} is an *Args refusal* (§ 4.5), never resumed: the engine refused the call's args before any dispatch, and the same args are refused again, so it is a Lead error (a halt only at its bound). If a call dies otherwise or`,
     'If a call dies or'), 'routing-sites', '§ 5')
 })
 
@@ -312,9 +355,9 @@ test('control: the pre-check moved after the stamps fails pre-check', () => {
 })
 
 test('control: a launch sequence that no longer names the verifySlot check fails launch-sites', () => {
-  only(edit(real, "A launch is: § 2.5, § 3's config, § 4's *Check verifySlot before the stamps* (a missing or different `args.verifySlot` writes nothing and halts), stamp",
+  only(edit(real, "A launch is: § 2.5, § 3's config, § 4's *Check verifySlot before the stamps* (a missing or different `args.verifySlot` writes nothing: a Lead error, a halt only at its bound), stamp",
     "A launch is: § 2.5, § 3's config, stamp"), 'launch-sites', 'seeded revise')
-  only(edit(real, " § 4's *Check verifySlot before the stamps* runs on `call`'s printed `args`, after step 3's `mark-integrating` and before the canary arm: a mismatch frees the lane and halts.", ''),
+  only(edit(real, " § 4's *Check verifySlot before the stamps* runs on `call`'s printed `args`, after step 3's `mark-integrating` and before the canary arm: a mismatch is a Lead error (`call` again, the lane still held), and only at its bound, or on an operator's edit, does it free the lane and halt.", ''),
     'launch-sites', 'integrate call')
 })
 
@@ -346,10 +389,33 @@ test('control: verifySlots back in the printed shape fails verify-timeout', () =
 })
 
 test('control: the prUrlError clause reading as a Lost call again fails prose-sites', () => {
-  only(edit(real, 'before dispatch (an *Args refusal*, which halts the entry);', 'before dispatch and the refusal reads as a *Lost call*;'), 'prose-sites', 'prUrlError')
+  only(edit(real, 'before dispatch (an *Args refusal*, a Lead error);', 'before dispatch and the refusal reads as a *Lost call*;'), 'prose-sites', 'prUrlError')
 })
 
-test('the rules are all named (12) and each has a control', () => {
-  assert.equal(RULES.length, 12)
+test('control (p55-3): the Lead error paragraph moved after Args refusal fails lead-error', () => {
+  const lines = real.split('\n')
+  const i = lines.findIndex((l) => l.startsWith(LE_HEAD))
+  const j = lines.findIndex((l) => l.startsWith('**Args refusal (p32-1).**'))
+  const block = lines.slice(i, j)
+  const rest = [...lines.slice(0, i), ...lines.slice(j)]
+  const k = rest.findIndex((l) => l.startsWith('**Restart routing**'))
+  rest.splice(k, 0, ...block)
+  only(rest.join('\n'), 'lead-error', 'after Args refusal')
+})
+
+test('control (p55-3): a signature dropped, the precedence sentence, the interim or exit 1 changed fails lead-error', () => {
+  only(edit(real, " **S3** the shell's exit 126 or 127 for the command typed (`command not found`, `No such file or directory`, `Permission denied`);", ''),
+    'lead-error', 'no S3')
+  only(edit(real, '**A Lead error is read first**, before any route', '**A Lead error is read last**, after any route'), 'lead-error', 'read last')
+  only(edit(real, ', (c) the engine\'s set-aside row (reconcile writes it), (d) the exit\'s existing route', ''), 'lead-error', 'no interim for (c), (d)')
+  only(edit(real, ' is no Lead error: the site\'s old route stands', ' is a Lead error too'), 'lead-error', 'exit 1 redone')
+})
+
+test("control (p55-3): a bound the prose and LEAD_ERROR_BOUND disagree on fails lead-error", () => {
+  only(real, 'lead-error', 'LEAD_ERROR_BOUND = 4', edit(realRr, '\nLEAD_ERROR_BOUND = 3\n', '\nLEAD_ERROR_BOUND = 4\n'))
+})
+
+test('the rules are all named (13) and each has a control', () => {
+  assert.equal(RULES.length, 13)
   assert.deepEqual(RULES.filter((r) => !CONTROLLED.has(r)), [])
 })
