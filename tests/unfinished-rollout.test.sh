@@ -3050,7 +3050,7 @@ ok "$rc|$(wj '[w["slug"] for w in d["waiting"]]')|$(wj 'd["next"]')" "0|['wo']|w
   "WL5: a paused, stuck, incomplete or halted chain needs Lachy: off the list"
 scen wl6
 wl
-ok "$rc|$out" '0|{"room": 2, "running": 0, "cap": {"n": 2, "by": "trickle", "why": "no file"}, "waiting": [], "next": null}' \
+ok "$rc|$out" '0|{"room": 2, "running": 0, "cap": {"n": 2, "by": "trickle", "why": "no file"}, "waiting": [], "next": null, "leads": []}' \
   "WL6: an empty vault waits on nothing"
 python3 "$CHECK" waiting --tasks-dir "$S/none" > "$S.out" 2> "$S.err"; rc=$?
 ok "$rc|$(cat "$S.out")" "2|" "WL7: a missing tasks dir is exit 2, with no stdout"
