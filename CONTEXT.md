@@ -1870,7 +1870,7 @@ through time, from attention to merged PRs. Terms only — no implementation.
   the line reads `over: true` and the lead hands over (**Lead hand-over**,
   p55-5) while the task's total over every session is below six; from the
   sixth the stop takes its site's old route, so a refusal every fresh lead
-  repeats stops at two hand-overs. A set-aside's reason after a
+  repeats is handed over once. A set-aside's reason after a
   merge-task stop is the engine's, cut from merge-task's own output
   (`set-aside --merge-task`), never the lead's words. Not an
   **Agent-fixable block** (an agent's stop, which the automatic retry

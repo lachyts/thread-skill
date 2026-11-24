@@ -9,8 +9,8 @@
 #   HO1 next at the count   HO2 drained   HO2b a call the summary lost   HO3 the bound   HO4 his pause
 #   HO5 the listing   HO6 the manual form   HO7 the Reinstate   HO8 a fresh session mid-drain   HO9 join and carry
 #   HO10 a Lead error at its bound   HO11 a second hand-over   HO12 nothing to hand   HO13 identity
-#   HO14 the start stamp
-# (the Waiting list row and the needs-you item are unfinished-rollout.test.sh's; moving's readings
+#   HO14 the start stamp   HO15 an Approved queue's regenerate waits for the fresh lead
+# (the Waiting list row and the needs-you item are reconcile-rollout-hand-over-leads.test.sh's; moving's readings
 # reconcile-rollout-moving.test.sh's; the Stop driver's lines rollout-stop-driver.test.sh's; the ledger's
 # reflect-ledger.test.mjs's; reconcile's merge-step at the bound reconcile-rollout-record.test.sh's.)
 # This suite reads the record, so it keeps its own THREAD_EVENTS_DIR and ignores THREAD_TEST_EVENTS_DIR.
@@ -158,6 +158,11 @@ ok "$(q "$J" '[d["handOver"]["state"], d["handOver"]["open"], d["halt"]]')" \
   '["drained",[{"task":"ho2b-a","runId":"wf_ho2b_a","call":"task"}],"hand-over"]' "HO2b: left out of --running: drained, open names it with its runId"
 J=$(nx 2b s2 --running ho2b-a --now 2026-11-25T10:06:00Z)
 ok "$(q "$J" '[d["handOver"]["open"], d["running"], d["halt"]]')" '[[],["ho2b-a"],"hand-over"]' "HO2b: listed again under paused:, halt is still hand-over"
+mkro 2c ho2c-a; mkt ho2c-a 2c in_progress
+ent 2c s2c --now 2026-11-25T09:00:00Z; started 2c ho2c-a wf_ho2c_a; count 2c s2c 2
+J=$(nx 2c s2c --running "")
+ok "$(q "$J" '[d["handOver"]["state"], d["handOver"]["open"], d["halt"]]')" \
+  '["drained",[{"task":"ho2c-a","runId":"wf_ho2c_a","call":"task"}],"hand-over"]' "HO2b: the one call that starts it and stamps paused: names the lost call too"
 
 echo "== HO3. the bound: past 160 min with work in flight"
 mkro 3 ho3-a ho3-b ho3-c; mkt ho3-a 3 in_progress; mkt ho3-b 3 open; mkt ho3-c 3 review "pr: $PR/3"
@@ -294,6 +299,12 @@ for s in ho10-c ho10-d; do
   ok "$rc|$(cksum < "$V/$s.md")|$(rec 10 | wc -l)" "5|$before|$recs" "HO10 (ii): mark-integrating $s exits 5 and writes nothing"
   has "$out" "HAND-OVER: [[$s]]'s Integration waits" "HO10 (ii): … one HAND-OVER: line"
 done
+# The lane's holder between its integrate call and its merge: reconcile removed its `integrating:` stamp and the record's
+# lane is still held on it (the lead's verify and merge-task run), so it stays in the drain, never held.
+setfm ho10-b integrating -
+J=$(nx 10 s10 --running "" --now 2026-11-25T10:02:00Z)
+ok "$(q "$J" '[d["handOver"]["state"], d["handOver"]["held"], d["awaitingIntegration"], d["halt"], d["pausedNow"]]')|$(fmc 10 paused)" \
+  '["draining",["ho10-c","ho10-d"],["ho10-b"],null,false]|<none>' "HO10 (ii): the lane's holder awaiting, its stamp reconciled away: in the drain, not held, no paused:"
 ok "$(mi ho10-b >/dev/null 2>&1; echo $?)" 0 "HO10: the lane's holder re-takes it (a Base moved re-run passes)"
 setfm ho10-b status done; rr free-lane --tasks ho10-b --tasks-dir "$V" >/dev/null 2>&1
 J=$(nx 10 s10 --running "" --now 2026-11-25T10:30:00Z)
@@ -379,5 +390,22 @@ ok "$(fmc 13d paused_for)|$(plog 13d | wc -l | tr -d ' ')" "hand-over|1" "HO13 (
 nx 13d - --running "" --now 2026-11-25T10:07:00Z >/dev/null
 out=$(cp_ 13d - --now 2026-11-25T10:08:00Z); rc=$?
 ok "$rc|$(fmc 13d paused)|$(plog 13d | tail -1)" "0|<none>|- 2026-11-25T10:08+00:00 hand-over: taken by session none" "HO13 (d): … and a session-less clear-pause clears it"
+
+echo "== HO15. an Approved queue: a hand-over is no run mark; halt hand-over under its paused:, regenerate after the Reinstate"
+mkdir -p "$TMP/bin"   # a stub gh: the gating PR reads MERGED
+printf '%s\n' '#!/usr/bin/env bash' 'echo "{\"state\":\"MERGED\",\"mergedAt\":null,\"url\":\"https://github.com/o/r/pull/202\"}"' > "$TMP/bin/gh"
+chmod +x "$TMP/bin/gh"
+mkro 15 ho15-a -- 'hold_until: {pr: o/r#202, merged: true}' 'on_merge: regenerate'; mkt ho15-a 15 open
+ent 15 s15 --now 2026-11-25T09:00:00Z; count 15 s15 2
+J=$(nx 15 s15 --running "" --gh-bin "$TMP/bin/gh")
+ok "$(q "$J" '[d["halt"], d["handOver"]["state"], d["onMerge"]["action"], d["holdUntil"][0]["held"]]')|$(fmc 15 on_merge)|$(fmc 15 paused)" \
+  "[\"hand-over\",\"drained\",\"regenerate\",true]|regenerate|$S0" "HO15: under its paused: the halt is hand-over, the hold and on_merge kept (no plain release)"
+out=$(rr carry --from "$V/$(N 15).md" --tasks-dir "$V" --dry-run 2>&1); rc=$?
+ok "$rc" 2 "HO15: carry still refuses the handing-over approved queue"
+has "$out" "is handing over to a fresh lead" "HO15: … saying why"
+ent 15 s-new --now 2026-11-25T11:00:00Z; cp_ 15 s-new --now 2026-11-25T11:00:00Z >/dev/null
+J=$(nx 15 s-new --running "" --now 2026-11-25T11:01:00Z --gh-bin "$TMP/bin/gh")
+ok "$(q "$J" '[d["halt"], d["onMerge"]["action"], d["onMerge"]["members"], d["handOver"]["state"]]')|$(fmc 15 on_merge)" \
+  '["regenerate","regenerate",["ho15-a"],null]|regenerate' "HO15: after the fresh lead's clear-pause its next regenerates: the hand-over's lines are no run mark"
 
 [ "$fail" -eq 0 ] && echo "ALL PASS" || { echo "SOME FAILED"; exit 1; }

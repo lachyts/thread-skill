@@ -77,8 +77,9 @@ Subcommands:
               hand-over`, appends the `draining` line and records `hand-over` outcome drain; its hold reasons read
               `hand-over: draining (a Lead hand-over)`, then `hand-over: waiting for a fresh lead`; drained, it keeps
               `paused_for`, records `paused` mode hand-over and halts "hand-over". Under cause lead-error an awaiting
-              row and an `integrating` row whose lane the Run record shows free are held (`handOver.held`, in neither
-              `awaitingIntegration` nor `integrating`). Past HAND_OVER_DRAIN_MINUTES since its `draining` line with work
+              row and an `integrating` row are held (`handOver.held`, in neither `awaitingIntegration` nor
+              `integrating`) unless the Run record's lane is held on it: that row stays in the drain. Past
+              HAND_OVER_DRAIN_MINUTES since its `draining` line with work
               in flight (a live slug, the record's lane holder, or before `paused:` a row the drain waits on) it stamps
               `paused:`, appends one `bound after` line, records `hand-over` outcome bound and a hard stop
               (_record_hard_stop) and halts "hand-over" at once. A drain another session started (both sessions valid
@@ -799,7 +800,9 @@ Subcommands:
               done or dropped (unless done with `superseded_by:` naming --to: a re-run), or neither paused
               nor never started (or an approved queue whose only marks are ended room stops: approved_unrun), or one
               that has run and is catching up (`paused_for: catch-up`, an Engine catch-up, p54-14: `--from <x> is
-              catching up (an Engine catch-up): it resumes by itself; nothing carried`); a
+              catching up (an Engine catch-up): it resumes by itself; nothing carried`), or one a Lead hand-over
+              stands on (p55-5, whatever approved_unrun reads: `--from <x> is handing over to a fresh lead (a Lead
+              hand-over): it resumes there; nothing carried`); a
               --from with a task an undecided RACE or UNVERIFIED holds (--dry-run
               included; the line names each held slug and `/thread:repair [[<from>]]`); a --from with an
               unacked git-env trip (Git-env hold, below; --dry-run included; `ERROR: carry: --from <stem> holds
@@ -2104,7 +2107,8 @@ Approved queue (p30-4; the grammar is skills/_shared/vault-grammar.md § Approve
 parallel note (_approved_queue). Its writer is `approve-queue`. Once the hold reads MERGED with no error, `next`'s verdict
 (_on_merge_verdict), the first that applies: a done or dropped note releases plainly; an unreadable value fails closed
 (held, `waits: you`, error ON_MERGE_BAD); _approved_marks (the queue's own read of what has run: never_started's marks
-with the Chorus Stage's room-stop lines, ROOM_STOP_LINE_RE, read as no run mark) reading `run` releases it as a plain hold
+with the Chorus Stage's room-stop lines, ROOM_STOP_LINE_RE, and a Lead hand-over's stamps and lines, p55-5, read as no
+run mark) reading `run` releases it as a plain hold
 with a `WARN: on_merge:` line; a room stop that stands holds it (`waits: room-stop`); an `integrating:` stamp whose task
 is in flight (integrating, or a RACE-held lane) holds it (`waits: integration`), one with no Integration in flight reads
 as run; with no linked member left after the project filter (_approved_members) it releases with a WARN; otherwise it
@@ -2174,8 +2178,9 @@ leg.py) heading line. On a linked task note:
 a non-empty `owner:` or `integrating:`. A task's status and its `started:` / `ready:` / `merged:` stamps never
 count, because a carry keeps them. A protocol-3 run shows through the `owner:` its engine stamped on each task
 at dispatch. approved_unrun is the approved queue's widening (Approved queue above): an approved queue whose only marks
-are the Chorus Stage's room stops, each one ended, reads as never started to `carry` (--from), `approve-queue` and
-unfinished-rollout.py; never_started itself is unchanged, and every other reader keeps it.
+are the Chorus Stage's room stops, each one ended, and an ended Lead hand-over's `## Pause log` lines (p55-5; one that
+stands still reads as run) reads as never started to `carry` (--from), `approve-queue` and unfinished-rollout.py;
+never_started itself is unchanged, and every other reader keeps it.
 
 Incomplete (incomplete, read by `next`, `status` and unfinished-rollout.py): a never-started rollout that must
 not run as written. The first that applies:
@@ -3838,17 +3843,21 @@ def _approved_queue(note) -> bool:
 
 def _approved_marks(rollout_note, linked):
     """(kind, detail): the approved queue's own read of what has run (vault-grammar § Approved queue). The Chorus Stage's
-    room stops (ROOM_STOP_LINE_RE, step-boundary.py's lines) are no run mark; every mark never_started counts is,
-    except a task's `integrating:`, read as an Integration in flight. The first that applies:
-      ("run", why): never_started's own marks in its words (`paused:`, `pause_requested`, `completed:`, a
-        `## Completion log` or `## Leg log` heading); a `## Pause log` with no line under it, or with a non-blank line
-        that is no room stop (a hard pause's, a sign-off's); a linked task's valued `owner:`;
+    room stops (ROOM_STOP_LINE_RE, step-boundary.py's lines) are no run mark, and neither is a Lead hand-over (p55-5:
+    the engine's own pause, never a run of his): its stamps while it stands (_handing_over) and its `## Pause log`
+    lines (HAND_OVER_LINE_RE), standing or ended. Every other mark never_started counts is one, except a task's
+    `integrating:`, read as an Integration in flight. The first that applies:
+      ("run", why): never_started's own marks in its words (`paused:` or `pause_requested` that is no hand-over's,
+        `completed:`, a `## Completion log` or `## Leg log` heading); a `## Pause log` with no line under it, or with a
+        non-blank line that is neither a room stop nor a hand-over's (a hard pause's, a sign-off's); a linked task's
+        valued `owner:`;
       ("room-stop", "since <stamp>"): the last room-stop line is a start line, lapsed or not (step-boundary.py end's rule);
       ("integrating", [slug, ...]): the sorted linked tasks that carry a valued `integrating:`;
       ("unrun", ""): none of the above."""
-    if _valued(rollout_note.get("paused")):
+    handing = _handing_over(rollout_note)
+    if _valued(rollout_note.get("paused")) and not handing:
         return "run", f"it carries paused: {_scalar(rollout_note.get('paused'))}"
-    if _truthy_flag(rollout_note.get("pause_requested")):
+    if _truthy_flag(rollout_note.get("pause_requested")) and not handing:
         return "run", "it carries pause_requested"
     if _valued(rollout_note.get("completed")):
         return "run", f"it carries completed: {_scalar(rollout_note.get('completed'))}"
@@ -3861,6 +3870,8 @@ def _approved_marks(rollout_note, linked):
         if not lines:
             return "run", f"it has a {PAUSE_LOG_SECTION} section"
         for line in lines:
+            if HAND_OVER_LINE_RE.match(line):
+                continue
             m = ROOM_STOP_LINE_RE.match(line)
             if not m:
                 return "run", f"it has a {PAUSE_LOG_SECTION} line that is no room stop"
@@ -3881,10 +3892,12 @@ def approved_unrun(rollout_note, linked):
     """(True, '') when nothing has run the rollout, else (False, reason): never_started, widened for an approved queue
     (_approved_queue) whose only marks are the Chorus Stage's room stops, each one ended (_approved_marks reads
     `unrun`). A room stop that still stands reads (False, 'a room stop stands since <stamp>'), and a task's
-    `integrating:` keeps never_started's reason. Read by `carry` (--from), `approve-queue` and unfinished-rollout.py;
-    never_started itself is unchanged, and every other reader keeps it."""
+    `integrating:` keeps never_started's reason. So does a Lead hand-over that stands (_handing_over, p55-5: its
+    `paused:` or `pause_requested`): only once it ended (a fresh lead's `clear-pause`, a lift, his abort) are its
+    `## Pause log` lines the queue's only marks, and it reads unrun. Read by `carry` (--from), `approve-queue` and
+    unfinished-rollout.py; never_started itself is unchanged, and every other reader keeps it."""
     fresh, why = never_started(rollout_note, linked)
-    if fresh or not _approved_queue(rollout_note):
+    if fresh or not _approved_queue(rollout_note) or _handing_over(rollout_note):
         return fresh, why
     kind, detail = _approved_marks(rollout_note, linked)
     if kind == "unrun":
@@ -7999,6 +8012,7 @@ def cmd_next(args) -> int:
     handing = _handing_over(rollout_note)
     # The Run record, parsed only when a hand-over stands (its calls in flight) or a Lead error could be its cause: a
     # record with no `"handOver":true` line holds no such cause, and the count alone decides at LEAD_HANDOVER_COMPACTIONS.
+    # The start below reads it again, so the call that starts a hand-over names its calls in flight too (`open`).
     ho_lines = _record_read(ho_stem) if handing or (compactions["count"] < LEAD_HANDOVER_COMPACTIONS
                                                      and _record_mentions(ho_stem, b'"handOver":true')) else []
     ho_unlanded = [r for r in rows if r["state"] not in OUTSIDE_N and r["state"] != "merged"]
@@ -8033,17 +8047,20 @@ def cmd_next(args) -> int:
         if _session_ok(ho_caller):
             ev["session"] = ho_caller
         _event(ho_stem, HAND_OVER, None, ev, args)
-        handing, ho = True, _hand_over_open(rollout_note)
-    # The lead-error split (D10): under cause lead-error what is in flight goes on to its end and nothing new begins: an
-    # `integrating` row the Run record's lane does not hold (a refused launch's leftover stamp) and every awaiting row are
-    # held, never in `integrating` or `awaitingIntegration`. An unreadable record keeps every `integrating` row in
-    # flight (fail closed to the bound).
+        handing, ho, ho_lines = True, _hand_over_open(rollout_note), _record_read(ho_stem)
+    # The lead-error split (D10): under cause lead-error what is in flight goes on to its end and nothing new begins. A
+    # row the Run record's lane holds is in flight whatever its stamp, as _hand_over_shuts_lane reads it: `integrating`,
+    # or awaiting once reconcile removed its `integrating:` (the lead's verify and merge-task still run), and it stays
+    # in the drain. Every other `integrating` row (a refused launch's leftover stamp) and awaiting row is held, never
+    # in `integrating` or `awaitingIntegration`. An unreadable record keeps every such row in the drain (fail closed
+    # to the bound; `mark-integrating` refuses each).
     if handing and ho is not None and ho["cause"] == "lead-error":
         rec_ = _record_state(ho_stem)
-        keep = [r for r in integrating if rec_ is None or (rec_["lane"] or "") == r["slug"].lower()]
-        kept_ids = {id(r) for r in keep}
-        ho_held = sorted([r for r in integrating if id(r) not in kept_ids] + awaiting, key=_rank)
-        integrating, awaiting = keep, []
+
+        def in_lane(r):
+            return rec_ is None or (rec_["lane"] or "") == r["slug"].lower()
+        ho_held = sorted([r for r in integrating + awaiting if not in_lane(r)], key=_rank)
+        integrating, awaiting = [r for r in integrating if in_lane(r)], [r for r in awaiting if in_lane(r)]
     # The bound (D3): past HAND_OVER_DRAIN_MINUTES since the open `draining` line with work still in flight (a live
     # slug, the Run record's lane holder, or, before `paused:`, a row the drain waits on): `paused:` stamped if it is not
     # there, the `bound after` line (once per hand-over), the Run record's hand-over bound line, and a hard stop's record
@@ -11749,7 +11766,8 @@ def _halt_lane(rollout, slug, args, state):
 LEAD_ERROR_BOUND = 3
 # At its bound a Lead error hands over (p55-5, execute § 4.5 *Lead error*): its `over` line carries `handOver: true` while
 # the task's total, every session's count with this line, is below this; from it on `handOver: false` and the site's old
-# route stands, so a refusal every fresh lead repeats stops at two hand-overs.
+# route stands, so a refusal every fresh lead repeats is handed over once: the fresh lead's third, the task's sixth,
+# takes the old route.
 LEAD_ERROR_HANDOVER_TOTAL = 2 * LEAD_ERROR_BOUND
 LEAD_ERROR_MERGE_STEP = "merge-step"
 LEAD_ERROR_SITES = ("args-refusal", "pre-check", LEAD_ERROR_MERGE_STEP, "command")     # run_record.py's LEAD_ERROR_SITES
@@ -13030,16 +13048,19 @@ def _compaction_stop(note, lines, now):
     """The stop under which a compaction's § 1 re-entry is deferred, never dropped (execute § 1.5 *After a
     compaction*), for the hook and the verb alike; the first that applies, else None:
       "pause"      his pause stands (_pause_stands: the `paused:` stamp or an open `paused` line) and is not the
-                   engine's own (_catching_up, or the open line's mode `catch-up`). A soft pause's drain
-                   (`pause_requested:` with no `paused:`) and an Engine catch-up's pause are no stop: the lead still
-                   works there, and under a catch-up's pause the re-entry makes the move.
+                   engine's own (_catching_up or _handing_over, or the open line's mode `catch-up` or `hand-over`).
+                   A soft pause's drain (`pause_requested:` with no `paused:`), an Engine catch-up's pause and a
+                   Lead hand-over's (p55-5) are no stop: the lead still works there. Under a catch-up's pause the
+                   re-entry makes the move; under a hand-over's `paused:` (the arm waiting on a call in flight) its
+                   Reinstate meets `clear-pause` exit 4 and goes on to step 5's `hand-over` arm.
       "room-stop"  a room stop stands as step-boundary.py `stands` reads it (_room_standing with the Stage's reading
                    as a callable, so the Stage is read only for a held start line past the 6 h bound).
       "halt"       the last open stop after the last lead-entry (_stop_state's `open`) has cause `halt`. Any other
                    open stop keeps the order now: a § 1 entry is what resumes it. Any lead-entry closes a halt, the
                    tick's own (2b) line too, so the verb at the heartbeat never reads this one (cmd_compactions'
                    *A halt at the heartbeat*)."""
-    if _pause_stands(note, lines)[0] and not (_catching_up(note) or _open_pause_mode(lines) == CATCH_UP):
+    if _pause_stands(note, lines)[0] and not (_catching_up(note) or _handing_over(note)
+                                             or _open_pause_mode(lines) in (CATCH_UP, HAND_OVER)):
         return "pause"
     if _room_standing(_last_room_stop(note), now, alive=lambda t: _stage_alive(t)[0]) == 0:
         return "room-stop"
@@ -16023,7 +16044,7 @@ def cmd_carry(args) -> int:
                       "rollout is superseded")
     if not fresh and _catching_up(src_note):
         return refuse(f"--from {src.stem} is catching up (an Engine catch-up): it resumes by itself; nothing carried")
-    if not fresh and _handing_over(src_note):
+    if _handing_over(src_note):   # whatever approved_unrun reads: an Approved queue's hand-over is no run mark
         return refuse(f"--from {src.stem} is handing over to a fresh lead (a Lead hand-over): it resumes there; nothing "
                       "carried")
     held = _race_holds(src_note, linked)
@@ -21636,7 +21657,8 @@ def _open_pause_mode(lines):
 
 
 # ---- hand-over: the Lead hand-over (ADR 0085 d3, d5, d6 and d9, p55-5; the module docstring's `hand-over`) ----------
-# The `## Pause log` lines (vault-grammar § Pause log), each `- <stamp> hand-over: <rest>`, none holding a wikilink:
+# The `## Pause log` lines (vault-grammar § Rollout start stamp, *A Lead hand-over's `## Pause log` lines*), each
+# `- <stamp> hand-over: <rest>`, none holding a wikilink:
 #   draining (<cause>; session <id | none>; count <n>)     `next` starts it (cause compactions | lead-error)
 #   bound after <m> min: stopping <slug> (<runId>), …; lane <slug>    `next` at the drain's bound (once per hand-over)
 #   listed[ (gated)]     stamp-start --hand-over: listed on the Waiting list

@@ -176,11 +176,15 @@ note, on a serial note or on a note with no rollout `hold_until` is read by noth
   Chorus Stage's room-stop lines (execute § Room stop; step-boundary.py's, one regex) are never Lachy's run, so a
   queue whose only marks are room stops, each one ended, reads as unrun to the verdict, to `approve-queue`, to
   `carry` and to unfinished-rollout.py, all through `approved_unrun`. A room stop that stands makes the verdict
-  wait (`waits: room-stop`), and the next loop entry's `end` closes it. His own `paused:` or `pause_requested`, a
-  `## Pause log` line that is no room stop, `completed:`, a `## Completion log` or `## Leg log`, and a task's
-  `owner:` still read as run: the verdict then releases it as a plain hold, with one `WARN: on_merge:` line the
-  lead relays as a needs-you item. A task's `integrating:` is an Integration in flight, and the verdict waits for
-  it (`waits: integration`); one with no Integration in flight reads as run.
+  wait (`waits: room-stop`), and the next loop entry's `end` closes it. A Lead hand-over (p55-5) is the engine's own
+  pause, so it is no run mark either: its `paused:` or `pause_requested` while it stands (`paused_for: hand-over`)
+  and its `## Pause log` lines, standing or ended. Under its `paused:` the verdict keeps the hold and `next` halts
+  `hand-over`; the fresh lead's `next` regenerates after its `clear-pause`. While it stands `approved_unrun` still
+  reads the queue as run (`carry` refuses it, schedule joins it). His own `paused:` or `pause_requested`, a
+  `## Pause log` line that is neither a room stop nor a hand-over's, `completed:`, a `## Completion log` or
+  `## Leg log`, and a task's `owner:` still read as run: the verdict then releases it as a plain hold, with one
+  `WARN: on_merge:` line the lead relays as a needs-you item. A task's `integrating:` is an Integration in flight,
+  and the verdict waits for it (`waits: integration`); one with no Integration in flight reads as run.
 - **Never carried.** Of an approved queue's keys, `carry` copies only the `hold_until` block: the new note keeps a plain hold, released at its
   first `next`. A plain `--regenerate` of an approved queue drops the approval.
 - **Fails closed, only at the merge.** While the PR is open an unreadable `on_merge` waits as any hold does, and

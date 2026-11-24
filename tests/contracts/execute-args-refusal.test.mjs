@@ -86,7 +86,7 @@ const LE_REDO = ["(a) back to loop step 1, where *Restart routing*, or step 1.4'
   '(b) rebuild the args (§ 4 for a task call, `call` again for a seeded revise or an integrate call) and check again',
   '(c) back to step 1: the note reads `review`, so step 1.4 runs `prepare` then `call`, and the lead types no sha',
   '(d) run the command as the step writes it', 'No set-aside row, no retry counter, no halt, no `## Needs you` item.']
-const LE_INTERIM = "the lead hands over (*Lead hand-over*) while the line's `handOver` is true, that is while the task's `total` (every session's count, this line included) is below `LEAD_ERROR_HANDOVER_TOTAL` (6, twice the bound), so a refusal every fresh lead repeats stops at two hand-overs; from it the line reads `handOver: false` and the stop takes the route its site had before, (a) and (b) the § 7 halt with today's reason, (c) the engine's set-aside row (reconcile writes it), (d) the exit's existing route"
+const LE_INTERIM = "the lead hands over (*Lead hand-over*) while the line's `handOver` is true, that is while the task's `total` (every session's count, this line included) is below `LEAD_ERROR_HANDOVER_TOTAL` (6, twice the bound), so a refusal every fresh lead repeats is handed over once, and the task's sixth Lead error (the fresh lead's third) is not; from it the line reads `handOver: false` and the stop takes the route its site had before, (a) and (b) the § 7 halt with today's reason, (c) the engine's set-aside row (reconcile writes it), (d) the exit's existing route"
 const LE_EXIT1 = "A `lead-error` exit 1 (its line not written: the Run record unreadable or unwritable) is no Lead error: the site's old route stands"
 
 // Named failures; [] means every rule holds.

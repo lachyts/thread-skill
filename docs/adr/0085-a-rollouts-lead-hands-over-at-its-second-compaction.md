@@ -81,7 +81,7 @@ The count of two and the hand-over stay p55-5's: nothing routes on the count yet
   With no stop standing it orders the re-entry at § 1 before the next launch, and the hook writes `told = count`.
   Under his pause, a standing room stop or an open halt the line says to start nothing now and to take the entry that
   ends the stop from § 1 of that text; the count rises and `told` stays, so the order is deferred, never dropped. A
-  soft pause's drain and an Engine catch-up's pause are no stop.
+  soft pause's drain, an Engine catch-up's pause and (p55-5) a Lead hand-over's own pause are no stop.
 - **A deferred order is given once.** The entry that ends the stop takes the order when it is the session's own,
   its `--by` is not `heartbeat` and it is dated after the hook's write (the file's `by: hook` and `at`): the first
   tick after it writes `told = count` and reads `reenter: false`, so the skill file is read once. Otherwise that
@@ -161,9 +161,10 @@ d3, d5, d6, d9).**):
   task's total over every session (this line included) is below `LEAD_ERROR_HANDOVER_TOTAL` (6, twice the bound), else
   `handOver: false` and the site's old route stands. `next` reads such a line of the caller's session after the
   record's last `hand-over` handed line as cause `lead-error`; under it the drain is the surface wait's rule (what is
-  in flight goes on to its end, nothing new begins): an awaiting row and an `integrating:` row whose lane the Run
-  record shows free are held (`handOver.held`), and `mark-integrating` refuses them with exit 5 and one `HAND-OVER:`
-  line. Site (c) at the bound with `handOver` is taken as below it (no set-aside).
+  in flight goes on to its end, nothing new begins): an awaiting row and an `integrating:` row are held
+  (`handOver.held`) unless the Run record's lane is held on it, and `mark-integrating` refuses them with exit 5 and one
+  `HAND-OVER:` line; the lane's holder stays in the drain whatever its stamp (awaiting between its integrate call and
+  its merge). Site (c) at the bound with `handOver` is taken as below it (no set-aside).
 - **D11, the Waiting list row.** `unfinished-rollout.py waiting` gains a top-level `leads` list after `next`: [{slug,
   cwd, title, prompt, harness, since}] for each root parallel note with `paused:`, `paused_for: hand-over`, `start:
   unattended` and a Project root that no fresh lead has opened (a `lead-entry` after its open `paused` line whose
@@ -186,7 +187,10 @@ d3, d5, d6, d9).**):
 - **D16, nothing to hand.** No hand-over starts on a superseded note, nor where the verdict would be `empty`, `done` or
   `complete`; a drain whose last row merges is lifted (`hand-over: lifted (nothing left to hand)`).
 - **D17.** Under the hand-over's `paused:`, `halt` is `hand-over` right after the whole git-env and main-red verdicts,
-  ahead of `regenerate` and the rest.
+  ahead of `regenerate` and the rest. A hand-over is no run mark of an Approved queue (`_approved_marks`: its stamps
+  while it stands, its Pause log lines always), so a queue that has not run keeps its hold and `on_merge:` through
+  it, and the fresh lead's `next` regenerates after its `clear-pause`; while it stands `approved_unrun` still reads
+  the queue as run, so `carry` refuses it and schedule joins it.
 
 **For the Chorus task** (`chorus-the-stage-opens-a-handed-over-rollouts-fresh-lead`, item 11). The interface is
 `waiting`'s `leads`: each row {slug, cwd (the Project root), title, prompt (`/thread:execute [[<slug>]]`, plus
@@ -201,8 +205,7 @@ any `paused:` as his pause and a `done` line as an ended lead, so no resume of t
 Residuals of this build: the /workflows gate is prose the lead follows (no script reads /workflows); the bound costs
 the in-flight context of at most `parallel_ceiling` tasks past 160 minutes; `--gated` rests on the lead's recall
 (p55-4's residual); a session-less lead has no identity; past 45 minutes a listed hand-over asks him to start a session
-even when the Stage only waits for room. Under or after a hand-over the Approved queue's regenerate is never read:
-its `paused:` and Pause log lines are run marks (`_approved_marks`), so D17's order is a guard.
+even when the Stage only waits for room.
 
 ## Context
 

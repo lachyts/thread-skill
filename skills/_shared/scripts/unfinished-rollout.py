@@ -62,7 +62,8 @@ Rules.
   lower-cased, every run of non-alphanumerics turned into `-`, trimmed.
 - Complete: at least one linked task and every one merged (reconcile-rollout.py's queue states).
 - Never started: reconcile-rollout.py's never_started (only execute's own marks), widened for an approved queue whose
-  only marks are the Stage's ended room stops (reconcile-rollout.py's approved_unrun; vault-grammar § Approved queue).
+  only marks are the Stage's ended room stops and an ended Lead hand-over's lines (reconcile-rollout.py's
+  approved_unrun; vault-grammar § Approved queue).
 - Eligible: this project's, and paused (`paused:`) or never started.
 - Catching up (p54-14, ADR 0084 d5): `paused_for: catch-up` on the note with one of its stamps (`pause_requested` or
   `paused:`), an Engine catch-up's drain or move, the engine's own pause (rr._catching_up; a dangling one is none). It
