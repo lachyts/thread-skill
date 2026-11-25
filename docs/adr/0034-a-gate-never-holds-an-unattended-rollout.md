@@ -234,7 +234,9 @@ probes without asking, always.
 - **The test Login.** A credential gate whose text names a Claude Login and no env name passes when every Login it
   names is one of the machine's declared test Logins: `[defaults] test_logins` in `~/.config/thread/rollouts.toml`
   (rollout-settings.py, schema 5), one line, operator-only (ADR 0063 d1's rule: no agent or script writes it, since an
-  agent could otherwise widen its own approval; tune.py refuses an edit that changes it). It fails closed: a deny word
+  agent could otherwise widen its own approval; tune.py refuses an edit that changes it). *(2026-11-24, p56-5: an
+  agent now writes it on his quoted ruling, through `rollout-settings.py declare`: ADR 0063's amendment of that
+  date.)* It fails closed: a deny word
   (a `live` before a probe, run or test excepted), an env name, another credential word beside it, an `@` address, a
   conjunction that joins a second thing (`and`, `or`, `plus`, `as well as`, `along with`, `together with`, `&`, `+`,
   `;`), a plural `Logins`, a Login it cannot name or one not declared asks. It reads no limit, ledger or month line,

@@ -2,8 +2,10 @@
 """tune.py — land the Tunings Lachy picked from a by-hand Reflection, or the knobs the weekly reading lands or reverts on
 its own (ADR 0037 d5), and record each (p15-5, ADR 0032).
 
-python >= 3.8, stdlib only (score.py, which it loads, keeps the same floor). The only writer of rollouts.toml and of
-tunings.jsonl. An edit that adds a key above the file's `schema` raises its top-level `schema` line in the same edit
+python >= 3.8, stdlib only (score.py, which it loads, keeps the same floor). The Reflection's only writer of
+rollouts.toml (inert-paths.py writes only `inert_paths`, a repo's Inert paths; rollout-settings.py `declare`
+writes any other key he has ruled on, Tuning keys included, and this script then reads that value as a hand edit: its
+revert reason prints `a hand edit, left alone`) and the only writer of tunings.jsonl. An edit that adds a key above the file's `schema` raises its top-level `schema` line in the same edit
 (rollout-settings.py's header, ADR 0043): raise_schema(), below. Three callers (ADR 0037 d4-d5): skills/reflect/SKILL.md step 7 runs it exactly once per by-hand
 Reflection that reached its scores; skills/reflect/scripts/close-score.py runs `--record-only --close <kind>` once at
 each rollout's close (its completion ceremony, or its supersede); and SKILL.md step 14 (the weekly reading) runs
@@ -121,8 +123,8 @@ result goes to a temp file in the same directory and must resolve with each pick
 key from `file:defaults`, a repo one from `file:repo`, a Weight key in `weight`), every other rollout key, Weight part
 and Guardrail unchanged, and every
 repo's `inert_paths` (p29-3, ADR 0045: schedule's inert-paths.py `record` and `drop` are its only writers),
-every repo's `test_credentials` (ADR 0063: the operator's alone, no automated writer) and the resolved `[defaults]
-test_logins` (p37-4: the operator's declared test Logins, no automated writer) unchanged.
+every repo's `test_credentials` (ADR 0063: declared on his ruling only, never a Tuning) and the resolved `[defaults]
+test_logins` (p37-4: the operator's declared test Logins, declared on his ruling only, never a Tuning) unchanged.
 
 The reader check (rollout-settings.py's header: a writer that raises the schema runs it), only when the edit raises the
 file's `schema`: a capacity_max Tuning raises it to 4, a Weight Tuning to 6 and an overtime_runs Tuning to 8 (p39-14), an
@@ -537,8 +539,8 @@ _key_line_re = RS._key_line_re
 
 def raise_schema(lines, need, current):
     """`lines` with the top-level `schema` raised to `need` when it is above `current` (the file's, else 1): the
-    module docstring's schema rule, through rollout-settings.py's raise_schema_lines() (the one copy both writers
-    share). Never lowers it; a Stop(2) for a schema line it will not edit."""
+    module docstring's schema rule, through rollout-settings.py's raise_schema_lines() (the one copy every writer of
+    the file shares). Never lowers it; a Stop(2) for a schema line it will not edit."""
     try:
         return RS.raise_schema_lines(lines, need, current)
     except RS.SettingsError as e:
@@ -838,7 +840,8 @@ def _apply(scores, applied, names, repo, config, before, dry_run, auto=None, tas
         for key in ("inert_paths", "test_credentials"):
             if _repo_tables(tmp, key) != _repo_tables(config, key):
                 raise Stop("the edit changes a repo's %s: nothing written" % key, 2)
-        # p37-4: the declared test Logins are the operator's alone (machine-wide, [defaults]): no Tuning moves them.
+        # p37-4: the declared test Logins are declared on his ruling only (machine-wide, [defaults]): no Tuning moves
+        # them.
         if after.get("test_logins") != before.get("test_logins"):
             raise Stop("the edit changes test_logins: nothing written", 2)
         if after["schema"]["file"] > before["schema"]["file"]:

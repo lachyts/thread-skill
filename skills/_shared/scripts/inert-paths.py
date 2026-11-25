@@ -317,7 +317,8 @@ CLI. JSON on stdout for prove and propose (one line), human lines for record and
 
 Importable (lead-integrate.py prepare loads this file lazily, inside its fail-closed try): ProofError, changed(),
 path_test(), prove(), glob_match(), PROSE_EXT, CANDIDATES, PROOF_BUDGET_S, DROP_AFTER, ES, RS, RR; and reader_check()
-(tune.py loads this file lazily for it, when a Tuning raises the schema: p53-5).
+(tune.py loads this file lazily for it, when a Tuning raises the schema: p53-5; rollout-settings.py's `declare` and
+`undo` load it lazily too, at every write: p56-5).
 """
 from __future__ import annotations
 
@@ -4253,7 +4254,8 @@ def live_notes(tasks_dir):
 
 def reader_check(new_file, tasks_dir, who="inert-paths", force=True):
     """(refusals, warnings): each live rollout's engine root asked to read `new_file` (the header's reader check), each
-    line led by `who`. tune.py loads it too (who "tune", force False: it has no --force, so no line offers one)."""
+    line led by `who`. tune.py loads it too (who "tune", force False: it has no --force, so no line offers one), and so
+    do rollout-settings.py's `declare` and `undo` (who "rollout-settings", force False)."""
     notes = live_notes(tasks_dir)
     warns, refusals = [], []
     if notes is None:

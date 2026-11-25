@@ -22,7 +22,15 @@ orient still runs no git. R3 (c) reads the repo's test-credential class through 
 --repo`, which writes nothing (its one git call is a read-only `git remote get-url origin` inside the
 script). The sweep R3 (c) runs reads `[defaults] test_logins` from the same file through
 `rollout-settings.py`'s resolve(repo=None), in process, only when a `credential:` gate line naming a
-Login needs it: read-only, with no git.
+Login needs it: read-only, with no git. A ruled declaration (R3 (c)) is the one write outside the
+vault that is not the grill's docs: `rollout-settings.py declare` writes one line of
+`~/.config/thread/rollouts.toml` and one line of `rollouts.declarations.jsonl` beside it. Its git
+calls are read-only: with `--repo`, `git remote get-url origin`; and on every write its reader check
+(`inert-paths.py`'s `reader_check()`, through `engine-snapshot.py`'s `engine_root()`, `git_primary()`
+and `snapshot_problem()`) runs `git rev-parse` (`--local-env-vars`, `--show-toplevel`,
+`--path-format=absolute --git-common-dir`, `--verify -q HEAD`), `git symbolic-ref -q HEAD` and
+`git status --porcelain --untracked-files=no` in the plugin root, its Primary checkout and each live
+rollout's snapshot.
 
 **Under `--backlog`.** The write surface adds the record note, the trigger file and `wait` lines, each through
 `backlog-orient.py`, and the start stamp through `stamp-start --backlog` (`skills/orient/backlog.md` § B5, § B8).
@@ -205,7 +213,13 @@ Resolving:
   declared test Logins could not be read: those hits carry no `login` and keep the ask; every note
   still printed. Any other credential, or an irreversible gate, still gets § 3.6's ask-ahead
   question in the grill: a sign-off now or none. Asked or recorded here, it is not asked again at
-  schedule. A gate only the Readiness grade names is not R3's to find, since the reshuffle grades nothing:
+  schedule. A ruled declaration is written, never handed back (ADR 0063's 2026-11-24 amendment):
+  when his answer in the grill rules on the declaration itself, in words that name it ("the dummy
+  Login is a test Login"), run `rollout-settings.py declare` with those words quoted exactly and
+  today's date, as schedule § 3.6's paragraph of that name says, name the `declared` line it prints
+  in R5's **Report**, then run the sweep again for that task and handle the hit as it now reads. A
+  sign-off of one gate rules on nothing, and a non-zero exit prints its line and keeps the ask.
+  A gate only the Readiness grade names is not R3's to find, since the reshuffle grades nothing:
   schedule's Pre-flight puts it (schedule § 1.5), and under `--backlog` the run puts it last
   (`skills/orient/backlog.md` § B9).
 

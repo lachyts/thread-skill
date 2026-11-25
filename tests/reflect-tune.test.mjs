@@ -1,4 +1,6 @@
-// skills/reflect/scripts/tune.py — the only writer of rollouts.toml and tunings.jsonl (p15-5, ADR 0032): it edits
+// skills/reflect/scripts/tune.py — the Reflection's only writer of rollouts.toml and the only writer of tunings.jsonl
+// (p15-5, ADR 0032; of the settings file's two other writers, inert-paths.py writes only inert_paths and
+// rollout-settings.py declare any other key Lachy has ruled on, a Tuning key included, read here as a hand edit): it edits
 // only the picked keys, records one `tuning` line per by-hand Reflection, lands and reverts the weekly reading's knobs
 // (p21-7, --auto and --revert), and writes nothing when anything is refused.
 //
@@ -965,7 +967,7 @@ test('KT2 control: an edit that drops another repo\'s inert_paths is refused, no
 })
 
 // ---- KT3: a Tuning never touches a repo's test-credential class (ADR 0063) ------------------------------------------------
-// test_credentials (schema 3) is the operator's alone and lives as ONE line in its repo table: the line-by-line edit keeps
+// test_credentials (schema 3) is declared on his ruling only, never a Tuning, and lives as ONE line in its repo table: the line-by-line edit keeps
 // it byte-identical and inserts after it, an edit whose result changes any repo's class is refused with nothing written
 // (the control patches edit_text, as KT2's does), and the sub-table form is refused before any edit.
 const KT3_CLASS = 'test_credentials = { file = "/x/.env.local", keys = [{ name = "STRIPE_SECRET", prefix = "sk_test_" }, { name = "SUPABASE_SERVICE_ROLE_KEY", supabase_project = "geyyptxqiovujgbiecsp" }] }  # test mode only'
@@ -1014,7 +1016,7 @@ test('KT3 (c) the sub-table form is refused with its remedy, nothing written', (
 })
 
 // ---- KT4: a Tuning never touches the declared test Logins (p37-4) ---------------------------------------------------------
-// test_logins (schema 5) is the operator's alone, one line under [defaults]: an edit of another key keeps that line
+// test_logins (schema 5) is declared on his ruling only, never a Tuning, one line under [defaults]: an edit of another key keeps that line
 // byte-identical, and an edit whose resolved test_logins differs from before is refused with nothing written (the control
 // patches edit_text, as KT2's and KT3's do).
 const KT4_LOGINS = 'test_logins = ["dummy"]   # the dummy Claude Login, probes only'

@@ -33,6 +33,14 @@
 // amendment): § 3.7's *Widest pricing* sentence with its governed cap word and what still asks after it, "nor read at
 // its widest", *The Cap's format*'s widest-amount sentence, ADR 0008's p48-4 line, CONTEXT.md's "read at its widest,
 // is within the limit" and the README's widest clause (widest).
+// p56-5 (ADR 0063's 2026-11-24 amendment, "Agents make any ruled edit"): a declaration Lachy has ruled on in words is
+// written by an agent through `rollout-settings.py declare` and reported, never handed back as a hand edit, and one he
+// has not ruled on stays his question. The two test-login pins that said operator-only now say declared on his ruling
+// only (test-login); the rest is its own rule (ruled-declaration): § 3.7's two paragraphs and the Don't, § 3's two
+// rows, schedule § 3.6's paragraph with its Scope clause, reshuffle R3 (c) and its Write surface, asking.md's bullet,
+// the README's two paragraphs, CONTEXT.md's entry, the ADR's amendment with its Decided for him list, and three
+// sentences of rollout-settings.py's header (the forms that write, the clock, the comment). The verbs' behaviour is
+// pinned by tests/rollout-settings-declare.test.mjs D1-D9.
 //
 // Same shape as execute-signed-gate.test.mjs: every rule lives in one function, checkStanding(files), returning named
 // failures, so the real text and the controls run through identical logic; each control mutates the real text in one
@@ -55,6 +63,7 @@ const real = {
   orientAll: read('skills/orient-all/SKILL.md'),
   backlog: read('skills/orient/backlog.md'),
   adr0008: read('docs/adr/0008-a-declared-gate-always-pauses-for-a-human.md'),
+  adr0063: read('docs/adr/0063-a-declared-test-credential-signs-itself.md'),
   snapshot: read('skills/_shared/engine-snapshot.md'),
   grade: read('skills/_shared/readiness-grade.md'),
   settings: read('skills/_shared/scripts/rollout-settings.py'),
@@ -303,7 +312,8 @@ function checkStanding(f) {
     fails.push('widest')
   }
 
-  // test-login (p37-4): a credential gate naming only a declared test Login signs itself; machine-wide, operator-only.
+  // test-login (p37-4): a credential gate naming only a declared test Login signs itself; machine-wide, declared on his
+  // ruling only (p56-5).
   const tl = labelled(f.execute, S37, "A declared test Login (p37-4, ADR 0034's 2026-11-05 amendment).")
   const row3 = collapse((section(f.execute, /^### 3\. /) ?? '').split('\n').find((l) => l.startsWith('| `test_logins` |')) ?? '')
   // § 4.5 step 1.2's Exit 3 and § 6.5 (a) list the same ASK reasons as § 3.7 (review round 1: sibling sites)
@@ -316,12 +326,12 @@ function checkStanding(f) {
     !tl.includes('one of the machine\'s declared test Logins') || !tl.includes('`(approved <date> under the standing approval: test Login <name>, from <source>)`') ||
     !tl.includes('with no limit, no ledger, no month line and no Needs-you line') ||
     !tl.includes("It is machine-wide, so a Leg's serial note signs one too, and a bounced note signs none") ||
-    !tl.includes('Operator-only: no agent or script writes `test_logins`') ||
+    !tl.includes("Declared on his ruling only (ADR 0063's 2026-11-24 amendment): `test_logins` is his hand edit, or, once he has ruled on that Login in words, an agent's") ||
     !row3.includes('one line under `[defaults]` of `~/.config/thread/rollouts.toml`') ||
     !collapse(f.execfit).includes("and a declared test Login (ADR 0034's 2026-11-05 amendment), a publish never uses") ||
     !collapse(f.snapshot).includes('`test_logins` (p37-4) is the first schema-5 key: an older snapshot ignores it, so its rollouts ask the Login gate as before.') ||
     !f.context.includes('- **Test Login** —') || !collapse(f.context).includes('a Leg never signs one (a Test Login is machine-wide)') ||
-    !collapse(f.readme).includes('test_logins = ["dummy"]') || !collapse(f.readme).includes('It is operator-only: no skill or script writes it.')) {
+    !collapse(f.readme).includes('test_logins = ["dummy"]') || !collapse(f.readme).includes("It is declared on your ruling only: your hand edit, or an agent's once you have ruled on it in words")) {
     fails.push('test-login')
   }
 
@@ -374,6 +384,47 @@ function checkStanding(f) {
     !collapse(f.readme).includes('Schedule and orient record such a gate ahead and never ask it: the planner words it as the standing approval reads it.')) {
     fails.push('test-login-sweep')
   }
+
+  // ruled-declaration (p56-5, ADR 0063's 2026-11-24 amendment): an agent writes a declaration Lachy has ruled on in
+  // words, through the one writer, and reports it; with no such words it stays his question. A § 3 row that is there
+  // says who writes it (a missing row is its own rule's failure).
+  const rd = labelled(f.schedule, S36, 'A ruled declaration is written, never handed back')
+  const rowU = collapse((section(f.execute, /^### 3\. /) ?? '').split('\n').find((l) => l.startsWith('| `unreachable_paths` |')) ?? '')
+  const ROW_WHO = "declared on his ruling only: his hand edit, or an agent's `rollout-settings.py declare` quoting his words"
+  const RD_R3 = "A ruled declaration is written, never handed back (ADR 0063's 2026-11-24 amendment): when his answer in the grill rules on the declaration itself, in words that name it"
+  const decided = (f.adr0063.split('## Decided for him (overturnable)')[1] ?? '').split('\n').filter((l) => /^\d+\. \*\*/.test(l))
+  if (!tl.includes("with no such words it stays his question, a needs-you item, never the lead's inference") ||
+    !tc.includes("The class is declared on his ruling only, as a test Login is (below): his hand edit, or an agent's `rollout-settings.py declare` quoting his words") ||
+    !donts.includes('Never edit `~/.config/thread/rollouts.toml` yourself: a declaration he has ruled on goes through `rollout-settings.py declare`, a Tuning through `tune.py`, an Inert path through `inert-paths.py`') ||
+    (row3 && !row3.includes(ROW_WHO)) || (rowU && !rowU.includes(ROW_WHO)) ||
+    !s36.includes("**A ruled declaration is written, never handed back** (ADR 0063's 2026-11-24 amendment).") ||
+    !rd.includes('When his answer in the confirm batch rules on the declaration itself, in words that name it') ||
+    !rd.includes('rollout-settings.py declare --key <key>') || !rd.includes("--words \"<his words, quoted exactly>\" --said <today's date>") ||
+    !rd.includes("Name the `declared` line it prints, verbatim, in step 8's report") ||
+    !rd.includes('A non-zero exit prints its line, keeps his sign-off as an ordinary ask-ahead bullet and never blocks the schedule') ||
+    !rd.includes('A sign-off of one gate rules on nothing') ||
+    !scope.includes("§ 3.6's `rollout-settings.py declare`, run only when his answer in the confirm batch rules on a declaration in words (ADR 0063's 2026-11-24 amendment), writes one line of that file and one line of `rollouts.declarations.jsonl` beside it") ||
+    !r3.includes(RD_R3) || !before(r3, 'Asked or recorded here, it is not asked again at schedule.', RD_R3) ||
+    !r3.includes('A sign-off of one gate rules on nothing, and a non-zero exit prints its line and keeps the ask.') ||
+    !collapse(f.reshuffle).includes("A ruled declaration (R3 (c)) is the one write outside the vault that is not the grill's docs: `rollout-settings.py declare` writes one line of `~/.config/thread/rollouts.toml` and one line of `rollouts.declarations.jsonl` beside it") ||
+    !collapse(f.asking).includes("A declaration he has ruled on in words is never handed back to him as a hand edit (ADR 0063's 2026-11-24 amendment): the agent writes it with `rollout-settings.py declare`") ||
+    !collapse(f.asking).includes('One he has not ruled on is *yours*.') ||
+    !collapse(f.readme).includes('It is declared on your ruling only: write it by hand, or rule on it in words and an agent writes it with `rollout-settings.py declare --repo <clone>`') ||
+    !collapse(f.readme).includes("rollout-settings.py declare --key test_logins --value '[\"dummy\"]'") ||
+    !collapse(f.readme).includes('records it in `~/.config/thread/rollouts.declarations.jsonl`') ||
+    !collapse(f.readme).includes('a declaration you have not ruled on stays your question') ||
+    !f.context.includes('- **Ruled declaration** —') || !collapse(f.context).includes('("Agents make any ruled edit", ADR 0063\'s 2026-11-24 amendment)') ||
+    !collapse(f.context).includes('_Avoid_: auto-declare, self-approval.') ||
+    !f.adr0063.includes('*(Amended 2026-11-24 by p56-5') ||
+    !f.adr0063.includes('## Amendment (2026-11-24, p56-5: an agent writes a ruled declaration)') ||
+    !f.adr0063.includes('**"Agents make any ruled edit"**') ||
+    decided.length !== 9 || !decided[0].startsWith('1. **Ruled means his own words.**') || !decided[2].startsWith('3. **One writer.**') ||
+    !decided[4].startsWith('5. **The reader check runs at every write, and there is no `--force`.**') ||
+    !collapse(f.settings).includes('The first form, the resolver, writes nothing; `declare` and `undo` (Declaring, below) are the only forms that write.') ||
+    !collapse(f.settings).includes("Today is the machine's local date (`_today()`, the one seam)") ||
+    !collapse(f.settings).includes("The comment names the line's last declaration and nothing more: the log is the record.")) {
+    fails.push('ruled-declaration')
+  }
   return fails
 }
 
@@ -385,7 +436,7 @@ test('execute, schedule, reshuffle, status, README and CONTEXT.md hold every sta
 
 const RULES = ['step12', 'halt-guard', 'form', 'question-tool', 'standing-37', 's7', 'reinstate', 'exclusion-e',
   'schedule-sweep', 'spend-recorded', 'reshuffle', 'month-line', 'one-unfinished', 'docs', 'test-credential', 'cap-only', 'test-login',
-  'test-login-sweep', 'widest']
+  'test-login-sweep', 'widest', 'ruled-declaration']
 const CONTROLLED = new Set()
 
 function edit(text, from, to) {
@@ -560,7 +611,7 @@ test('control: each test-login pin, removed in one place, fails test-login alone
   only('execute', 'only as a declared test credential or a declared test Login (below). A declared test credential is one of', 'only as a declared test credential: one of', L, 'Test credentials: old first sentence')
   only('execute', 'so no class resolves and every class credential there asks', 'so no class resolves and every credential there asks', L, 'Test credentials: every credential asks on a Leg')
   only('execute', ' It is machine-wide, so a Leg\'s serial note signs one too, and a bounced note signs none.', '', L, 'the paragraph: not machine-wide')
-  only('execute', 'Operator-only: no agent or script writes `test_logins`', 'An agent may write `test_logins`', L, 'the paragraph: not operator-only')
+  only('execute', "Declared on his ruling only (ADR 0063's 2026-11-24 amendment): `test_logins` is his hand edit, or,", 'Any agent may write `test_logins`: it is his hand edit, or,', L, 'the paragraph: not on his ruling only')
   only('execute', ', with no limit, no ledger, no month line and no Needs-you line:', ', against the limit:', L, 'the paragraph: a limit')
   const row = real.execute.split('\n').find((x) => x.startsWith('| `test_logins` |'))
   only('execute', row + '\n', '', L, '§ 3: no test_logins row')
@@ -568,7 +619,7 @@ test('control: each test-login pin, removed in one place, fails test-login alone
   only('snapshot', '`test_logins` (p37-4) is the first schema-5 key', '`test_logins` (p37-4) is a key', L, 'engine-snapshot.md: no schema-5 sentence')
   only('context', '- **Test Login** —', '- **Dummy Login** —', L, 'CONTEXT.md: no entry')
   only('context', '(a Test Login is machine-wide)', '(none is)', L, 'CONTEXT.md: Test credential entry')
-  only('readme', 'It is\noperator-only: no skill or script writes it.', 'Any agent may write it.', L, 'README: not operator-only')
+  only('readme', span(real.readme, "It is declared on your ruling only: your hand edit, or an agent's once you have ruled on it in words"), 'Any agent may write it', L, 'README: not on his ruling only')
   // review round 1: step 1.2's Exit 3 and § 6.5 (a) name the test-Login asks, and § 3.7 names step 5 (nothing joined)
   only('execute', "a key missing from it, or a Login gate that names an undeclared Login or anything beside it, § 3.7's *A declared test Login*). Exit 1:",
     'or a key missing from it). Exit 1:', L, 'step 1.2: no test-Login asks')
@@ -630,7 +681,51 @@ test('control: each test-login-sweep pin, removed in one place, fails test-login
   only('readme', 'Schedule and orient\nrecord such a gate ahead and never ask it', 'Schedule and orient\nask such a gate ahead', TLS, 'README: asked ahead')
 })
 
-test('the rules are all named (19) and each has a control', () => {
-  assert.equal(RULES.length, 19)
+test('control: each ruled-declaration pin, removed in one place, fails ruled-declaration alone', () => {
+  const RD = 'ruled-declaration'
+  only('execute', "would widen its own approval), and with no such words it stays his question, a needs-you item, never the lead's inference.",
+    'would widen its own approval), and with no such words the lead infers it.', RD, 'the test-Login paragraph: inferred')
+  only('execute', ' The class is declared on his ruling only, as a test Login is (below):', ' The class is declared by any agent, as a test Login is (below):', RD, 'Test credentials: any agent')
+  only('execute', '- Never edit `~/.config/thread/rollouts.toml` yourself:', '- Edit `~/.config/thread/rollouts.toml` yourself when it helps:', RD, "Don'ts: no Don't")
+  only('execute', "and declared on his ruling only: his hand edit, or an agent's `rollout-settings.py declare` quoting his words (§ 3.7's *A declared test Login*)", 'and only Lachy writes it', RD, '§ 3: the test_logins row')
+  only('execute', "and declared on his ruling only: his hand edit, or an agent's `rollout-settings.py declare` quoting his words (ADR 0063's 2026-11-24 amendment)", 'and only Lachy writes it', RD, '§ 3: the unreachable_paths row')
+  only('schedule', "**A ruled declaration is written, never handed back** (ADR 0063's 2026-11-24 amendment).", "**A ruled declaration is handed back** (ADR 0063's 2026-11-24 amendment).", RD, '§ 3.6: handed back')
+  only('schedule', 'When his answer in the confirm batch rules on the declaration itself, in words that name it', 'When his answer in the confirm batch signs a gate', RD, '§ 3.6: a sign-off as a ruling')
+  only('schedule', 'run `python3 ${CLAUDE_PLUGIN_ROOT}/skills/_shared/scripts/rollout-settings.py declare --key <key>', 'edit the file: `--key <key>', RD, '§ 3.6: another writer')
+  only('schedule', "--words \"<his words, quoted exactly>\" --said <today's date>", '--words "<a summary>"', RD, '§ 3.6: no quoted words')
+  only('schedule', "Name the `declared` line it prints, verbatim, in step 8's report, then", 'Then', RD, '§ 3.6: not reported')
+  only('schedule', ' A non-zero exit prints its line, keeps his sign-off as an ordinary ask-ahead bullet and never blocks the schedule.', '', RD, '§ 3.6: no exit rule')
+  only('schedule', ' A sign-off of one gate rules on nothing:', ' A sign-off of one gate rules on its declaration:', RD, '§ 3.6: a sign-off rules')
+  only('schedule', " § 3.6's `rollout-settings.py declare`, run only when his answer in the confirm batch rules on a declaration in words (ADR 0063's 2026-11-24 amendment), writes", " § 3.6 writes", RD, '§ Scope: no clause')
+  only('reshuffle', span(real.reshuffle, 'A ruled declaration is written, never handed back (ADR 0063'), 'A ruled declaration is handed back (ADR 0063', RD, 'R3: handed back')
+  only('reshuffle', span(real.reshuffle, 'A sign-off of one gate rules on nothing, and a non-zero exit prints its line and keeps the ask.'), 'A sign-off of one gate rules on its declaration.', RD, 'R3: a sign-off rules')
+  CONTROLLED.add(RD)
+  assert.deepEqual(checkStanding(movedBefore('reshuffle', " A ruled declaration is written, never handed back (ADR 0063's 2026-11-24 amendment): when his answer in the grill rules on the declaration itself, in words that name it",
+    'Asked or recorded here, it is not asked again at schedule.')), [RD], 'R3: the rule before the asked-or-recorded sentence')
+  only('reshuffle', span(real.reshuffle, "is the one write outside the vault that is not the grill's docs"), 'is no write at all', RD, 'write surface: no write named')
+  only('asking', "- A declaration he has ruled on in words is never handed back to him as a hand edit (ADR 0063's 2026-11-24 amendment): the agent writes it with `rollout-settings.py declare`,", '- A declaration he has ruled on in words is handed back to him as a hand edit:', RD, 'asking.md: handed back')
+  only('asking', ' One he has not ruled on is *yours*.', '', RD, 'asking.md: an unruled one')
+  only('readme', span(real.readme, 'It is declared on your ruling only: write it by hand, or rule on it in words and an agent writes it with'), 'Write it by hand, with', RD, 'README: the class')
+  only('readme', "rollout-settings.py declare --key test_logins --value '[\"dummy\"]'", 'rollout-settings.py', RD, 'README: no example')
+  only('readme', span(real.readme, 'records it in `~/.config/thread/rollouts.declarations.jsonl`'), 'records nothing', RD, 'README: no log')
+  only('readme', span(real.readme, 'a declaration you have not ruled on stays your question'), 'any declaration is its to write', RD, 'README: an unruled one')
+  only('context', '- **Ruled declaration** —', '- **Auto-declare** —', RD, 'CONTEXT.md: no entry')
+  only('context', span(real.context, '("Agents make any ruled edit", ADR 0063\'s 2026-11-24 amendment)'), '(a later ADR)', RD, 'CONTEXT.md: no ruling')
+  only('context', '_Avoid_: auto-declare, self-approval.', '_Avoid_: nothing.', RD, 'CONTEXT.md: no avoid line')
+  only('adr0063', '*(Amended 2026-11-24 by p56-5', '*(Amended 2026-11-24 by a later task', RD, 'ADR 0063: no head note')
+  only('adr0063', '## Amendment (2026-11-24, p56-5: an agent writes a ruled declaration)', '## Amendment (2026-11-24)', RD, 'ADR 0063: no amendment heading')
+  only('adr0063', '**"Agents make any ruled edit"**', 'the widest option', RD, 'ADR 0063: no ruling quoted')
+  only('adr0063', '1. **Ruled means his own words.**', '1. **Ruled means anything.**', RD, 'ADR 0063: Decided for him 1')
+  only('adr0063', '3. **One writer.**', '3. **Any writer.**', RD, 'ADR 0063: Decided for him 3')
+  only('adr0063', '5. **The reader check runs at every write, and there is no `--force`.**', '5. **The reader check may be forced.**', RD, 'ADR 0063: Decided for him 5')
+  const nine = real.adr0063.split('\n').find((l) => l.startsWith('9. **A line\'s comment'))
+  only('adr0063', nine, nine.replace('9. **', 'Also: **'), RD, 'ADR 0063: eight decided items')
+  only('settings', span(real.settings, 'The first form, the resolver, writes nothing; `declare` and `undo` (Declaring, below) are the only forms that write.'), 'It writes nothing.', RD, 'rollout-settings.py: it writes nothing')
+  only('settings', span(real.settings, "Today is the machine's local date (`_today()`, the one seam)"), 'Today is the UTC date', RD, 'rollout-settings.py: no clock sentence')
+  only('settings', span(real.settings, "The comment names the line's last declaration and nothing more: the log is the record."), 'The comment is the record.', RD, 'rollout-settings.py: no comment sentence')
+})
+
+test('the rules are all named (20) and each has a control', () => {
+  assert.equal(RULES.length, 20)
   assert.deepEqual(RULES.filter((r) => !CONTROLLED.has(r)), [])
 })
