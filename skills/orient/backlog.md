@@ -120,7 +120,9 @@ R1 and R2 under `--backlog`. The item set is `sweep`'s rows, never a walk of the
   by side, then batch 2's, never two batches at once. With no fork in the harness, the forks run one at a time here,
   under the same answers.
 - **A fork returns** schedule's summary verbatim and each note's path; its misfits; Pre-flight's `out[]` with each
-  why, and its `asks[]` and `index[]` verbatim; its § 3.5 drops, each with its matched words; its S3.7 `signIns` and
+  why, and its `asks[]` and `index[]` verbatim, with, for each `gate` row of its `index[]`, one line naming the act its
+  grade means, read from the task note (`[[<slug>]] <kind>: <the act>`, schedule § 1.5); its § 3.5 drops, each with
+  its matched words; its S3.7 `signIns` and
   S2's `leftOut` rows, each with its line; its Decided for you block; its stop line, or its `joined [[<X>]]` line at a
   join; and **touched**, every task note it wrote.
 - A reopened task whose fork stopped is parked again with the reason `its batch waits: <stop line>`.
@@ -166,7 +168,9 @@ orient.** paragraph cites this list. A `## Decided for you` bullet is an agent's
 8. schedule § 1.5's Pre-flight (and S3.5), as under the chain's item 4: its own read-only grading agents, `log` and
    `decided-for-you --write --by schedule` run as written; there is no round and no `record`; the final `preflight`
    passes `--decided` only for the prompt line's slugs among its candidates. A One call, a Grill or an ungraded member
-   leaves with its Dependent closure, unstamped, and its `asks[]` and `index[]` are returned for B9.
+   leaves with its Dependent closure, unstamped, and its `asks[]` and `index[]` are returned for B9. Unlike the chain,
+   its `preflight` calls pass `--ask-gates` (p56-2): a member whose grade names a credential or irreversible gate its
+   note never words leaves as `unsigned` the same way, its `gate` question returned in `asks[]` and `index[]`.
 9. Step 2.5's verifier and merge gate: stated, never asked. With no verifier, the fork stops before writing.
 10. Step 2.6's baseline: captured as written (it asks nothing, and the fork waits for it inside its turn): its
     `block`, or `none`, and its `line` in the summary.
@@ -177,7 +181,9 @@ orient.** paragraph cites this list. A `## Decided for you` bullet is an agent's
 15. schedule § 3.5: a match that a recorded `## Decisions` answer settles is dismissed (B9 records a kept gate in
     exactly that form). Any other match drops its task, named and unstamped, never `ignore_gate`; the fork returns it
     with its matched words, and B9 puts § 3.5's question.
-16. schedule § 3.6: every undismissed hit is stamped `plan_approval: required`, with no ask-ahead. A spend or a
+16. schedule § 3.6: every undismissed hit is stamped `plan_approval: required`, with no ask-ahead. A credential or
+    irreversible hit of a kind its task's `preflight` row lists under `swept` is never dismissed for naming nothing
+    (schedule § 3.6), so it is stamped. A spend or a
     test-credential hit gets its Planner line, or a credential hit § 3.6 records as a declared test Login (p37-4),
     the test-Login Planner line. A gate sets aside its task, never the rollout (ADR 0008, ADR 0034).
 17. Step 4.5's merges: none, with the candidates named (the Pulse keys a task by its path).
@@ -255,7 +261,8 @@ sign-ins, when any fork's `signIns` holds a pair that reads signed out: schedule
 `hands_steps` list over every server such a pair names, from this session's check, and its check-again question, both
 over those pairs alone (a pair whose check could not run is in neither, as S3.7 keeps one out of its list, and its
 rows stay out with their Left out rows and lines); then each fork's
-`asks[i]`, verbatim; then one § 3.5 question per task a fork dropped at answer 15, worded
+`asks[i]`, verbatim (a `gate` question after its fork's line naming the act, B5, and with no recommendation: a
+sign-off is his authorisation, ADR 0008); then one § 3.5 question per task a fork dropped at answer 15, worded
 `§ 3.5 gate: does "<the matched words>" hold this task out of a rollout?`, with the options
 `No: keep it, it holds nothing` and `Yes: keep it out, it is a gate` (No recommended when the note only quotes or
 describes the words, schedule § 3.5's no-gate reading, else Yes); then R3's grill, invoked by name with R3's `args`,
@@ -264,7 +271,8 @@ cluster by cluster. Each question holds only its tasks.
 **After each answer**, written at once:
 
 - **One call or Grill** → `python3 ${CLAUDE_PLUGIN_ROOT}/skills/_shared/scripts/estate-dispatch.py record --task <slug> --question <decision.question> --answer <text> --recommended <index.recommended> [--fork <f>] --by schedule`.
-  The task is decided on exit 0 (a Grill once every decision is recorded).
+  The task is decided on exit 0 (a Grill once every decision is recorded), unless a gate question of its is left
+  (**A gate left**, below).
 - **§ 3.5 No**, or typed words that keep the task →
   `python3 ${CLAUDE_PLUGIN_ROOT}/skills/_shared/scripts/estate-dispatch.py record --task <slug> --question '§ 3.5 gate: does "<the matched words>" hold this task out of a rollout?' --answer '<the option text, or "No: " + his words>' --recommended '<the recommended option text>' --by schedule`.
   It writes the bullet under `## Decisions (asked ahead <D>)` that answer 15 dismisses (schedule § 3.5's first keep
@@ -273,6 +281,20 @@ cluster by cluster. Each question holds only its tasks.
 - **§ 3.5 Yes** → nothing is written to the task. It stays out, listed under `## Held by his answer` with its words,
   with no `wait` line and no `## Answered, waiting` row, so it never holds back the re-stamp. The next Backlog orient
   that batches it puts the question again, as every standalone schedule run does for a gate nobody has cleared.
+- **A gate signed** (`Sign it off now`, or typed words that sign the act its fork's line names) →
+  `- <kind>: <his words> (approved <D>, asked ahead at schedule)` is appended to the task's `## Approved gates` section
+  (created at the note's end when absent), his words his Note or his typed words, else the fork's line. The task is
+  decided once every gate question of its is signed and every other question of its is decided; it then joins the
+  post-question round, whose own `preflight` reads the bullet and whose § 3.6 stamps the task.
+- **A gate left** (`Leave it out`, any other typed answer, or no answer) → nothing is written to the task. Any other
+  typed answer, "there is no such act here" included, is a gate left, and the run never writes an `## Approved gates`
+  bullet he did not sign. A task with any gate question left or unanswered is
+  never decided, whatever else was recorded for it (a One call's recorded answer stands; of two kinds, a signed
+  bullet stands): it takes no `wait` line and gets no `## Answered, waiting` row, so it never holds back the
+  re-stamp, and it joins no post-question round. On `Leave it out` or any other typed answer it is listed under
+  `## Held by his answer` with his words. With no answer (his "stop", or no reply) there are no words of his: its
+  question goes under Questions waiting, as every open question does, and never under Held by his answer. The next
+  Backlog orient that batches it puts the questions still open again.
 - **Ungraded** → never recorded. "Queue it as it stands" decides it; "Leave it out" puts it under Held by his answer.
 - **An answer that defers or drops the work** → recorded, and the task stays undecided, under Held by his answer.
 - **A grilled item** → respecced by R5.2, its Decided for you lines through `record --owner … --by orient`, then

@@ -12,8 +12,9 @@ schedule run queues. `rank-stamp` stamps the pass's estate rank on each rollout 
 live ones (ADR 0067 d9; CONTEXT.md **Estate rank**). Two callers: skills/orient-all/SKILL.md (§ 6's sign-in pass runs
 `preflight`, read-only, per serial entry; § 7 runs `rank-stamp` before its first `sessions`), and
 skills/schedule/SKILL.md § 1.5 (and its serial
-path's S3.5), which runs `slices`, `log`, `preflight`, `record` (`record --by schedule`) and `decided-for-you --by
-schedule --write`, and under orient-all only `preflight` and `decided-for-you --by orient-all --write`; orient's
+path's S3.5), which runs `slices`, `log`, `preflight --ask-gates`, `record` (`record --by schedule`) and
+`decided-for-you --by schedule --write`, and under orient-all only `preflight` and `decided-for-you --by orient-all
+--write`; orient's
 reshuffle R5.2 runs `record --owner --by orient`. This docstring is the only copy of the output schemas. python >= 3.9 with PyYAML (`log` and `preflight`
 need none). Called as:
 
@@ -35,7 +36,7 @@ need none). Called as:
     python3 ${CLAUDE_PLUGIN_ROOT}/skills/_shared/scripts/estate-dispatch.py log --rank FILE --scan FILE [--model ID]
         [--effort E] [--dry-run]
     python3 ${CLAUDE_PLUGIN_ROOT}/skills/_shared/scripts/estate-dispatch.py preflight --rank FILE --scan FILE
-        --tasks SLUG[,SLUG]... [--kept SLUG]... [--decided SLUG]... [--dep A=B]...
+        --tasks SLUG[,SLUG]... [--kept SLUG]... [--decided SLUG]... [--dep A=B]... [--ask-gates]
     python3 ${CLAUDE_PLUGIN_ROOT}/skills/_shared/scripts/estate-dispatch.py rank-stamp --rank FILE --plan FILE
         [--wrote NOTE]... [--at ISO] [--vault PATH] [--dry-run]
 
@@ -71,7 +72,8 @@ What it reuses. Loaded by path inside main(), so importing this file runs nothin
 constants that way): estate-rank.py (ER: Ranker's index, the gradeable rule; slug_key; DECISION_MINUTES and
 REVIEW_MINUTES), and through ER.load_siblings resolve-target.py's next-action.py (NA: Vault, Note, status_of,
 OPEN_STATUSES, links_in, tags_of) and estate-scan.py (ES: first_link, link_live and in_flight, vault-grammar.md
-§ In flight stated once, and still_to_start, its one exception); `preflight` loads ER alone, for slug_key;
+§ In flight stated once, and still_to_start, its one exception); `preflight` loads ER alone, for slug_key, and with
+`--ask-gates` gated_inputs.py (GI: sweep and body_of, stdlib only, so `preflight` still needs no PyYAML);
 reconcile-rollout.py (RR: Note, GATE_PENDING_SECTION, GATE_BOUNCE_SECTION,
 PROJECT_ROOT_RE, _shape and _start_unattended, the start stamp's reader; _dep_status and _fold_unit, the dependency
 rule a rollout row waits on); and, for `sessions` and `rank-stamp` only, leg.py (LEG:
@@ -370,9 +372,11 @@ rank-stamp --rank R --plan P [--wrote NOTE]... [--at ISO] [--vault V] [--dry-run
   why} | null, notReached[], dryRun}, each note vault-relative. Exit 1 when `failed` is set (orient-all § 7 runs the
   line once more; a second exit 1 is § 8's caveat); --dry-run writes nothing.
 
-preflight --rank R --scan S --tasks SLUG[,SLUG]... [--kept SLUG]... [--decided SLUG]... [--dep A=B]...: schedule
-  § 1.5's split of its candidates (ADR 0047). It reads the two files and, for each One call or Grill named --decided,
-  its task note (the scan's `vault` joined to its row's `note`). --tasks is every candidate, deduplicated
+preflight --rank R --scan S --tasks SLUG[,SLUG]... [--kept SLUG]... [--decided SLUG]... [--dep A=B]... [--ask-gates]:
+  schedule § 1.5's split of its candidates (ADR 0047). It reads the two files and, for each One call or Grill named
+  --decided, its task note (the scan's `vault` joined to its row's `note`), and with --ask-gates the note of each
+  candidate a gate is read for (below). Schedule § 1.5 passes --ask-gates; an orient-all fork, its sign-in pass and
+  the chain pass none, and without it the output is today's, byte for byte. --tasks is every candidate, deduplicated
   by ER.slug_key in first-seen order (a scan task is shown by its scan slug); --kept, --decided and --dep (each
   repeatable, --kept and --decided also comma-joined) must name candidates. Each candidate, in order:
   - kept (a carried task that has started): in, `kept`, never graded or asked;
@@ -406,22 +410,39 @@ preflight --rank R --scan S --tasks SLUG[,SLUG]... [--kept SLUG]... [--decided S
   answers (LEAVES): every candidate that depends on an Orient, unreadable or waiting one, directly or through others,
   leaves as `dependency` (Ready, decided, undecided or ungraded alike), via its first dependency in that closure. Only
   then is a One call's or Grill's note read, for one still in as `decided`: unrecorded, it leaves as above (so one
-  already out through a LEAVES dependency keeps its `dependency` why, its note unread). Then a candidate still in leaves, to a fixpoint, when a
-  dependency is out: `dependency`, via the first such dependency.
+  already out through a LEAVES dependency keeps its `dependency` why, its note unread). With --ask-gates (p56-2, ADR
+  0034), next, each candidate whose why is still `ready`, `decided` or `undecided`, in --tasks order, has its gates
+  read (gates_of): a `credential` or `irreversible` kind its rank row's `gates` names (ASK_GATE_KINDS; a `gates` that
+  is not a list names none, and a task naming none has no note read; `spend` is never read, Chorus ADR 0108 d4) is
+  swept when gated_inputs.py's one-argument sweep of the note's body hits that kind anywhere (an `## Approved gates`
+  bullet's kind word included, so a signed gate is swept), else open. One still in with an open kind leaves as
+  `unsigned`, its reason UNSIGNED_GATE naming the open kinds, or UNSIGNED_NOTE, every named kind open, when the note
+  cannot be read (fail closed); an `undecided` one keeps its why. Kept, Orient, waiting, unreadable, ungraded and
+  unrecorded candidates, and every one already out as `dependency`, are never read. Then a candidate still in leaves,
+  to a fixpoint, when a dependency is out (an `unsigned` one included): `dependency`, via the first such dependency.
   The round: one question per AskUserQuestion call, each candidate still out undecided or ungraded after the closure,
   so never an unreadable task nor one already out through an Orient or unreadable dependency, which leaves whatever the
   answer: the One calls in rank order (`[[slug]] <question>`), then each Grill's decisions in rank order (`[[slug]] (k/n) <question>`), each text
   followed by its `goal` when it has one and NOTE_INVITE (framing(), as rounds), then the ungraded in --tasks order
   (`[[slug]] could not be graded (<reason>): leave it out of this rollout, or queue it as it stands? <NOTE_INVITE>`,
-  UNGRADED_OPTIONS, `Leave it out` recommended, its description and UNGRADED_WHY saying why over his autonomy). Only
-  his decisions are asked: the rank's decisions[] hold only those (ADR 0054). Options are built as rounds builds them
-  (label_for, the recommendation first and marked, framing()'s descriptions); HEADERS gives each header. An ungraded answer is never recorded (schedule § 1.5).
+  UNGRADED_OPTIONS, `Leave it out` recommended, its description and UNGRADED_WHY saying why over his autonomy). With
+  --ask-gates the gate questions come between the Grills and the ungraded: one per open kind of each candidate with
+  one, in rank order and ASK_GATE_KINDS order within a task, none for a note that cannot be read (`[[slug]]
+  <GATE_QUESTION> <NOTE_INVITE>`, its `{says}` GATE_SAYS quoting the rank row's `why` as the grader's reason, empty
+  with none; GATE_OPTIONS with GATE_DESCRIPTIONS, none recommended: the authorisation is his, ADR 0008). Only his
+  decisions and the sign-offs his grades name are asked: the rank's decisions[] hold only his (ADR 0054). Options are
+  built as rounds builds them (label_for, the recommendation first and marked, framing()'s descriptions); HEADERS
+  gives each header. An ungraded answer is never recorded (schedule § 1.5), and a gate answer goes through no
+  `record`: schedule § 1.5 writes a signed gate's `## Approved gates` bullet, which the final call's sweep then hits.
   Output: {schema, today, counts {candidates, graded, ready, oneCall, grill, orient, ungraded, kept, decided, in, out}
   (graded, the grades and ungraded over the candidates not kept), tasks[] {slug, grade, decided, in, why, via?,
-  reason?}, queue[] (the slugs in, in --tasks order), out[] {slug, grade, why, via?, reason?, home?, project?, note?}, asks[][]
-  (one question each), index[] {question, kind (one-call | grill | ungraded), slug, note, decision {question,
-  options[], recommendation, why?, fork?} (an ungraded one's synthesised from UNGRADED_QUESTION), labels[], texts[],
-  recommended (texts[0]), k?, n?, fork?}, warnings[]}.
+  reason?, gates?, swept?}, queue[] (the slugs in, in --tasks order), out[] {slug, grade, why, via?, reason?, gates?,
+  home?, project?, note?}, asks[][] (one question each), index[] {question, kind (one-call | grill | gate | ungraded),
+  slug, note, decision {question, options[], recommendation, why?, fork?} (an ungraded one's synthesised from
+  UNGRADED_QUESTION; a `gate` row has none), gate? (a `gate` row's kind), labels[], texts[], recommended (texts[0];
+  null for a `gate` row), k?, n?, fork?}, warnings[]}. gates (the kinds still open) is on an `unsigned` row alone, and
+  swept (the named kinds the sweep hit) on a tasks[] row whose list is not empty; both only with --ask-gates. It
+  still writes nothing, and counts is unchanged.
 """
 import argparse
 import datetime
@@ -459,7 +480,7 @@ LABEL_MAX = 40
 RECOMMENDED = " (Recommended)"
 ELLIPSIS = "…"
 HEADERS = {"sign-off": "Sign-off", "one-call": "One call", "unpark": "Unpark", "grill": "Grill", "ungraded": "Ungraded",
-           "pick": "Open"}
+           "pick": "Open", "gate": "Gate ahead"}
 # The Framing's Note (asking.md § 3): the last words of every question this script builds (ADR 0054 d8).
 NOTE_INVITE = "What would make this wrong for you?"
 # schedule § 1.5's question for a task the grading could not grade (its options, the recommendation first).
@@ -485,6 +506,23 @@ WAITS_UNREAD = "its note does not parse"  # a `waits` leaver's reason when its d
 UNRECORDED_ANSWER = "no recorded answer to: {question}"
 UNRECORDED_RULING = "no `orient ruling:` line for its fork: {fork}"
 UNRECORDED_NOTE = "its note cannot be read"
+# `preflight --ask-gates` (p56-2, ADR 0034): a `credential` or `irreversible` kind a task's grade names (its rank row's
+# `gates`) that gated_inputs.py's sweep reads no hit of in its note is open. The task leaves as `unsigned` (UNSIGNED_GATE,
+# its kinds "an irreversible", "a credential" or "a credential and an irreversible"; UNSIGNED_NOTE when the note cannot
+# be read), and each open kind is one sign-off question, with no recommendation (ADR 0008). Spend is never read here
+# (Chorus ADR 0108 d4). A signed gate is an `## Approved gates` bullet, which the sweep hits by its kind word.
+GATED_INPUTS_PY = os.path.join(HERE, "gated_inputs.py")
+ASK_GATE_KINDS = ("credential", "irreversible")
+GATE_OPTIONS = ("Sign it off now", "Leave it out")
+GATE_QUESTION = ("its grade names {a} {kind} sign-off its note never words{says}. The act is named above: sign it off "
+                 "now, or leave this task out of this rollout?")
+GATE_SAYS = " (the grade says: {why})"  # the rank row's `why`, the grader's reason, never the act being signed
+GATE_DESCRIPTIONS = ("Signs exactly the act named above: the sign-off is written into the task note now, in your words "
+                     "when you give them, and the task queues",
+                     "Leaves this task out of this rollout, with every task that depends on it; nothing is written, and "
+                     "the next schedule puts the sign-off again")
+UNSIGNED_GATE = "its grade names {kinds} sign-off its note never words, and none is signed"
+UNSIGNED_NOTE = UNRECORDED_NOTE
 SIGN_OFF_OPTIONS = ("Sign off", "Not now")
 TOP_DEFAULT = 15
 # Claude Code caps a session's live subagents (AGENT_CAP_ENV, AGENT_CAP_DEFAULT when unset): a launch past it is
@@ -2509,13 +2547,19 @@ def decision_of(d):
     return out
 
 
+def article(kind):
+    """`an` before a gate kind that starts with a vowel (irreversible), else `a` (credential)."""
+    return "an" if kind[:1] in "aeiou" else "a"
+
+
 class Preflight:
     """schedule § 1.5's split of its candidates (the module docstring's preflight paragraph). Reads the rank, the scan
     and the note of each decided One call or Grill still in after the first closure step (unrecorded); ER is loaded
-    for slug_key alone."""
+    for slug_key alone. With GI (gated_inputs.py, loaded for `--ask-gates` alone) it also reads the note of each
+    candidate in or undecided whose grade names a credential or irreversible gate (gates_of)."""
 
-    def __init__(self, ER, rank, scan, tasks, kept, decided, deps):
-        self.ER, self.rank, self.scan = ER, rank, scan
+    def __init__(self, ER, rank, scan, tasks, kept, decided, deps, GI=None):
+        self.ER, self.rank, self.scan, self.GI = ER, rank, scan, GI
         key = ER.slug_key
         self.rows = {}  # the rank's graded tasks by key, in rank order
         for t in rank["tasks"]:
@@ -2647,6 +2691,29 @@ class Preflight:
                 return UNRECORDED_RULING.format(fork=fork)
         return None
 
+    def gates_of(self, k):
+        """(open, swept, reason) for a candidate under `--ask-gates` (p56-2): named is each ASK_GATE_KINDS kind its rank
+        row's `gates` holds (a `gates` that is not a list names none, and with none the note is never read); swept the
+        named kinds GI.sweep(GI.body_of(<note>)) hits, the one-argument sweep, which reads no settings file; open the
+        named kinds it does not. A hit anywhere in the body counts, an `## Approved gates` bullet's kind word included,
+        so a signed gate is swept. The note is read as unrecorded() reads it; one that cannot be read is open on every
+        named kind, its reason UNSIGNED_NOTE (fail closed), else the reason is UNSIGNED_GATE's."""
+        gates = self.rows[k].get("gates")
+        named = [g for g in ASK_GATE_KINDS if isinstance(gates, list) and g in gates]
+        if not named:
+            return [], [], None
+        rel, root = self.note_of(k), self.scan.get("vault")
+        try:
+            with open(os.path.join(os.path.expanduser(root), rel), encoding="utf-8") as f:
+                text = f.read()
+        except (OSError, TypeError, ValueError):  # TypeError: no vault or no note; ValueError: not UTF-8
+            return named, [], UNSIGNED_NOTE
+        hits = self.GI.sweep(self.GI.body_of(text))
+        swept = [g for g in named if hits.get(g)]
+        opened = [g for g in named if g not in swept]
+        kinds = " and ".join("%s %s" % (article(g), g) for g in opened)
+        return opened, swept, UNSIGNED_GATE.format(kinds=kinds) if opened else None
+
     def reason(self, k):
         """Why a candidate could not be graded: the rank's why, else `no grade` or `not in the scan`. A task whose own
         status is outside Active (its scan statusClass `hold`) is skipped by the ranker as `hold`, or as `in flight`
@@ -2713,6 +2780,24 @@ class Preflight:
                 gap = self.unrecorded(k)
                 if gap:
                     entry[k].update({"in": False, "why": "unrecorded", "reason": gap})
+        # With --ask-gates (p56-2): a credential or irreversible kind the grade names that the note never words is
+        # open. Read only for a candidate still in, or undecided, once the steps above have run, so a task that leaves
+        # whatever he answers, or whose answer went unrecorded, is never read or asked. One in leaves as `unsigned`; an
+        # undecided one keeps its why. Each open kind is a question, unless the note could not be read.
+        gate_open = {}
+        for k in self.order if self.GI is not None else ():
+            e = entry[k]
+            if e["why"] not in ("ready", "decided", "undecided"):
+                continue
+            opened, swept, why = self.gates_of(k)
+            if swept:
+                e["swept"] = swept
+            if not opened:
+                continue
+            if e["in"]:
+                e.update({"in": False, "why": "unsigned", "reason": why, "gates": opened})
+            if why != UNSIGNED_NOTE:
+                gate_open[k] = opened
         # Then the rest: a task that is in leaves when a dependency is out (one undecided or ungraded included).
         out = self.closure(k for k in self.order if not entry[k]["in"])
         for k in self.order:
@@ -2736,17 +2821,21 @@ class Preflight:
             self.one_call(k, questions, index)
         for k in (x for x in ranked if entry[x]["grade"] == "Grill"):
             self.grill(k, questions, index)
+        for k in sorted(gate_open, key=lambda x: pos[x]):
+            for kind in gate_open[k]:
+                self.gate_q(k, kind, questions, index)
         for k in self.order:
             if not entry[k]["in"] and entry[k]["why"] == "ungraded":
                 self.ungraded(k, entry[k]["reason"], questions, index)
         tasks, queue, left = [], [], []
         for k in self.order:
             e = entry[k]
-            tasks.append({x: e[x] for x in ("slug", "grade", "decided", "in", "why", "via", "reason") if x in e})
+            tasks.append({x: e[x] for x in ("slug", "grade", "decided", "in", "why", "via", "reason", "gates", "swept")
+                          if x in e})
             if e["in"]:
                 queue.append(e["slug"])
                 continue
-            o = {x: e[x] for x in ("slug", "grade", "why", "via", "reason", "home", "project") if x in e}
+            o = {x: e[x] for x in ("slug", "grade", "why", "via", "reason", "gates", "home", "project") if x in e}
             if self.note_of(k):
                 o["note"] = self.note_of(k)
             left.append(o)
@@ -2792,12 +2881,25 @@ class Preflight:
         self.ask(k, "ungraded", "[[%s]] %s %s" % (self.shown[k], q, NOTE_INVITE), UNGRADED_OPTIONS, UNGRADED_DESCRIPTIONS,
                  d, questions, index)
 
+    def gate_q(self, k, kind, questions, index):
+        """One open gate's sign-off question (p56-2), as Rounds.sign_off_q builds one: no pick, the authorisation is his
+        (ADR 0008). Its index row carries the `gate` kind and no `decision`, since nothing goes through `record`: schedule
+        § 1.5 writes a signed gate's `## Approved gates` bullet itself."""
+        why = self.rows[k].get("why")
+        says = GATE_SAYS.format(why=fold(why)) if isinstance(why, str) and why.strip() else ""
+        text = "[[%s]] %s %s" % (self.shown[k], GATE_QUESTION.format(a=article(kind), kind=kind, says=says), NOTE_INVITE)
+        opts, labels = Rounds.options(GATE_OPTIONS, GATE_DESCRIPTIONS, False)
+        questions.append({"question": text, "header": HEADERS["gate"], "multiSelect": False, "options": opts})
+        index.append({"question": text, "kind": "gate", "slug": self.shown[k], "note": self.note_of(k), "gate": kind,
+                      "labels": labels, "texts": list(GATE_OPTIONS), "recommended": None})
+
 
 def cmd_preflight(args):
     rank, scan = read_rank(args.rank), read_scan(args.scan)
     ER = load("thread_estate_rank", ESTATE_RANK_PY)
+    GI = load("thread_gated_inputs", GATED_INPUTS_PY) if args.ask_gates else None
     emit(Preflight(ER, rank, scan, split_slugs(args.tasks), split_slugs(args.kept), split_slugs(args.decided),
-                   [d for d in args.dep or []]).run())
+                   [d for d in args.dep or []], GI).run())
 
 
 # ---- main --------------------------------------------------------------------------------------------------------
@@ -2875,6 +2977,7 @@ def parse(argv):
     pf.add_argument("--kept", action="append", default=[])
     pf.add_argument("--decided", action="append", default=[])
     pf.add_argument("--dep", action="append", default=[])
+    pf.add_argument("--ask-gates", action="store_true")
     args = p.parse_args(argv)
     if not args.verb:
         fail(2, "a verb is required: slices | rounds | plan | sessions | record | decided-for-you | log | preflight | "

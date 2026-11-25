@@ -32,6 +32,14 @@ no amount it can read, or none a cap word governs, still asks.)*
 goes `live`, so a Webflow publish of animately.co is asked ahead when its note names the publish as live; a note that
 names no live publish is still first seen at the plan gate (the accepted residual), and a publish to staging, a preview
 or a draft is no hit.)*
+*(Amended 2026-11-25 by p56-2: a `credential` or `irreversible` gate a task's Readiness grade names and the sweep reads
+no hit for is asked ahead in schedule's Pre-flight round (ADR 0047): signed, it is an `## Approved gates` bullet as a
+swept one is, and its task is stamped; unsigned, its task is left out with its line; where the sweep does hit that
+kind, the hit is never dismissed for naming nothing. Under the Backlog orient the question follows the start
+(`skills/orient/backlog.md` § B9) and the task waits. Spend is still recorded, never asked. An orient-all schedule fork
+and the chain pass no `--ask-gates` and put no question, and the estate pass's Decision round (orient-all § 4)
+does not put this gate either, so there it is still first seen mid-run: at its plan gate when its task has one, else
+when its builder stops on it.)*
 
 ## Context
 

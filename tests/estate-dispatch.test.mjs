@@ -8,7 +8,9 @@
 // The notes three schedule forks would have written are added to V after the scan, as they land after it in a real
 // pass. record writes only copies of V, and log (D16) only its own events dirs under S. D17-D21 are schedule's
 // Pre-flight (schedule § 1.5, ADR 0047), over a vault of their own, VF; D22 is the question gate's (ADR 0054) over VF
-// with a second grades file: his decisions asked in the Framing, the rest written as Decided for you.
+// with a second grades file: his decisions asked in the Framing, the rest written as Decided for you. D25 is the
+// Pre-flight's gate ahead (p56-2): `preflight --ask-gates` reads a gated task's note through
+// skills/_shared/scripts/gated_inputs.py's sweep, over a vault of its own.
 import { test, after } from 'node:test'
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
@@ -2359,4 +2361,153 @@ test('D17c. preflight holds a task whose dependency outside the candidates nobod
   // Decided or not, a held task stays out.
   assert.ok(ok(preflight(['--tasks', CANDS.join(','), '--kept', 'ts-kept', '--decided', 'ts-call'], rankFile, scanFile)).out
     .some((o) => o.slug === 'ts-call' && o.why === 'waits'))
+})
+
+// ---- D25. a gate the grade names and the sweep misses is asked ahead (p56-2, ADR 0034) -----------------------------
+// Its own vault VG, scanned and ranked for real. pub, Ready, is graded irreversible on a note the sweep reads clean (the
+// 16 Nov Animately live publish); dep depends on it. swept and tok are graded a kind their notes hit (a live publish, a
+// `token`); key is a One call graded credential on a clean note; both is graded credential and irreversible on a clean
+// note; spend is graded spend alone; plain has no gate; og is Orient, graded irreversible, and behind, graded
+// irreversible on a clean note, depends on og. A signed gate is an `## Approved gates` bullet, which the sweep hits by
+// its kind word.
+test('D25. preflight --ask-gates: a gate the grade names and the sweep misses is asked in the round; signed, its task queues; unsigned, it is left out with its line', () => {
+  const VG = path.join(S, 'vg')
+  const GT = path.join(VG, 'Work', 'Tasks')
+  write(path.join(VG, 'Work', 'Projects', 'Pf.md'), fm('tags:\n  - project\nstatus: active'))
+  const task = (slug, body = '', rest = '') => write(path.join(GT, `${slug}.md`),
+    fm(`tags:\n  - task\nstatus: open\nprojects:\n  - "[[Pf]]"${rest}`, `\n# Task ${slug}\n\n## Notes\n\n${body}\n`))
+  task('pub', 'Swap the hero copy in the Webflow Designer and republish the site.')
+  task('dep', '', links('depends-on', ['pub']))
+  task('swept', 'Publish animately.co live from the Designer.')
+  task('tok', 'Trim the system prompt so a reply uses fewer tokens.')
+  task('key', 'Rotate the deploy hook the build calls.')
+  task('both', 'Swap the hero copy in the Webflow Designer and republish the site with the account owner signed in.')
+  for (const s of ['spend', 'plain', 'og']) task(s)
+  task('behind', 'Swap the footer copy in the Webflow Designer and republish the site.', links('depends-on', ['og']))
+  const CANDS = ['pub', 'dep', 'swept', 'tok', 'key', 'both', 'spend', 'plain', 'og', 'behind']
+  const scanRun = spawnSync('python3', [SCAN, '--vault', VG, '--today', TODAY, '--deadline', '0'], { encoding: 'utf8', cwd: S, env, timeout: 60000 })
+  assert.equal(scanRun.status, 0, scanRun.stderr)
+  const scanFile = keep('vg-scan.json', scanRun.stdout)
+  const PUB_WHY = 'the hero copy goes out on the public site'
+  const irr = { gates: ['irreversible'] }
+  const gradeRows = [R('pub', 'serial', { ...irr, why: PUB_WHY }), R('dep', 'serial'), R('swept', 'serial', irr),
+    R('tok', 'serial', { gates: ['credential'] }), G('key', 'One call', 'serial', { decisions: one(), gates: ['credential'] }),
+    R('both', 'serial', { gates: ['credential', 'irreversible'] }), R('spend', 'serial', { gates: ['spend'] }), R('plain', 'serial'),
+    G('og', 'Orient', 'serial', irr), R('behind', 'serial', irr)]
+  const grades = keep('vg-grades.json', JSON.stringify({ project: 'Pf', tasks: gradeRows }))
+  const rankRun = spawnSync('python3', [RANK, 'rank', '--scan', scanFile, '--today', TODAY, '--grades', grades], { encoding: 'utf8', cwd: S, env, timeout: 60000 })
+  assert.equal(rankRun.status, 0, rankRun.stderr)
+  const rk = JSON.parse(rankRun.stdout)
+  const rankFile = keep('vg-rank.json', rankRun.stdout)
+  const VG_BEFORE = snap(VG)
+  const pf = (more = [], scan = scanFile, rank = rankFile) => ok(preflight(['--tasks', CANDS.join(','), ...more], rank, scan))
+  const flagged = (more = [], scan = scanFile, rank = rankFile) => pf(['--ask-gates', ...more], scan, rank)
+  const row = (j, slug) => j.tasks.find((t) => t.slug === slug)
+  const gateAsks = (j) => j.index.filter((x) => x.kind === 'gate').map((x) => [x.slug, x.gate])
+  const UNSIGNED = (kinds) => `its grade names ${kinds} sign-off its note never words, and none is signed`
+  const signed = (kind, act) => `\n## Approved gates\n\n- ${kind}: ${act} (approved ${TODAY}, asked ahead at schedule)\n`
+
+  // (a) Without the flag (orient-all's fork and the chain): today's split, no note read for a gate, no new key.
+  const plainRun = pf()
+  assert.deepEqual(plainRun.queue, ['pub', 'dep', 'swept', 'tok', 'both', 'spend', 'plain'])
+  assert.deepEqual(outOf(plainRun), [['key', 'undecided', null], ['og', 'orient', null], ['behind', 'dependency', 'og']])
+  assert.deepEqual(plainRun.index.map((x) => [x.kind, x.slug]), [['one-call', 'key']])
+  for (const r of [...plainRun.tasks, ...plainRun.out]) {
+    assert.ok(r.why !== 'unsigned' && !('gates' in r) && !('swept' in r), JSON.stringify(r))
+  }
+
+  // (b) With it: pub and both leave unsigned with dep through pub; key stays undecided; the gate questions follow the
+  // One call, in the rank's order and ASK_GATE_KINDS order within a task.
+  const j = flagged()
+  assert.deepEqual(j.queue, ['swept', 'tok', 'spend', 'plain'])
+  assert.deepEqual(j.out, [
+    { slug: 'pub', grade: 'Ready', why: 'unsigned', reason: UNSIGNED('an irreversible'), gates: ['irreversible'], note: 'Work/Tasks/pub.md' },
+    { slug: 'dep', grade: 'Ready', why: 'dependency', via: 'pub', note: 'Work/Tasks/dep.md' },
+    { slug: 'key', grade: 'One call', why: 'undecided', note: 'Work/Tasks/key.md' },
+    { slug: 'both', grade: 'Ready', why: 'unsigned', reason: UNSIGNED('a credential and an irreversible'),
+      gates: ['credential', 'irreversible'], note: 'Work/Tasks/both.md' },
+    { slug: 'og', grade: 'Orient', why: 'orient', home: 'Pf', note: 'Work/Tasks/og.md' },
+    { slug: 'behind', grade: 'Ready', why: 'dependency', via: 'og', note: 'Work/Tasks/behind.md' }])
+  assert.deepEqual(row(j, 'swept').swept, ['irreversible'])
+  assert.deepEqual(row(j, 'tok').swept, ['credential'])
+  for (const s of ['spend', 'plain', 'behind', 'og', 'dep', 'key']) assert.ok(!('swept' in row(j, s)) && !('gates' in row(j, s)), s)
+  const order = rk.tasks.map((t) => t.slug).filter((s) => ['pub', 'key', 'both'].includes(s))
+  const want = order.flatMap((s) => (s === 'both' ? [['both', 'credential'], ['both', 'irreversible']] : [[s, s === 'pub' ? 'irreversible' : 'credential']]))
+  assert.equal(j.index[0].kind, 'one-call')
+  assert.deepEqual(gateAsks(j), want)
+  assert.deepEqual(j.index.map((x) => x.kind), ['one-call', 'gate', 'gate', 'gate', 'gate'])
+  assert.equal(j.asks.length, j.index.length)
+  j.index.forEach((x, i) => {
+    const q = j.asks[i][0]
+    assert.equal(q.question, x.question)
+    if (x.kind !== 'gate') return
+    assert.equal(q.header, 'Gate ahead')
+    assert.deepEqual(q.options.map((o) => o.label), ['Sign it off now', 'Leave it out'])
+    assert.deepEqual([x.labels, x.texts, x.recommended, 'decision' in x, x.note], [['Sign it off now', 'Leave it out'],
+      ['Sign it off now', 'Leave it out'], null, false, `Work/Tasks/${x.slug}.md`])
+    assert.ok(q.options.every((o) => !o.label.includes('(Recommended)') && o.description), JSON.stringify(q.options))
+    assert.ok(x.question.startsWith(`[[${x.slug}]] its grade names a${x.gate === 'irreversible' ? 'n' : ''} ${x.gate} sign-off`), x.question)
+    assert.ok(x.question.includes('The act is named above') && x.question.endsWith('What would make this wrong for you?'), x.question)
+  })
+  assert.ok(j.index.find((x) => x.slug === 'pub').question.includes(`(the grade says: ${PUB_WHY})`))
+
+  // (c) Signed: its `## Approved gates` bullet lets pub in, and dep with it; the bullet's hit is reported as swept.
+  const signedScan = recordedIn('d25-signed', VG, scanFile, [], { pub: signed('irreversible', 'republish the site') })
+  const c = flagged([], signedScan)
+  assert.ok(c.queue.includes('pub') && c.queue.includes('dep'), JSON.stringify(c.queue))
+  assert.deepEqual(row(c, 'pub').swept, ['irreversible'])
+  assert.ok(!gateAsks(c).some(([s]) => s === 'pub'))
+
+  // (d) --decided names no sign-off: a Ready task named decided with no bullet stays unsigned.
+  assert.equal(row(flagged(['--decided', 'pub']), 'pub').why, 'unsigned')
+
+  // (e) A One call answered and recorded with its gate unsigned is out as unsigned; with its bullet too, it is in.
+  const keyAnswered = recordedIn('d25-key', VG, scanFile, [['key', 'Which way?', 'left']])
+  const e1 = row(flagged(['--decided', 'key'], keyAnswered), 'key')
+  assert.deepEqual([e1.in, e1.why, e1.gates, e1.reason], [false, 'unsigned', ['credential'], UNSIGNED('a credential')])
+  const keySigned = recordedIn('d25-key-signed', VG, scanFile, [['key', 'Which way?', 'left']],
+    { key: signed('credential', 'rotate the deploy hook') })
+  assert.deepEqual(flagged(['--decided', 'key'], keySigned).queue.includes('key'), true)
+
+  // (f) Two kinds: one bullet leaves it out on the kind still open, asked once; both bullets let it in, unasked.
+  const half = flagged([], recordedIn('d25-half', VG, scanFile, [], { both: signed('credential', 'the account owner signs in') }))
+  const f1 = row(half, 'both')
+  assert.deepEqual([f1.why, f1.gates, f1.swept, f1.reason], ['unsigned', ['irreversible'], ['credential'], UNSIGNED('an irreversible')])
+  assert.deepEqual(gateAsks(half).filter(([s]) => s === 'both'), [['both', 'irreversible']])
+  const whole = flagged([], recordedIn('d25-whole', VG, scanFile, [], {
+    both: signed('credential', 'the account owner signs in') + `- irreversible: republish the site (approved ${TODAY}, asked ahead at schedule)\n` }))
+  assert.ok(whole.queue.includes('both'))
+  assert.ok(!gateAsks(whole).some(([s]) => s === 'both'))
+
+  // (g) A note gone since the scan: fail closed, unasked. A task that leaves whatever he answers is never read.
+  const gone = keep('vg-gone-scan.json', JSON.stringify({ ...JSON.parse(scanRun.stdout), vault: path.join(S, 'vg-gone') }))
+  const g = flagged([], gone)
+  for (const [s, kinds] of [['pub', ['irreversible']], ['both', ['credential', 'irreversible']], ['swept', ['irreversible']], ['tok', ['credential']]]) {
+    const r = row(g, s)
+    assert.deepEqual([r.why, r.reason, r.gates], ['unsigned', 'its note cannot be read', kinds], s)
+  }
+  assert.deepEqual([row(g, 'behind').why, row(g, 'behind').via], ['dependency', 'og'])
+  assert.deepEqual(g.queue, ['spend', 'plain'])
+  assert.deepEqual(gateAsks(g), [])
+  assert.deepEqual(g.index.map((x) => [x.kind, x.slug]), [['one-call', 'key']])
+
+  // (h) A kept task is never read or asked.
+  const h = flagged(['--kept', 'pub'])
+  assert.deepEqual([row(h, 'pub').why, h.queue.includes('dep')], ['kept', true])
+  assert.ok(!gateAsks(h).some(([s]) => s === 'pub'))
+
+  // (i) A rank row whose gates is not a list names none.
+  const rkStr = structuredClone(rk)
+  rkStr.tasks.find((t) => t.slug === 'pub').gates = 'irreversible'
+  const i = flagged([], scanFile, keep('vg-rank-str.json', JSON.stringify(rkStr)))
+  assert.ok(i.queue.includes('pub') && i.queue.includes('dep'))
+
+  // (k) A One call named decided with no recorded answer stays unrecorded, never read for its gate.
+  const k = row(flagged(['--decided', 'key']), 'key')
+  assert.deepEqual([k.why, k.reason, 'gates' in k], ['unrecorded', 'no recorded answer to: Which way?', false])
+  assert.ok(!gateAsks(flagged(['--decided', 'key'])).some(([s]) => s === 'key'))
+
+  // (j) Read-only: the flagged calls wrote nothing in the vault, and loading gated_inputs.py left no bytecode.
+  assert.deepEqual(snap(VG), VG_BEFORE)
+  assert.ok(!fs.existsSync(path.join(root, 'skills', '_shared', 'scripts', '__pycache__')), 'no __pycache__ under skills/_shared/scripts')
 })

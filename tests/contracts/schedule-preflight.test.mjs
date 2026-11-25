@@ -1,7 +1,7 @@
 // Schedule runs a Pre-flight (ADR 0047, p29-5): skills/schedule/SKILL.md § 1.5 grades every task still to start and
 // settles the decisions it hides with Lachy in one round, before anything writes a rollout note, and runs no plan gate.
 // Its script half is tests/estate-dispatch.test.mjs (D17-D21), tests/estate-rank.test.mjs (R6),
-// tests/estate-scan.test.mjs (18) and tests/engine-snapshot.test.sh (G4); this file pins the prose. Thirteen rules:
+// tests/estate-scan.test.mjs (18) and tests/engine-snapshot.test.sh (G4); this file pins the prose. Fourteen rules:
 //   p1  § 1.5 sits between steps 1 and 2 and names its commands: estate-scan.py with --deadline 0, `slices --tasks
 //       <graded set>` with `--superseding <prior>`, estate-rank.py rank, readiness-grade.md § The grading agents,
 //       `estate-dispatch.py preflight` and `record ... --by schedule`.
@@ -43,6 +43,13 @@
 //       from "the same prior's root" "before the carry".
 //   p13 § 1.5 step 3 mends a task whose note does not parse through `next-action.py mend <slug>`, the one writer of the
 //       quoting rule, and holds no `as one Edit` (a hand copy of it).
+//   p14 a gate the grade names and the sweep misses is asked ahead (p56-2, ADR 0034): § 1.5 step 7 passes
+//       `--ask-gates`; § 1.5's intro, **The round.** and its **A gate the grade names** paragraph put the sign-off
+//       (no recommendation, the act shown with the question, a typed answer that signs nothing writes nothing, spend
+//       never read, an extra's skipped); **The final call.** and step 8 name `unsigned`; the orient-all form and Under
+//       the chain item 4 pass no `--ask-gates`, so it is first seen mid-run there; § 3.6's **Signed ahead, or named by
+//       the grade** stamps a signed task and never dismisses a `swept` hit; S3.5 and orient §§ 6 and 7 name the
+//       sign-offs and the `unsigned` leavers; ADR 0034's dated line and readiness-grade.md's `gates` say so.
 // One pure function, check(files), returns the failing rules; every control mutates one place and fails exactly its
 // rule. Reads files only.
 import { test } from 'node:test'
@@ -56,7 +63,9 @@ const RUN_RECORD = 'skills/_shared/scripts/run_record.py'
 const GRADE = 'skills/_shared/readiness-grade.md'
 const GRAMMAR = 'skills/_shared/vault-grammar.md'
 const ADR = 'docs/adr/0047-schedule-runs-a-pre-flight.md'
-const FILES = Object.fromEntries([SCHEDULE, ORIENT_ALL, CONTEXT, RUN_RECORD, GRADE, GRAMMAR, ADR].map((f) => [f, readIf(f)]))
+const ADR34 = 'docs/adr/0034-a-gate-never-holds-an-unattended-rollout.md'
+const ORIENT = 'skills/orient/SKILL.md'
+const FILES = Object.fromEntries([SCHEDULE, ORIENT_ALL, CONTEXT, RUN_RECORD, GRADE, GRAMMAR, ADR, ADR34, ORIENT].map((f) => [f, readIf(f)]))
 
 // The flags each prior-root command has had since the first Engine snapshot (ADR 0047 § Build rulings).
 const PRIOR_VERBS = [
@@ -243,6 +252,37 @@ function check(files) {
   need('p13', '§ 1.5 step 3', step3, ['${CLAUDE_PLUGIN_ROOT}/skills/_shared/scripts/next-action.py mend <slug>'])
   never('p13', '§ 1.5 step 3', step3, ['as one Edit'])
 
+  // p14: a gate the grade names and the sweep misses is asked ahead (p56-2).
+  need('p14', '§ 1.5', pf, ['[--kept <each kept slug>] --ask-gates', 'but for one whose grade names a sign-off its note never words'])
+  need('p14', '§ 1.5 **The round.**', round, ['then the gate sign-offs', 'Only his decisions and the sign-offs his grades name are asked',
+    'for a `gate` row its `gate` kind and no `decision`', 'gets no question but, for a Ready one, a gate sign-off',
+    "an extra's is skipped too, so it leaves unsigned the same way"])
+  need('p14', '§ 1.5 **A gate the grade names**', para('**A gate the grade names'), ['`credential` or `irreversible`',
+    '`## Approved gates`', 'asked ahead at schedule', '`unsigned`', 'carries no recommendation', 'shown with the question', 'ADR 0008',
+    'Any other typed answer, "there is no such act here" included, writes nothing',
+    'never writes an `## Approved gates` bullet he did not sign', 'Spend is never read here', 'skipped for an extra'])
+  need('p14', '§ 1.5 **The final call.**', final, ['`unsigned`'])
+  need('p14', "step 8's **Pre-flight's left-out tasks.**", left, ['[[task-i]] — its grade names an irreversible sign-off its note ' +
+    'never words, and none is signed: the next schedule puts it again'])
+  need('p14', 'step 8', s8, ['you said:', 'a pickup you did not name', "signed ahead in the Pre-flight's round"])
+  const chain4 = C(slice(sec(sch, /^### 0\. /), /^4\. § 1\.5: /, /^5\. /) ?? '')
+  for (const [name, text] of [['§ 1.5 **The orient-all form.**', form], ['Under the chain item 4', chain4]]) {
+    need('p14', name, text, ['passes no `--ask-gates`', 'first seen mid-run'])
+  }
+  const signedAhead = C(sec(sch, /^### 3\.6\. /).split(/\n\s*\n/).find((p) => p.startsWith('**Signed ahead, or named by the grade')) ?? '')
+  need('p14', "§ 3.6's **Signed ahead, or named by the grade**", signedAhead, ['A hit inside an `## Approved gates` bullet is a gate already signed',
+    'its task is stamped `plan_approval: required` and listed as signed ahead', 'lists under `swept` is never dismissed for naming nothing'])
+  const SIGN_OFFS = 'decisions and the sign-offs its grades name, never a confirm'
+  const o6 = C(sec(files[ORIENT], /^### 6\. /))
+  const o7 = C(sec(files[ORIENT], /^### 7\. /))
+  need('p14', 'S3.5', s35, [SIGN_OFFS, 'before S4, which asks nothing there'])
+  need('p14', 'orient § 6', o6, [SIGN_OFFS, 'Orient-graded, undecided or unsigned tasks'])
+  need('p14', 'orient § 7', o7, [SIGN_OFFS, 'Orient-graded, undecided or unsigned members'])
+  for (const [name, text] of [['S3.5', s35], ['orient § 6', o6], ['orient § 7', o7]]) never('p14', name, text, ['(decisions, never a confirm)'])
+  need('p14', 'ADR 0034', C(files[ADR34]), ['by p56-2', "asked ahead in schedule's Pre-flight round", 'pass no `--ask-gates` and put no question',
+    'Decision round (orient-all § 4) does not put this gate either', 'first seen mid-run'])
+  need('p14', 'readiness-grade.md', C(files[GRADE]), ['is listed even when the note never words the act'])
+
   return { fails: [...fails].sort(), details }
 }
 
@@ -346,6 +386,33 @@ test('control p10: S7 without the Pre-flight line fails p10 alone', () => {
 
 test('control p11: an empty queue that drops the Grade log lines fails p11 alone', () => {
   only(swap(FILES, SCHEDULE, 'the Grade log lines `log` wrote', 'nothing else', PF), ['p11'], 'grade log')
+})
+
+test('control p14: a gate the grade names left unasked, signed by a typed answer, dismissed or unstamped fails p14 alone', () => {
+  only(swap(FILES, SCHEDULE, '[--kept <each kept slug>] --ask-gates', '[--kept <each kept slug>]', PF), ['p14'], 'no flag')
+  only(swap(FILES, SCHEDULE, '  - [[task-i]] — its grade names an irreversible sign-off its note never words, and none is signed: the next ' +
+    'schedule puts it again\n', '', /^### 8\. /), ['p14'], 'left-out line')
+  only(swap(FILES, SCHEDULE, 'The fork passes no `--ask-gates`', 'The fork passes `--ask-gates`', PF), ['p14'], 'orient-all fork')
+  only(swap(FILES, SCHEDULE, 'Any other typed answer, "there is no such act here" included, writes nothing',
+    'Any other typed answer is taken as a sign-off', PF), ['p14'], 'typed answer')
+  only(swap(FILES, SCHEDULE, 'lists under `swept` is never dismissed for naming nothing', 'lists under `swept` is dismissed as any other',
+    /^### 3\.6\. /), ['p14'], 'swept dismissed')
+  only(swap(FILES, SCHEDULE, 'decisions and the sign-offs its grades name, never a confirm', 'decisions, never a confirm'), ['p14'], 'S3.5')
+  only(swap(FILES, ORIENT, 'Orient-graded, undecided or unsigned tasks', 'Orient-graded or undecided tasks'), ['p14'], 'orient § 6')
+  only(swap(FILES, ORIENT, 'Orient-graded, undecided or unsigned members', 'Orient-graded or undecided members'), ['p14'], 'orient § 7')
+  only(swap(FILES, ADR34, "is asked ahead in schedule's Pre-flight round (ADR 0047)", 'is noted'), ['p14'], 'ADR asked ahead')
+  only(swap(FILES, ADR34, 'does not put this gate either', 'puts it'), ['p14'], 'ADR estate pass')
+  only(swap(FILES, GRADE, 'is listed even when the note never words the act', 'is listed only when the note words the act'), ['p14'], 'grade')
+  only(swap(FILES, SCHEDULE, 'gets no question but, for a Ready one, a gate sign-off', 'gets no question', PF), ['p14'], 'Ready unasked')
+  only(swap(FILES, SCHEDULE, 'Only his decisions and the sign-offs his grades name are asked', 'Only his decisions are asked', PF), ['p14'],
+    'decisions only')
+  only(swap(FILES, SCHEDULE, ', but for one whose grade names a\nsign-off its note never words, which queues once he signs it ' +
+    '(**A gate the grade names**, below)', '', PF), ['p14'], 'intro')
+  only(swap(FILES, SCHEDULE, 'its task is stamped `plan_approval: required` and listed as signed ahead', 'its task is not stamped',
+    /^### 3\.6\. /), ['p14'], 'not stamped')
+  only(swap(FILES, SCHEDULE, "an extra's is skipped too, so it leaves unsigned the same way", "an extra's is put too", PF), ['p14'], 'extra put')
+  only(swap(FILES, SCHEDULE, "signed ahead in the Pre-flight's round: irreversible: republish the site", 'queued', /^### 8\. /), ['p14'],
+    'step 8 signed ahead')
 })
 
 test('control p12: a new flag on the prior\'s carry, eleven commands, or the defer after the carry fails p12 alone', () => {

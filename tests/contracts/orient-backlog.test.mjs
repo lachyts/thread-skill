@@ -37,6 +37,11 @@
 //   questions    B9's order: asks, § 3.5, the grill, the records, the round, § B8, then the re-stamp;
 //   gate-answer  a kept § 3.5 gate is recorded as the `## Decisions` answer answer 15 dismisses; a held one writes
 //                nothing, takes no wait line and never holds the re-stamp;
+//   signed-gate  a gate only the grade names (p56-2): B6 answer 8's `preflight` passes `--ask-gates` and answer 16
+//                never dismisses a `swept` hit; B5 returns each `gate` row's act line; B9's **A gate signed** writes
+//                the `## Approved gates` bullet and joins the round, and **A gate left** writes nothing, decides
+//                nothing, takes no wait line, and lists a typed answer under Held by his answer but no answer under
+//                Questions waiting; reshuffle R3 points at it;
 //   wording      only B9's unit asks; no exemption phrase, no retired word; every outside § B<n> names the file.
 // One pure function, check(files), over { relPath: text }. Reads files only.
 import { test } from 'node:test'
@@ -319,6 +324,19 @@ function check(F) {
   need('gate-answer', "B9's § 3.5 Yes", yes, ['nothing is written to the task', 'It stays out', '`## Held by his answer`', 'no `wait` line'])
   never('gate-answer', "B9's § 3.5 Yes", yes, ['backlog-orient.py wait', 'estate-dispatch.py record'])
   need('gate-answer', 'B6 answer 15', C(slice(b6, /^15\. /, /^16\. /) ?? ''), ['a match that a recorded `## Decisions` answer settles is dismissed'])
+
+  // signed-gate (p56-2): a gate only the grade names is asked after the start, and the task waits on it.
+  need('signed-gate', 'B6 answer 8', C(slice(b6, /^8\. /, /^9\. /) ?? ''), ['--ask-gates', '`unsigned`', '`gate` question'])
+  need('signed-gate', 'B6 answer 16', C(slice(b6, /^16\. /, /^17\. /) ?? ''), ['lists under `swept` is never dismissed for naming nothing'])
+  need('signed-gate', "B5's **A fork returns**", item(B(F, 5), 'A fork returns'), ['one line naming the act'])
+  need('signed-gate', "B9's **A gate signed**", item(b9, 'A gate signed'), ['`## Approved gates`', '(approved <D>, asked ahead at schedule)',
+    'typed words that sign', 'joins the post-question round', '§ 3.6 stamps the task'])
+  const left = item(b9, 'A gate left')
+  need('signed-gate', "B9's **A gate left**", left, ['nothing is written to the task', 'never decided, whatever else was recorded for it',
+    '`## Held by his answer`', 'no `wait` line', 'Any other typed answer', 'never writes an `## Approved gates` bullet he did not sign',
+    'goes under Questions waiting', 'never under Held by his answer'])
+  never('signed-gate', "B9's **A gate left**", left, ['backlog-orient.py wait', 'estate-dispatch.py record'])
+  need('signed-gate', 'reshuffle R3', sec(r, /^## R3\. /), ["A gate only the Readiness grade names is not R3's to find"])
   if (!constant.includes('"Held by his answer"')) flag('gate-answer', "the script's SECTIONS lack Held by his answer")
   if (!/^WAITING = "Answered, waiting"$/m.test(py) || /rec\.rows\("Held by his answer"\)/.test(py)) flag('gate-answer', 'guard 4 reads another section')
 
@@ -383,6 +401,12 @@ const CONTROLS = [
   ['gate-answer', [BACK, '  `python3 ${CLAUDE_PLUGIN_ROOT}/skills/_shared/scripts/estate-dispatch.py record --task <slug> --question \'§ 3.5 gate:', '  `record --task <slug> --question \'§ 3.5 gate:']],
   ['gate-answer', [BACK, 'with no `wait` line and no', 'with a `backlog-orient.py wait` line and no']],
   ['gate-answer', [BACK, 'a match that a recorded `## Decisions` answer settles is dismissed', 'every match is a drop']],
+  ['signed-gate', [BACK, 'never decided, whatever else was recorded for it', 'is decided once its other answers are recorded']],
+  ['signed-gate', [BACK, 'is a gate left, and the run never writes an', 'is a gate signed, and the run writes an']],
+  ['signed-gate', [BACK, 'its `preflight` calls pass `--ask-gates` (p56-2)', 'its `preflight` calls pass no new flag']],
+  ['signed-gate', [RESH, "A gate only the Readiness grade names is not R3's to find", 'A gate the Readiness grade names is R3\'s']],
+  ['signed-gate', [BACK, 'and never under Held by his answer', 'and under Held by his answer too']],
+  ['signed-gate', [BACK, 'takes no `wait` line and gets no', 'takes a `wait` line and gets an']],
   ['wording', [BACK, '- **Frozen**, listed and never touched:', '- **Frozen**, listed (and ask him first):']],
   ['wording', [BACK, '- **Never rename a task**', '- **Never rename a task or a ' + ['wa', 've'].join('')]],
 ]
