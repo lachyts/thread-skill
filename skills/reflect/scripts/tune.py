@@ -3,8 +3,9 @@
 its own (ADR 0037 d5), and record each (p15-5, ADR 0032).
 
 python >= 3.8, stdlib only (score.py, which it loads, keeps the same floor). The Reflection's only writer of
-rollouts.toml (inert-paths.py writes a repo's Inert paths and rollout-settings.py `declare` a ruled declaration, each
-its own keys) and the only writer of tunings.jsonl. An edit that adds a key above the file's `schema` raises its top-level `schema` line in the same edit
+rollouts.toml (inert-paths.py writes only `inert_paths`, a repo's Inert paths; rollout-settings.py `declare`
+writes any other key he has ruled on, Tuning keys included, and this script then reads that value as a hand edit: its
+revert reason prints `a hand edit, left alone`) and the only writer of tunings.jsonl. An edit that adds a key above the file's `schema` raises its top-level `schema` line in the same edit
 (rollout-settings.py's header, ADR 0043): raise_schema(), below. Three callers (ADR 0037 d4-d5): skills/reflect/SKILL.md step 7 runs it exactly once per by-hand
 Reflection that reached its scores; skills/reflect/scripts/close-score.py runs `--record-only --close <kind>` once at
 each rollout's close (its completion ceremony, or its supersede); and SKILL.md step 14 (the weekly reading) runs

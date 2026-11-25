@@ -24,8 +24,13 @@ script). The sweep R3 (c) runs reads `[defaults] test_logins` from the same file
 `rollout-settings.py`'s resolve(repo=None), in process, only when a `credential:` gate line naming a
 Login needs it: read-only, with no git. A ruled declaration (R3 (c)) is the one write outside the
 vault that is not the grill's docs: `rollout-settings.py declare` writes one line of
-`~/.config/thread/rollouts.toml` and one line of `rollouts.declarations.jsonl` beside it, with no git
-but `--repo`'s read-only `git remote get-url origin`.
+`~/.config/thread/rollouts.toml` and one line of `rollouts.declarations.jsonl` beside it. Its git
+calls are read-only: with `--repo`, `git remote get-url origin`; and on every write its reader check
+(`inert-paths.py`'s `reader_check()`, through `engine-snapshot.py`'s `engine_root()`, `git_primary()`
+and `snapshot_problem()`) runs `git rev-parse` (`--local-env-vars`, `--show-toplevel`,
+`--path-format=absolute --git-common-dir`, `--verify -q HEAD`), `git symbolic-ref -q HEAD` and
+`git status --porcelain --untracked-files=no` in the plugin root, its Primary checkout and each live
+rollout's snapshot.
 
 **Under `--backlog`.** The write surface adds the record note, the trigger file and `wait` lines, each through
 `backlog-orient.py`, and the start stamp through `stamp-start --backlog` (`skills/orient/backlog.md` § B5, § B8).

@@ -1,5 +1,6 @@
 // skills/reflect/scripts/tune.py — the Reflection's only writer of rollouts.toml and the only writer of tunings.jsonl
-// (p15-5, ADR 0032; the settings file's two other writers keep to their own keys): it edits
+// (p15-5, ADR 0032; of the settings file's two other writers, inert-paths.py writes only inert_paths and
+// rollout-settings.py declare any other key Lachy has ruled on, a Tuning key included, read here as a hand edit): it edits
 // only the picked keys, records one `tuning` line per by-hand Reflection, lands and reverts the weekly reading's knobs
 // (p21-7, --auto and --revert), and writes nothing when anything is refused.
 //

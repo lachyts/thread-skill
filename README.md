@@ -266,8 +266,9 @@ proposals (writing nothing), and `skills/reflect/scripts/escapes.py`, which it l
 reads the landed tasks' Escapes and Quality from the task notes' `fixes:` and the
 Project root's git (reverts, later review findings), writing nothing either.
 `skills/reflect/scripts/tune.py` is the Reflection's only writer of `rollouts.toml` and the only writer of
-`tunings.jsonl` (the settings file has two other writers, each for its own keys: `inert-paths.py`, a repo's Inert
-paths, and `rollout-settings.py declare`, a ruled declaration): it applies the Tunings Lachy picks and the knobs the weekly
+`tunings.jsonl` (the settings file has two other writers: `inert-paths.py` writes only `inert_paths`, a repo's Inert
+paths, and `rollout-settings.py declare` writes any other key you have ruled on, a Tuning key included, a value
+`tune.py` then reads as a hand edit and leaves alone): it applies the Tunings Lachy picks and the knobs the weekly
 reading lands or reverts (ADR 0037 d5), and records one line per by-hand Reflection.
 `skills/reflect/scripts/close-score.py` runs the script
 half of a Reflection at each rollout's close (fold, settings, score,
