@@ -21,6 +21,7 @@ Label each question before it is asked:
 - Spend under the standing approval is never asked (Chorus ADR 0108 d4): a fork about spend alone is *priorities*.
 - A credential in its repo's declared test-credential class is never asked ahead (ADR 0063): the standing approval signs it at the stop, or asks then.
 - A credential gate naming only a declared test Login (`[defaults] test_logins`) is never asked ahead (p37-4): the standing approval signs it at the stop, or asks then.
+- A declaration he has ruled on in words is never handed back to him as a hand edit (ADR 0063's 2026-11-24 amendment): the agent writes it with `rollout-settings.py declare`, quoting his words and their date, and reports the line it prints. One he has not ruled on is *yours*.
 - A review STOP or a design gap is never his by default: it goes to the agent that can resolve it, unless he has said he
   steers it (the steering exception above).
 - A routine step needs no question at all: a read, a read-only command a skill names (`gh pr view`, /thread:status, a scan its own § says writes

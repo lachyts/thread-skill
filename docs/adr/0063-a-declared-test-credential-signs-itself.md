@@ -6,6 +6,9 @@ decisions 1 and 2, where credential gates never passed the standing approval, an
 *(Amended 2026-11-05 by p37-4, ADR 0034's amendment of that date: a declared test Login (`[defaults] test_logins`,
 schema 5, operator-only by this ADR's d1 rule) signs a credential gate that names only it. It is machine-wide, so
 (vii) "A Leg never signs one" holds for classes only.)*
+*(Amended 2026-11-24 by p56-5, the Amendment at the end: an agent writes a declaration Lachy has ruled on in words,
+through `rollout-settings.py declare`, and reports it. Decision 1's "No automated writer adds or changes it" holds
+from then on for a declaration he has not ruled on.)*
 
 ## Context
 
@@ -44,8 +47,9 @@ be caught at the stop, before any build.
    The reason is that inert-paths.py and tune.py edit this file line by line, and both treat a key under a
    three-segment table as a hand edit they refuse. The one-line form is an ordinary single-segment key to both: they
    keep it byte-identical and insert after it. It is never a rollout or task stamp, because agents write those, and
-   an agent could then widen its own approval. No automated writer adds or changes it: inert-paths.py's `mine`/`others`
-   check refuses an edit that resolves another repo table, and tune.py refuses an edit that changes any repo's
+   an agent could then widen its own approval. No automated writer adds or changes it *(2026-11-24, p56-5: but
+   `rollout-settings.py declare`, for a declaration he has ruled on; the Amendment below)*: inert-paths.py's
+   `mine`/`others` check refuses an edit that resolves another repo table, and tune.py refuses an edit that changes any repo's
    `test_credentials`. Built-in: no class, which is off.
 
 2. **The reading.** `gated_inputs.credential_reading(gate, cls)` fails closed; the first failure wins, and it reads
@@ -113,7 +117,8 @@ be caught at the stop, before any build.
 ## Considered options
 
 - **A rollout-note stamp written at schedule time.** Rejected: agents write rollout and task notes, so an agent could
-  widen its own approval. The class lives where only Lachy writes.
+  widen its own approval. The class lives where only Lachy writes. *(2026-11-24, p56-5: and where an agent writes
+  only his quoted ruling; the Amendment below.)*
 - **An enforced fixed gate form**, as ADR 0038 did for spend. Rejected: it changes task.workflow.js's bytes and so
   every in-flight resume cache. A fail-closed reader plus a recorded Planner line gets the same effect.
 - **An engine judge hook** pricing credentials at the plan judge. Rejected for the same reason, and because the
@@ -156,3 +161,52 @@ Accepted residuals:
    to its body later reaches Lachy mid-run, never ahead. Nothing is signed unproved; the ask only moves.
 10. *(x)* A schema-2 Engine snapshot ignores the key (ADR 0043), so its rollouts ask every credential gate, as before.
 11. *(xi)* The lead reads the declared env file in process. No value ever reaches stdout, a note or the Run record.
+12. *(xii)* *(2026-11-24, p56-5.)* Nothing proves the words an agent quotes to `declare` are Lachy's, or that they
+    name the thing declared: an invented or stretched ruling widens that agent's own approval, which is what decision
+    1 kept out. The log line and the reported `declared` line are how he sees it; it is a review failure, undone
+    from the log.
+
+## Amendment (2026-11-24, p56-5: an agent writes a ruled declaration)
+
+At the orient grill of 2026-11-24 Lachy was asked who makes the edits to `~/.config/thread/rollouts.toml` that he
+has already ruled on. He took the widest option: **"Agents make any ruled edit"**. Whenever he has ruled on a
+declaration in words, an agent writes it into the file and reports it: a declaration he has already agreed to no
+longer waits on his own hand edit. The same day, under this ruling, the orient session declared the dummy Login a
+test Login.
+
+**What it reverses.** Decision 1's "No automated writer adds or changes it", and the same rule as ADR 0034's
+2026-11-05 amendment applies it to `test_logins` ("no agent or script writes it"), for a declaration he has ruled
+on. The rule was there so an agent could never widen its own approval. A quoted ruling keeps that: the approval is
+still his, and the agent only carries it into the file.
+
+**What stands.** A stamp on a rollout or task note is still never the class, since agents write those on no word of
+his. tune.py still refuses a Tuning whose result changes `test_credentials` or `test_logins`, and inert-paths.py
+still refuses an edit that changes another table. A declaration he has not ruled on is still his question, a
+needs-you item or an ask ahead, never an agent's inference.
+
+## Decided for him (overturnable)
+
+1. **Ruled means his own words.** Quoted exactly, with the date he said them, and naming the thing declared, or
+   said of it where `--source` shows that. A sign-off of one gate, a gate's wording, an agent's inference, a
+   pattern in his past answers or his silence is no ruling. `declare` checks that the words and a date that is not
+   in the future are there; that they name the thing is the agent's rule, since his ruling of 23 Nov on the voice
+   keys reads "I shouldn't be asked about this", which names nothing by itself.
+2. **Every agent edit is reported where he reads the result.** The `declared` line `declare` prints goes verbatim
+   into the agent's reply, confirm batch or report; a rollout's task agent puts it in its task note and its final
+   output, which the lead carries.
+3. **One writer.** `rollout-settings.py declare`, and no agent edits the file any other way. A Tuning stays tune.py's
+   and an Inert path inert-paths.py's.
+4. **It covers every key of the file but two.** `inert_paths`, whose writer proves each glob first, and `schema`,
+   which a writer raises and nobody declares.
+5. **The reader check runs at every write, and there is no `--force`.** A refused file halts every rollout on the
+   machine, so one live rollout whose engine root cannot read the edited file blocks the declaration until it
+   finishes. His hand edit remains.
+6. **The log sits beside the file and is written first.** `rollouts.declarations.jsonl` holds the key, the value, his
+   quoted words, their date and the line it replaced. A replace that fails after the log line is voided there.
+7. **`undo` needs his words too.** An undo of a ruled removal would otherwise widen an approval on nobody's word. It
+   never lowers `schema`, and it puts a removed line back at its old place, or at the end of its table when the
+   lines around that place have changed.
+8. **Dates are the machine's local date,** the day he would name for his own words. The log's `ts` and its ids are
+   UTC.
+9. **A line's comment names its last declaration only.** The log is the record. A Tuning that later moves a declared
+   Tuning key keeps the comment while the value is tune.py's, recorded in tunings.jsonl.

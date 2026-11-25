@@ -379,8 +379,8 @@ a reading needs it (part 1), with no git and no bytecode.
 
 5. The test-Login reading (p37-4, ADR 0034's 2026-11-05 amendment): a credential gate the standing approval may sign
    because it names only Claude Logins the operator declared as test Logins (rollout-settings.py's `[defaults]
-   test_logins`, schema 5, operator-only: `logins` below, a list of names, or None). Machine-wide, so a Leg's serial
-   note signs one too. It reads no limit, ledger, month line or file.
+   test_logins`, schema 5, declared on his ruling only: `logins` below, a list of names, or None). Machine-wide, so a
+   Leg's serial note signs one too. It reads no limit, ledger, month line or file.
    - `has_login_phrase(gate)`: true when the text after the first `:` holds a `Login` or `Logins` word (any case) and
      no upper-snake env token (ENV_TOKEN_RE). Such a gate takes this reading, never the class one of 4; a gate with
      an env token keeps 4's path, which needs one, so no gate routed here could have signed there.

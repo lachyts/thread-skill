@@ -1642,7 +1642,8 @@ through time, from attention to merged PRs. Terms only — no implementation.
   under the Standing approval once each key is proved present in that file
   and the rollout's `env_bootstrap` copies the file with a plain `cp`
   (ADR 0063); a key missing from it is asked at the stop. The class is its
-  own switch, at any spend limit, and only Lachy writes it. Schedule and
+  own switch, at any spend limit, and is declared on his ruling only (a
+  Ruled declaration, or his hand edit). Schedule and
   orient record such a credential, never ask it ahead; a Leg never signs one
   (a Test Login is machine-wide).
   _Avoid_: safe key, dev key.
@@ -1654,9 +1655,22 @@ through time, from attention to merged PRs. Terms only — no implementation.
   second thing beside them, signs itself under the Standing approval with no
   limit, ledger or month line (p37-4, ADR 0034's 2026-11-05 amendment); a
   serial Leg signs one too. A second thing named in plain prose with none of
-  those is not seen, and signs (a residual). Only Lachy writes it. Schedule
+  those is not seen, and signs (a residual). It is declared on his ruling
+  only (a Ruled declaration, or his hand edit). Schedule
   and orient record such a gate, never ask it ahead, on a serial chain too.
   _Avoid_: dummy account, test account.
+- **Ruled declaration** — a declaration in the Rollout settings file that
+  Lachy has ruled on in his own words, written there by an agent ("Agents make
+  any ruled edit", ADR 0063's 2026-11-24 amendment). The agent quotes his
+  words exactly, with the date he said them, to the file's one writer for
+  it, `rollout-settings.py declare`, which asks every live rollout's engine
+  root to read the edited file, writes ONE line, and logs it in
+  `rollouts.declarations.jsonl` beside the file with the line it replaced,
+  so `undo --id` takes it back (on his words too). Its `declared` line is
+  reported where he reads the result. A declaration he has not ruled on
+  stays his question: a sign-off of one gate, an inference from his answers
+  or silence is no ruling.
+  _Avoid_: auto-declare, self-approval.
 - **Human fix** — the one stated act that moves a set-aside task no agent may
   move (sign a gate, decide a refused descope, restore an Integration with no
   PR), with its detail: `lead-integrate.py inputs`' `humanFix` ({act, detail,

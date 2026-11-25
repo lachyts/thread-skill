@@ -33,7 +33,8 @@ schema, the Watch rule, the Agreement rule, the arms Agreement rule and the cade
 task: a bug task
 (Work/Tasks/thread-skill-bug-<words>.md), the suite audit (Work/Tasks/thread-skill-suite-audit-<date>.md, through bug's
 path) and the decision task (Work/Tasks/thread-skill-decisions-<date>[-N].md), to which `moot` adds a line at decide time. It
-never writes rollouts.toml or tunings.jsonl (tune.py is their one writer: step 14 runs `tune.py --revert` and `--auto`)
+never writes rollouts.toml or tunings.jsonl (tune.py is the Reflection's one writer of them: step 14 runs `tune.py
+--revert` and `--auto`)
 nor ladder.toml (a Fable ceiling moves only on Lachy's yes, which the session deciding the decision task applies),
 never commits, and never touches git. `span --fold` runs reconcile-rollout.py fold-journals, whose call-journal lines
 are span's only write outside --out's directory (the Time-lost ledger's intervals file, <dir of F>/ledger-intervals.json,

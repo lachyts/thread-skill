@@ -20,8 +20,11 @@ passes Lachy's answer on:
   copy of every rule (running time, the binding constraint, the baseline, the proposal rules), and
   `skills/reflect/scripts/escapes.py` beside it, which it loads, holds the rules for the Escapes and Quality.
 - `skills/reflect/scripts/tune.py` is the **only writer** of `rollouts.toml` and of `tunings.jsonl` (the
-  Reflection's line beside the record). Never edit either file by hand from this skill, and never compute a score
-  or write a Tuning in the conversation, save the one by-hand edit below.
+  Reflection's line beside the record) in a Reflection: no other step here writes either. Outside it `rollouts.toml`
+  has two more writers, each for its own keys and neither moving a Tuning: `inert-paths.py` (a repo's Inert paths)
+  and `rollout-settings.py declare` (a declaration he has ruled on; ADR 0063's 2026-11-24 amendment). Never edit
+  either file by hand from this skill, and never compute a score or write a Tuning in the conversation, save the one
+  by-hand edit below.
 - `~/.config/thread/ladder.toml`'s `[share]` values (each role's Fable ceiling, ADR 0079 d9) have **no script writer**
   until p46-10: arms.py proposes a move and reflect.py lists it on the decision task, and neither writes the file. A
   ceiling's yes in § Deciding the decision task is the one by-hand edit this skill makes: that one value, and no

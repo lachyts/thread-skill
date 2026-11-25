@@ -107,7 +107,7 @@ and cap it can read at its widest, or one over the line, reaches you.
 and schedule's gated-input sweep.
 
 A credential gate for a repo's test-mode or staging keys signs itself too, once
-the repo declares them (ADR 0063). Write the class as ONE line in the repo's
+the repo declares them (ADR 0063). The class is ONE line in the repo's
 table, with `schema = 3` at the top of the file:
 
 ```toml
@@ -115,9 +115,13 @@ table, with `schema = 3` at the top of the file:
 test_credentials = { file = "~/repos/animately/optimizer/.env.local", keys = [{ name = "STRIPE_SECRET", prefix = "sk_test_" }, { name = "SUPABASE_SERVICE_ROLE_KEY", supabase_project = "geyyptxqiovujgbiecsp" }] }
 ```
 
-Write it only after installing a release that knows the key: an older snapshot
-(schema 2) ignores it, and a pre-P29 reader refuses any `schema` line. After the
-edit, run `python3 skills/_shared/scripts/rollout-settings.py --repo <clone>` to
+It is declared on your ruling only: write it by hand, or rule on it in words
+and an agent writes it with `rollout-settings.py declare --repo <clone>`,
+quoting your words and their date (ADR 0063's 2026-11-24 amendment; the test
+Login below has an example). No other skill or script writes it. Either way it
+is written only after installing a release that knows the key: an older snapshot
+(schema 2) ignores it, and a pre-P29 reader refuses any `schema` line. After a
+hand edit, run `python3 skills/_shared/scripts/rollout-settings.py --repo <clone>` to
 check it reads. Any other form (a `[repo."o/r".test_credentials]` sub-table, a
 dotted key, a value over several lines) refuses the whole file, which halts every
 schema-3 rollout at its next entry. The rollout's `env_bootstrap` must copy that
@@ -129,11 +133,11 @@ you at the stop, by name. The class is its own switch, independent of
 `spend_approval_usd`: it signs at the built-in 0 too.
 
 A credential gate naming only a declared test Login, such as a dummy Claude
-Login kept for probes, signs itself too. Declare it as ONE line under
-`[defaults]`, with `schema = 5` at the top of the file, by hand and only after
+Login kept for probes, signs itself too. It is ONE line under
+`[defaults]`, with `schema = 5` at the top of the file, written only after
 installing a release that knows the key (an older snapshot ignores it; a
-pre-P29 reader refuses the `schema` line, so check each live rollout's engine
-root reads the new file first):
+pre-P29 reader refuses the `schema` line, so each live rollout's engine
+root must read the new file first):
 
 ```toml
 schema = 5
@@ -142,9 +146,23 @@ schema = 5
 test_logins = ["dummy"]
 ```
 
-Then run `python3 skills/_shared/scripts/rollout-settings.py` to check it reads:
-it prints `"test_logins": {"value": ["dummy"], "source": "file:defaults"}`. It is
-operator-only: no skill or script writes it. The gate still asks when, beside
+It is declared on your ruling only: your hand edit, or an agent's once you
+have ruled on it in words (ADR 0063's 2026-11-24 amendment). The agent runs the
+file's one writer for a declaration, quoting you:
+
+```
+python3 skills/_shared/scripts/rollout-settings.py declare --key test_logins --value '["dummy"]' \
+    --words "the dummy Login is a test Login" --said 2026-11-24
+```
+
+It asks each live rollout's engine root to read the edited file first, writes
+the one line, records it in `~/.config/thread/rollouts.declarations.jsonl`
+(your words, their date and the line it replaced, so `rollout-settings.py undo
+--id <id>` takes it back) and prints one `declared` line, which the agent
+reports to you. No other skill or script writes it, and a declaration you have
+not ruled on stays your question. After a hand edit, run
+`python3 skills/_shared/scripts/rollout-settings.py` to check it reads: it
+prints `"test_logins": {"value": ["dummy"], "source": "file:defaults"}`. The gate still asks when, beside
 the Login, it holds a deny word (such as token, access, secret or a live
 account), an env name, another credential word (account, key, credential,
 API, PAT or `.env`), an `@` address, or a conjunction that joins a second
@@ -247,8 +265,9 @@ the lead's loop entries (`reconcile-rollout.py record-entry`) and why main moved
 proposals (writing nothing), and `skills/reflect/scripts/escapes.py`, which it loads,
 reads the landed tasks' Escapes and Quality from the task notes' `fixes:` and the
 Project root's git (reverts, later review findings), writing nothing either.
-`skills/reflect/scripts/tune.py` is the only writer of `rollouts.toml` and
-`tunings.jsonl`: it applies the Tunings Lachy picks and the knobs the weekly
+`skills/reflect/scripts/tune.py` is the Reflection's only writer of `rollouts.toml` and the only writer of
+`tunings.jsonl` (the settings file has two other writers, each for its own keys: `inert-paths.py`, a repo's Inert
+paths, and `rollout-settings.py declare`, a ruled declaration): it applies the Tunings Lachy picks and the knobs the weekly
 reading lands or reverts (ADR 0037 d5), and records one line per by-hand Reflection.
 `skills/reflect/scripts/close-score.py` runs the script
 half of a Reflection at each rollout's close (fold, settings, score,
