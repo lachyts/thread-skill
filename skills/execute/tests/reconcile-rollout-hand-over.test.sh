@@ -112,7 +112,7 @@ ho() { local c=$1; shift; rr hand-over --rollout "$V/$(N "$c").md" --tasks-dir "
 started() {  # started <case> <slug> <runId>: the task's Slot and its bound task call, through the engine's writers
   rr mark-started --tasks "$2" --rollout "$V/$(N "$1").md" --tasks-dir "$V" --now "$T0" >/dev/null
   : > "$TMP/journal/$3.json"
-  rr bind-run --tasks "$2" --run-id "$3" --call task --journal-dir "$TMP/journal" --tasks-dir "$V" >/dev/null
+  rr bind-run --tasks "$2" --run-id "$3" --call task --journal-dir "$TMP/journal" --tasks-dir "$V" --now "$T0" >/dev/null
 }
 mins() { python3 -c 'import sys; from datetime import datetime, timedelta; print((datetime.fromisoformat(sys.argv[1].replace("Z", "+00:00")) + timedelta(minutes=int(sys.argv[2]))).strftime("%Y-%m-%dT%H:%M:%SZ"))' "$T0" "$1"; }
 
