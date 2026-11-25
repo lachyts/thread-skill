@@ -525,7 +525,9 @@ orient reports them from schedule's summary.
 Schedule's sign-ins (its serial path's S3.7, ADR 0074 d2) may put one `hands_steps` sign-in list and its check-again
 question here, before any note is written: a sign-in, never a confirm. A server he will not sign in to now, or a
 check that cannot run, leaves the rows needing it out with their dependants, unstamped. Orient reports each from
-schedule's summary with its `sign in to <server>, then /thread:orient --steer` line.
+schedule's summary with its `sign in to <server>, then /thread:orient --steer` line. Schedule's S2.5 and S4 put no
+question here, so a member held for an unsigned credential or irreversible gate leaves with its dependants,
+unstamped, with its `unsigned gate` line, and orient reports it the same way (p56-3).
 
 - **Exclusions** (kept out of every `--tasks`, each named with its reason in § 6's left-out list; the fit test already
   sends most of them to the session lane): conversation-gated tasks (need Lachy's input — say so, leave them for Hands-on or
@@ -538,7 +540,8 @@ schedule's summary with its `sign in to <server>, then /thread:orient --steer` l
   instead (Hands-on, a parallel rollout, a serial rollout, Not now), the ruling lines keep it
   decided. Also excluded: in-flight tasks (§ 2). A task whose playbook demands sign-off before
   external effects goes in with that gate declared (schedule § 3.5), so it is set aside, never run
-  past (ADR 0008, ADR 0034).
+  past (ADR 0008, ADR 0034); when that effect is a credential or irreversible gated input no bullet signs, schedule
+  leaves the row out of the chain with its line instead (p56-3).
 - **Schedule stopped at § 0, or on its serial path's plan or surface check** (S2, S3) → handled as
   in § 6: report its line and remedy; nothing is stamped.
 - **Surface overlap or session lane.** A chain refused at S3 overlaps an unfinished parallel

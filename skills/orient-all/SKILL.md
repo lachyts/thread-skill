@@ -263,8 +263,9 @@ rounds. A Grill task is decided only when every one of its decisions is answered
    14. Step 8: no execute handoff, and no Start when ready.
    15. Serial S1 and S4 ask nothing, as under orient § 7; S2's `sessionLane` members are returned as answer 2's
        misfits are. S3.7 checks nothing and raises no list: each pair the prompt line's `signed in` part names reads
-       signed in, and every other pair S3.7 would check goes as `--signed-out`. S2's `leftOut` rows are returned
-       with their lines.
+       signed in, and every other pair S3.7 would check goes as `--signed-out`. S2.5 and S4 put no question either,
+       so a row held for an unsigned credential or irreversible gate leaves with its dependants (p56-3). S2's
+       `leftOut` rows are returned with their lines.
    16. schedule's Pre-flight (schedule § 1.5, and S3.5 on the serial path) takes this pass's grades and answers as they
        stand: no grading agent, no round and no Grade log line (§ 2 step 7 logged them). Its `--tasks` is the fork's
        step 1 candidates, and its `--decided` the prompt line's decided slugs among them. A member not

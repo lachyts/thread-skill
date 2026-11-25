@@ -902,7 +902,8 @@ The Stops are § 1's, already passed. Then (b) for every set-aside row, whatever
 - **A gate** (`setAside.status` gate-pending): present each of its `setAside.gates` verbatim (Owner *yours*: a sign-off
   is his, ADR 0008; `${CLAUDE_PLUGIN_ROOT}/skills/_shared/asking.md`). On his sign-off,
   `python3 ${CLAUDE_PLUGIN_ROOT}/skills/execute/scripts/reconcile-rollout.py approve-gates --tasks <t> --rollout <rollout-note>`:
-  the next Leg's claim re-enters it. If he declines it, Defer (below).
+  the next Leg's claim re-enters it. If he declines it, Defer (below). The deferred note keeps its `## Gated inputs
+  (awaiting sign-off)`, and schedule chains it again only once that gate is signed (p56-3).
 - **A block** (blocked, review-blocked or plan-blocked): `AskUserQuestion` quoting `setAside.summary` (Owner *yours*, `${CLAUDE_PLUGIN_ROOT}/skills/_shared/asking.md`), offering hand
   back (with his guidance), defer, or leave it set aside.
   - Hand back: `python3 ${CLAUDE_PLUGIN_ROOT}/skills/execute/scripts/reconcile-rollout.py record-answer --tasks <t> --rollout <rollout-note> --kind decision --ask "<the ask, verbatim>" --answer "<his answer, verbatim>" --fingerprint <row.setAside.fingerprint> --form hand-back`,

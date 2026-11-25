@@ -79,8 +79,8 @@ Each row is one ask unit (a paragraph, list item or table row) in `skills/`, fou
 unit holds. Dispositions: `cited` (the ask stands and its unit cites `_shared/asking.md`), `listed` (a pointer at an
 ask another unit holds, whose Owner it shares: it cites `_shared/asking.md` too), `follow-up` (an ask the gate
 removes, left to the owner task named in Task and put in the Framing until it lands), `no ask` (the unit names an ask
-only to forbid it) and `designed out` (this build removed it, so its anchor appears nowhere). The table holds 71
-rows: 45 cited, 13 follow-up (p30-10 13), 3 listed, 7 no ask, 3 designed out. That is form N1:
+only to forbid it) and `designed out` (this build removed it, so its anchor appears nowhere). The table holds 72
+rows: 46 cited, 13 follow-up (p30-10 13), 3 listed, 7 no ask, 3 designed out. That is form N1:
 p30-5 (PR #226) is on main, its step 4 cited in three units. p30-4 (the approved queue) removed its 14 rows. Orient
 § 3.5's Priorities card (p30-6, Chorus ADR 0110 d5) added one `cited` row. p30-9 (ADR 0057) removed its 2 rows and
 added orient § 9's cited *gate* row: the execute handoff, decided and never asked. p29-7 (ADR 0048) added repair
@@ -88,7 +88,8 @@ added orient § 9's cited *gate* row: the execute handoff, decided and never ask
 p40-1 (ADR 0071) added the Backlog orient's § B9 cited row: his questions, put one at a time after the start.
 p42-4 (ADR 0074 d2) added schedule S3.7's cited row (the sign-in list's check-again question) and orient-all § 6's
 listed row (its parent puts that question once for every serial fork), and put the same question first in § B9's
-cited row.
+cited row. p56-3 (ADR 0034) added schedule S2.5's cited row: the sign-off of a serial row its own record holds for an
+unsigned gate, put on a standalone run only.
 
 | File | § | Anchor | Owner | Disposition | Task |
 | --- | --- | --- | --- | --- | --- |
@@ -132,6 +133,7 @@ cited row.
 | skills/schedule/SKILL.md | § 3.5 | `` Put each gate to the user in the confirm batch `` | *yours* | cited | — |
 | skills/schedule/SKILL.md | § 3.6 | `` **Ask ahead (ADR 0034) `` | *yours* | cited | — |
 | skills/schedule/SKILL.md | § Serial path | `` **S3.7. Sign-ins.** `` | *yours* | cited | — |
+| skills/schedule/SKILL.md | § Serial path | `` **S2.5. Held rows.** `` | *yours* (ADR 0008) | cited | — |
 | skills/status/SKILL.md | § 1 | `` **list the matches and ask which**: don't assume `` | *yours* | cited | — |
 | skills/next/SKILL.md | § Process | `` **An open question this session left** `` | *yours* (step 3 decides the rest) | cited | — |
 | skills/next/SKILL.md | § Process | `` **Decide the move, and say so in one line.** `` | *gate* | cited | — |

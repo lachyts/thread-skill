@@ -618,9 +618,23 @@ only), so an archived rollout, done or not, is never read. In each, its linked t
   or `drained, never handed`. The carrier until the Stage opens `leads` rows (ADR 0085 d11), and after: it drops once
   a fresh lead enters or the stamps go.
 Then, outside any rollout: each task directly in the tasks dir, tagged `task`, `status: open` and in no live rollout,
-whose `## Left out at schedule` section holds an entry (schedule § Serial path writes one for each row its final S2
-JSON's `leftOut` names, whether S3.7's re-run or a later S4 re-run left it out; S6 removes it once the row is
-stamped): kind `sign-in`, `text` its latest entry, rollout null, act `sign in, then /thread:orient --steer`.
+whose `## Left out at schedule` section holds an entry (schedule § Serial path writes one for each row an S2 JSON's
+`leftOut` names, S2.5 the first JSON's, S3.7's re-run or a later S4 re-run the rest; S6 removes it once the row is
+stamped). Source `left-out`, rollout null, and the first state that holds (p56-3; gated_inputs.py's part 6 reads the
+records and the line forms):
+  1. its own unsigned_hold (its `## Gated inputs (awaiting sign-off)`, `## Approved gates` and `## Left out at
+     schedule`) is non-empty, whatever each row's `from`: kind the first held row's, `text` gate_line built from the
+     held rows (so it names exactly the gates still unsigned), act `approve the gate: /thread:schedule --tasks <task>
+     asks it`. It is serial-chains.py plan's own test, so the steer act is never printed for a row plan leaves out;
+  2. its latest entry is a dependant's gate line and the row it names (`<row>`, its note found in the walk index) holds:
+     kind that row's first held kind, `text` the latest entry, act `approve [[<row>]]'s gate: /thread:schedule --tasks
+     <row> asks it; then /thread:orient --steer` (a `<row>` whose note is gone reads not held);
+  3. its latest entry is a gate line of either form, nothing holds, and it holds `sign in to`: kind `sign-in`, `text`
+     the latest entry, act `sign in, then /thread:orient --steer`;
+  4. its latest entry is a gate line, nothing holds, and no sign-in clause: kind `hands-on`, `text` the latest entry,
+     act `/thread:orient --steer`;
+  5. anything else (a sign-in's line): kind `sign-in`, `text` its latest entry, act `sign in, then /thread:orient
+     --steer`.
 Then, from the same tasks (p39-21, ADR 0070 d6: "Rewritten first, then me"), each one whose `taken_out_next` holds any
 value but `rewrite` (taken_out_next(): its third take-out writes `you`, reconcile-rollout.py defer --take-out; a value
 typed by hand reads the same, as the Pickup sweep and backlog-orient.py sweep read it, so a task they freeze is
@@ -2818,7 +2832,9 @@ def lead_rows(rr, notes, warns):
 
 # ---- the needs-you list (p48-1) ----------------------------------------------------------------------------------------
 
-# schedule § Serial path's line for a row its final S2 JSON's `leftOut` names (S3.7's re-run or a later S4 re-run)
+# schedule § Serial path's line for a row an S2 JSON's `leftOut` names (S2.5 writes the first JSON's, S3.7's re-run or
+# a later S4 re-run the rest): a sign-in's, or an unsigned gate's (gated_inputs.py's gate_line, p56-3). serial-chains.py
+# copies it, since it reads the gate lines back (tests/unfinished-rollout.test.sh NY9 holds the two equal).
 LEFT_OUT_SECTION = "## Left out at schedule"
 # A Felt check's act (p52-2, ADR 0081 d3): the verb is guard-exempt, so any root at p52-2 or later records it.
 FELT_ACT = ("try it by hand, then record it: reconcile-rollout.py felt-check from any thread-skill root at p52-2 or later "
@@ -3018,6 +3034,37 @@ def take_out_item(rr, walk, path, note):
                           path.stem, text, TAKE_OUT_ACT, rr._take_out_recommendation(history))
 
 
+def unsigned_hold_of(rr, gi, note):
+    """The gates that still hold a task's serial row (gated_inputs.py's unsigned_hold over its own note): the test
+    serial-chains.py plan applies, so needs-you never prints the steer act for a row plan would leave out again."""
+    return gi.unsigned_hold(note.section_text(rr.GATE_PENDING_SECTION), note.section_text(rr.APPROVED_GATES_SECTION),
+                            note.section_text(LEFT_OUT_SECTION), rr._norm_gate)
+
+
+def left_out_item(rr, gi, walk, path, note, entries):
+    """His row for a task schedule left out (p48-1, p56-3): the first state of the module docstring's left-out rule that
+    holds, read from its own record and, for a dependant's gate line, the record of the row it names."""
+    slug, label = path.stem, project_label(rr, note)
+    latest = re.sub(r"^(?:[-*+]|\d+[.)])\s+", "", entries[-1])
+    hold = unsigned_hold_of(rr, gi, note)
+    if hold:
+        return needs_you_item(hold[0]["kind"], "left-out", None, label, slug, gi.gate_line(slug, [r["gate"] for r in hold]),
+                              f"approve the gate: /thread:schedule --tasks {slug} asks it")
+    row = gi.dependant_row(latest)
+    if row is not None:
+        entry = walk.index.get(row.lower())
+        row_hold = unsigned_hold_of(rr, gi, entry[1]) if entry is not None else []
+        if row_hold:
+            return needs_you_item(row_hold[0]["kind"], "left-out", None, label, slug, latest,
+                                  f"approve [[{row}]]'s gate: /thread:schedule --tasks {row} asks it; then /thread:orient "
+                                  "--steer")
+    if row is not None or gi.read_gate_line(latest) is not None:
+        if "sign in to" in latest:
+            return needs_you_item("sign-in", "left-out", None, label, slug, latest, "sign in, then /thread:orient --steer")
+        return needs_you_item("hands-on", "left-out", None, label, slug, latest, "/thread:orient --steer")
+    return needs_you_item("sign-in", "left-out", None, label, slug, latest, "sign in, then /thread:orient --steer")
+
+
 def cmd_needs_you(args, rr) -> int:
     """`needs-you` (p48-1): every open needs-you item across every rollout, one JSON line (the module docstring)."""
     tasks_dir = Path(os.path.expanduser(args.tasks_dir))
@@ -3041,9 +3088,7 @@ def cmd_needs_you(args, rr) -> int:
             continue
         entries = log_entries(note.section_text(LEFT_OUT_SECTION))
         if entries:
-            text = re.sub(r"^(?:[-*+]|\d+[.)])\s+", "", entries[-1])
-            items.append(needs_you_item("sign-in", "left-out", None, project_label(rr, note), path.stem, text,
-                                        "sign in, then /thread:orient --steer"))
+            items.append(left_out_item(rr, standing.gi, walk, path, note, entries))
         if taken_out_next(rr, note) not in (None, rr.TAKEN_OUT_REWRITE):   # the Pickup sweep's and backlog-orient's
             taken.append(take_out_item(rr, walk, path, note))
     items += taken

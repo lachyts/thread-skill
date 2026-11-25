@@ -40,6 +40,13 @@ kind, the hit is never dismissed for naming nothing. Under the Backlog orient th
 and the chain pass no `--ask-gates` and put no question, and the estate pass's Decision round (orient-all § 4)
 does not put this gate either, so there it is still first seen mid-run: at its plan gate when its task has one, else
 when its builder stops on it.)*
+*(Amended 2026-11-25 by p56-3: a serial chain is never written, or written again, on a row whose `credential` or
+`irreversible` gate he has not signed. schedule § Serial path leaves such a row out of the chain with its dependants,
+unstamped, each with its `## Left out at schedule` line, and a later schedule leaves it out again from that record
+until an `## Approved gates` bullet signs it (`serial-chains.py`'s Unsigned gates); a standalone run asks the sign-off
+ahead (S2.5, S4), and its answer is written at once. Spend is never held, by flag or by a pending bullet: it is never
+asked ahead (Chorus ADR 0108 d4), the Leg's `approve-gates --standing` reads it at its claim, and p56-6 and p56-7 own
+the spend side. The wait notifies nobody (ADR 0075): it is one needs-you line.)*
 
 ## Context
 

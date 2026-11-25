@@ -553,7 +553,10 @@ through time, from attention to merged PRs. Terms only — no implementation.
   side by side (ADR 0067 d4, d9). ADR 0074 d3 (proposed, to be built by Phase
   42) also refuses any row that commits to a checkout other than the one it
   launches from, read-only reach still allowed; until it lands, only the
-  refusals **Serial rollout** names apply.
+  refusals **Serial rollout** names apply. A row whose credential or
+  irreversible gate he has not signed is never in a chain: schedule leaves it
+  out with its dependants and its `## Left out at schedule` line until a bullet
+  signs it (p56-3, ADR 0034).
 - **Leg** — one session's part of a serial rollout (`skills/execute/legs.md`).
   In order: execute's git-env check, `leg.py begin`, the preflight (the
   launch's required tools answer), the smoke test (the Verify line of every

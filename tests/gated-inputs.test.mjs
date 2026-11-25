@@ -47,7 +47,13 @@
 //   no key); APPROVED_SUFFIX_RE against GATE_ANNOT_RE (pattern, flags and an uppercase strip); schedule § 7's test-Login
 //   Planner line coupled to the reader; the CLI's lazy read of `[defaults] test_logins` (declared, none, a refused file
 //   with its one stderr line and exit 1, laziness for a note with no Login gate or one stopped at steps 1-6, stderr in
-//   note order) and its no-bytecode load (a copy of three scripts, with a control that drops the flag).
+//   note order) and its no-bytecode load (a copy of three scripts, with a control that drops the flag);
+// - p56-3 (an unsigned gate holds its serial row): the `## Left out at schedule` gate line's build-and-read round trip
+//   (two gates, a trailing sign-in clause, a dependant's remedy naming its row), neither form holding a gate word,
+//   § 3.5 phrase or plain ask of its own; hold_kind and approved_date; and unsigned_hold's rows: a pending gate signed
+//   by its exact text only (spend skipped, a kindless line irreversible), a left-out gate by equal text or a later
+//   same-kind bullet of his (never older, another kind's or a standing approval's), the residual that bullet names
+//   another act, every entry read, and one row per gate whose `pending` marks a gate still awaiting sign-off.
 //
 // Hermetic: python3 -I -B (no bytecode next to the module), THREAD_EVENTS_DIR in temp (reconcile-rollout.py is only
 // imported, never run), and every sweep CLI spawn under a temp HOME. It writes only under mktemp dirs; test 7 of p39-3
@@ -136,6 +142,13 @@ for req in json.loads(sys.argv[3]):
             out.append(gi.credential_annotation(req["date"], req["names"], req["file"], req["source"]))
         except ValueError as e:
             out.append({"error": str(e)})
+    elif op == "call":
+        out.append(getattr(gi, req["fn"])(*req["args"]))
+    elif op == "const":
+        out.append(getattr(gi, req["name"]))
+    elif op == "hold":
+        rr = rr or load("rr", sys.argv[2])
+        out.append(gi.unsigned_hold(req.get("pending", ""), req.get("approved", ""), req.get("left", ""), rr._norm_gate))
 print(json.dumps(out))
 `
 function py(reqs, env = {}) {
@@ -1707,4 +1720,95 @@ test("the credential annotation strips through GATE_ANNOT_RE and the engine's un
   const stripped = py(gates.map((gate, i) => ({ op: 'strip', gate, line: `${gate} ${anns[i]}` })))
   assert.deepEqual(stripped, [true, true], 'GATE_ANNOT_RE strips each; `(sk_test_)` and `(project …)` stay')
   gates.forEach((gate, i) => assert.deepEqual([...T.unapprovedGates([gate], [`${gate} ${anns[i]}`])], [], gate))
+})
+
+// ---- p56-3: an unsigned gate holds its serial row ------------------------------------------------------------
+
+test('p56-3 the unsigned hold: the gate line round trip, no gate word of its own, and unsigned_hold\'s rows', () => {
+  const G = 'irreversible: publish the page live'
+  const K = 'credential: the Stripe live keys'
+  const frame = (s) => `; /thread:schedule --tasks ${s} asks you to approve it, and chains it once approved`
+  const LINE = `g1: unsigned gate: ${G}${frame('g1')}`
+  const SIGN_IN = 'also needs mcp__x__*, which did not read signed in from its launch cc-a from /f: sign in to x, then /thread:orient --steer'
+  const REMEDY = "approve [[g1]]'s unsigned gate (/thread:schedule --tasks g1 asks)"
+  const DEP = `d1: depends on [[g1]], left out: ${REMEDY}, then /thread:orient --steer`
+  const call = (fn, ...args) => ({ op: 'call', fn, args })
+  const [line, two, remedy, read1, read2, readClause, readDep, readSignIn, depRow, depOfDirect, token, ...kinds] = py([
+    call('gate_line', 'g1', [G]), call('gate_line', 'g2', [G, K]), call('gate_remedy', 'g1'),
+    call('read_gate_line', `- 2026-11-20 ${LINE}`), call('read_gate_line', `g2: unsigned gate: ${G} | ${K}${frame('g2')}`),
+    call('read_gate_line', `- 2026-11-20 ${LINE}; ${SIGN_IN}`), call('read_gate_line', `- 2026-11-20 ${DEP}`),
+    call('read_gate_line', '- 2026-11-20 l1: needs mcp__x__*, which did not read signed in: sign in to x, then /thread:orient --steer'),
+    call('dependant_row', `- 2026-11-20 ${DEP}`), call('dependant_row', `- 2026-11-20 ${LINE}`),
+    { op: 'const', name: 'GATE_TOKEN' },
+    ...['spend: a probe', K, 'Irreversible: drop it', 'publish the page', 'note: do it'].map((g) => call('hold_kind', g)),
+  ])
+  assert.equal(line, LINE)
+  assert.equal(remedy, REMEDY)
+  assert.deepEqual(read1, { date: '2026-11-20', gates: [G], clause: null }, 'the direct line reads back')
+  assert.deepEqual(read2, { date: null, gates: [G, K], clause: null }, 'two gates on one line, no date')
+  assert.equal(two, `g2: unsigned gate: ${G} | ${K}${frame('g2')}`)
+  assert.deepEqual(readClause, { date: '2026-11-20', gates: [G], clause: SIGN_IN }, 'a trailing sign-in clause is kept apart')
+  assert.deepEqual([readDep, readSignIn, depRow, depOfDirect], [null, null, 'g1', null], 'the dependant form names its row')
+  assert.ok(token && LINE.includes(token) && DEP.includes(token), 'GATE_TOKEN marks both forms')
+  assert.deepEqual(kinds, ['spend', 'credential', 'irreversible', 'irreversible', 'irreversible'], 'hold_kind fails closed')
+  // Neither form holds a gate word of its own: the dependant line and the direct line's frame hit nothing, and the
+  // direct line's hits are its gate's own words (J1's control).
+  const SECTION_35 = /\b(?:don't action until|do not action until|hold for|until a release|until the next release|gated on a release|not decide)\b|\bsign(?:s|ed|ing)?[- ]?off\b/i
+  const PLAIN_ASK = /(?<!\b(?:had|used) to )\b(?:and ask|ask (?:which|him|lachy|the user|in plain text|once)|asks? lachy for|confirm with the user|offer to create)\b/i
+  const words = (r) => Object.fromEntries(Object.entries(r).map(([k, hs]) => [k, hs.map((h) => h.word).sort()]))
+  const [dep, frameOnly, direct, gateOnly] = py([DEP, `g1: unsigned gate: x${frame('g1')}`, `${LINE}; ${SIGN_IN}`, G]
+    .map((text) => ({ op: 'sweep_text', text })))
+  assert.deepEqual(words(dep), { spend: [], credential: [], irreversible: [] }, 'the dependant line hits nothing')
+  assert.deepEqual(words(frameOnly), { spend: [], credential: [], irreversible: [] }, 'the direct frame hits nothing')
+  assert.deepEqual(words(direct), words(gateOnly), "the direct line's only hits are its gate's words")
+  for (const text of [DEP, `g1: unsigned gate: x${frame('g1')}; ${SIGN_IN}`]) {
+    assert.ok(!SECTION_35.test(text) && !PLAIN_ASK.test(text), `no § 3.5 phrase or plain ask: ${text}`)
+  }
+  // approved_date: the date in the closing annotation, any case, a standing approval's too.
+  assert.deepEqual(py([
+    call('approved_date', `- ${G} (approved 2026-11-20, asked ahead at schedule)`), call('approved_date', `- ${G} (approved 2026-11-21)`),
+    call('approved_date', `- ${G}`), call('approved_date', `- ${K} (Approved 2026-11-22 under the standing approval: test Login dummy, from defaults)`),
+  ]), ['2026-11-20', '2026-11-21', null, '2026-11-22'])
+  // unsigned_hold: [label, {pending, approved, left}, rows].
+  const E = (date, gates = [G], slug = 'g1') => `- ${date} ${slug}: unsigned gate: ${gates.join(' | ')}${frame(slug)}`
+  const ap = (gate, date, tail = ', asked ahead at orient') => `- ${gate} (approved ${date}${tail})`
+  const row = (from, pending = false, gate = G, kind = 'irreversible') => ({ kind, gate, from, pending })
+  const OTHER = 'irreversible: delete the old branch'
+  const cases = [
+    ['a pending gate holds', { pending: `- ${G}` }, [row('set-aside', true)]],
+    ['… signed by its exact text', { pending: `- ${G}`, approved: ap(G, '2026-11-01') }, []],
+    ['… never by the date rule', { pending: `- ${G}`, approved: ap(OTHER, '2026-11-30') }, [row('set-aside', true)]],
+    ['a pending spend line is skipped', { pending: '- spend: a probe — cap US$5' }, []],
+    ['a kindless pending line reads irreversible', { pending: '- publish the page' }, [row('set-aside', true, 'publish the page')]],
+    ['a left-out gate holds', { left: E('2026-11-20') }, [row('left-out')]],
+    ['… an older same-kind bullet leaves it held', { left: E('2026-11-20'), approved: ap(OTHER, '2026-11-19') }, [row('left-out')]],
+    ['… one dated on its date signs it', { left: E('2026-11-20'), approved: ap(OTHER, '2026-11-20') }, []],
+    ['… equal text signs it whatever its date', { left: E('2026-11-20'), approved: ap(G, '2026-11-01') }, []],
+    ['… a bullet with no date and other text does not', { left: E('2026-11-20'), approved: `- ${OTHER}` }, [row('left-out')]],
+    ['… a later bullet of the other kind does not', { left: E('2026-11-20'), approved: ap(K, '2026-11-21') }, [row('left-out')]],
+    ['… a later standing approval does not', { left: E('2026-11-20', [K]), approved: ap('credential: the dummy Claude Login', '2026-11-21',
+      ' under the standing approval: test Login dummy, from defaults') }, [row('left-out', false, K, 'credential')]],
+    ['… an entry with no date signs by equal text only', { left: E('2026-11-20').replace('- 2026-11-20 ', '- '),
+      approved: ap(OTHER, '2026-11-21') }, [row('left-out')]],
+    // J3, the pinned residual: a later same-kind bullet naming another act signs the entry (S4's by-act check guards it).
+    ['residual: a later same-kind bullet of another act signs the entry', { left: E('2026-11-20'), approved: ap(OTHER, '2026-11-21') }, []],
+    ['every entry is read: a gate under a later sign-in entry holds',
+      { left: `${E('2026-11-18')}\n- 2026-11-20 g1: needs mcp__x__*, which did not read signed in: sign in to x, then /thread:orient --steer` },
+      [row('left-out')]],
+    ['… two entries of one gate, a bullet between them: the later one holds',
+      { left: `${E('2026-11-18')}\n${E('2026-11-20')}`, approved: ap(OTHER, '2026-11-19') }, [row('left-out')]],
+    ['a dependant entry holds nothing', { left: `- 2026-11-20 ${DEP}` }, []],
+    ['two gates, one signed: the other holds', { left: E('2026-11-20', [G, K]), approved: ap(G, '2026-11-21') },
+      [row('left-out', false, K, 'credential')]],
+    // Round 3 item 1: one row per gate, `pending` marking the bullet still awaiting sign-off.
+    ['an entry and a pending bullet in the same words: one row, pending', { left: E('2026-11-20'), pending: `- ${G}` },
+      [row('left-out', true)]],
+    // Round 2 item 1: the entry signed by date, the pending bullet still held by its exact text.
+    ['an entry signed by date, its gate still pending: one set-aside row', { left: E('2026-11-20'), pending: `- ${G}`,
+      approved: ap(OTHER, '2026-11-21') }, [row('set-aside', true)]],
+    ['a Note beside the sign-off leaves the pending bullet held', { left: E('2026-11-20'), pending: `- ${G}`,
+      approved: ap(`${G}; he said go`, '2026-11-21', ', asked ahead at schedule') }, [row('set-aside', true)]],
+  ]
+  const got = py(cases.map(([, q]) => ({ op: 'hold', ...q })))
+  cases.forEach(([label, , want], i) => assert.deepEqual(got[i], want, label))
 })

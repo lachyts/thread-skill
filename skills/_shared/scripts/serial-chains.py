@@ -3,16 +3,18 @@
 
     python3 ${CLAUDE_PLUGIN_ROOT}/skills/_shared/scripts/serial-chains.py plan --tasks <a,b,...>
         [--surface <slug>=<raw>]... [--dep <slug>=<slug>]... [--signed-out <namespace>@<alias>[:<folder>]]...
-        [--vault <dir>] [--launch-folders <json>]
+        [--unsigned <slug>=<gate>]... [--vault <dir>] [--launch-folders <json>]
 
-/thread:schedule § Serial path runs it at S2, again at S3.7 with `--signed-out`, and at S4 after a confirmed dependency
-or an added surface.
+/thread:schedule § Serial path runs it at S2, again at S3.7 with `--signed-out`, and at S4 after a confirmed dependency,
+an added surface or an unsigned gate (`--unsigned`).
 Stdlib only, python >= 3.9. No network, and it writes nothing. Git runs only as `git rev-parse --local-env-vars`
 (to scrub repo-local env vars such as a hook's GIT_DIR, landing-register.py's rule), `git -C <dir> rev-parse
 --show-toplevel`, `git -C <toplevel> rev-parse --path-format=absolute --git-common-dir` (a checkout's key, below) and
 `git -C <dir> remote get-url origin`, each read-only with a 30 s timeout. It reads the task notes
-(`<vault>/Work/Tasks`, root first, then Archive/), their project notes (`<vault>/Work/Projects/**`), the
-launch-folders file and its own tree's `.claude-plugin/plugin.json`; it never reads a launcher marker. Defaults:
+(`<vault>/Work/Tasks`, root first, then Archive/), each one's `## Approved gates`, `## Gated inputs (awaiting
+sign-off)` and `## Left out at schedule` sections among them (Unsigned gates, below), their project notes
+(`<vault>/Work/Projects/**`), the launch-folders file and its own tree's `.claude-plugin/plugin.json`; it never reads a
+launcher marker. Defaults:
 --vault ~/repos/obsidian, --launch-folders ~/repos/workspaces/_shared/state/launch-folders.json.
 
 Surfaces (CONTEXT.md **Surface**; ADR 0067 d4). A surface is a place a chain is predicted to write, as a canonical
@@ -175,6 +177,28 @@ member is in no chain and no `externalDeps`, and goes in `leftOut` with its line
 --steer`, `<row>` the first left-out member that lane member reaches, and its servers. Its refusals and WARNs are any
 member's. A key that leaves out no member adds `WARN: --signed-out <key>: it leaves out no chain member`.
 
+Unsigned gates (p56-3, ADR 0034's 2026-11-25 amendment; schedule § Serial path S2.5 and S4). A chain is never written
+on a row whose credential or irreversible gate he has not signed: its Leg would set it aside at its first claim and
+close "chain stuck". Before the Sign-ins leave-out, each non-lane member's hold is gated_inputs.py's unsigned_hold over
+its own note (its part 6, the one copy of the reading): a gate line of its `## Left out at schedule` that no `## Approved
+gates` bullet signs, by equal text or by a same-kind bullet of his dated on or after the entry, and a bullet of its `##
+Gated inputs (awaiting sign-off)` whose exact gate no bullet holds. So a row this rule left out once stays out on every
+later run, with no flag, until a bullet signs it. Then each `--unsigned <slug>=<kind>: <the act>` gate the records do
+not already name joins it (`from: flag`): the flag is the session's S4 reading, by act, that no bullet signs it, so it
+holds whatever bullets exist. Spend is never held, by flag or record: it is recorded, never asked (Chorus ADR 0108 d4).
+A held member is left out as a signed-out one is, by the line `<slug>: unsigned gate: <gate>[ | <gate>]…;
+/thread:schedule --tasks <slug> asks you to approve it, and chains it once approved` (gated_inputs.py's gate_line), and
+its dependants' remedy is `approve [[<row>]]'s unsigned gate (/thread:schedule --tasks <row> asks)` (gate_remedy), so a
+dependant's line reads `<slug>: depends on [[<via>]][, a session-lane row waiting on [[<row>]]], left out: approve
+[[<row>]]'s unsigned gate (/thread:schedule --tasks <row> asks), then /thread:orient --steer` and holds no kind word. A
+row both rules leave out gets one line, the gate first, `<its gate line>; also needs <ns>[, ...], which did not read
+signed in from its launch <alias> from <folder>: sign in to <server>[, ...], then /thread:orient --steer`, and its
+dependants' remedy joins the two with ` and `. A session-lane member is never held, and an `--unsigned` naming one adds
+`WARN: --unsigned <v>: <slug> is a session-lane member, never left out`. gated_inputs.py loads (reconcile-rollout.py's
+_gated) only when a member's note holds text under `## Gated inputs (awaiting sign-off)` or `## Left out at schedule`,
+or an `--unsigned` is passed, so a plan over notes with neither reads nothing new. LEFT_OUT_SECTION is
+unfinished-rollout.py's, copied.
+
 Grouping (ADR 0074 d1): connected components over surface overlap, `depends-on:` / `blocked-by:` / --dep edges inside
 the set, and a shared first project: every member whose first `projects:` wikilink names one project (case-folded) is
 in that project's one chain, whatever its surfaces, so a run gives at most one chain per project. A member with no
@@ -190,7 +214,11 @@ Output: one JSON line on stdout, exit 0, nothing on stderr:
    "source": ..., "added": [...], "launch": {"alias": ..., "folder": ...}, "works": [...], "mcp": [...]}},
    "externalDeps": [{"task": ..., "dependsOn": ...}]}], "sessionLane": [{"slug": ..., "why": ...}],
    "leftOut": [{"slug": ..., "why": ...}], "warns": ["WARN: ...", ...]}
-`leftOut` is always present, in notes order (the Sign-ins paragraph above).
+`leftOut` is always present, in notes order (the Sign-ins paragraph above). A row an unsigned gate holds directly also
+carries `"unsigned": [{"kind", "gate", "from", "pending"}]`: each gate that holds it, `kind` credential or irreversible
+(a kindless gate reads irreversible), `from` `left-out` (its record line), `set-aside` (a pending bullet) or `flag`,
+and `pending` true when the same gate is also a pending bullet (S2.5 removes that bullet when he signs it). A dependant,
+or a row left out only for a sign-in, carries no such field.
 A chain's `checkouts` is checkouts_of over its `surfaces` and its members' launch folders, the vault excluded: exactly
 what its note records (`surfaces:` and the Queue's Launch cells), so S3's `--checkout`, S4 and reconcile-rollout.py's
 `_serial_root` read the same list. A member's `works` also counts the `--add-dir` and `Local:` reach no Leg commits to.
@@ -201,8 +229,10 @@ Leg would open outside the checkout it works (an alias-less row whose `repo:` su
 none, that works two; a vault launch working one; an aliased row whose `repo:` surfaces name a checkout other than
 its launch folder's; never a session-lane member). Exit 2 prints
 one `serial-chains:` line: no --tasks, a task note not found, a malformed --surface or --dep, a malformed
-`--signed-out`, an alias-less one with no folder, or a `cx-*` one, reconcile-rollout.py unloadable, or plugin.json
-unreadable (ruling (c) cannot be checked, so the plan fails closed).
+`--signed-out`, an alias-less one with no folder, or a `cx-*` one, an `--unsigned` with no `=`, one whose kind is not
+credential or irreversible (spend included) or whose act is empty, one for a slug outside --tasks (`--unsigned <v>:
+<slug> is not one of --tasks`, as --surface and --dep say), reconcile-rollout.py or gated_inputs.py unloadable, or
+plugin.json unreadable (ruling (c) cannot be checked, so the plan fails closed).
 
 Chain copies (ADR 0067 d2). A serial note that carries `chain_copies:` works each git checkout it writes in its own
 Chain copy: a git worktree of that checkout on `chain/<rollout-slug>`, outside `~/repos` and `~/Projects`, which
@@ -248,7 +278,11 @@ from pathlib import Path
 HERE = Path(__file__).resolve().parent
 RR_SRC = HERE.parent.parent / "execute/scripts/reconcile-rollout.py"
 PLUGIN_JSON = HERE.parent.parent.parent / ".claude-plugin/plugin.json"
-RR_NAMES = ("Note", "_scalar", "_wikilink_slug", "_dep_entries", "_parse_ts")
+RR_NAMES = ("Note", "_scalar", "_wikilink_slug", "_dep_entries", "_parse_ts", "_norm_gate", "_gated",
+            "GATE_PENDING_SECTION", "APPROVED_GATES_SECTION")
+# schedule § Serial path's line for a row left out (S2.5, S3.7, S4): unfinished-rollout.py's LEFT_OUT_SECTION, copied
+# (tests/unfinished-rollout.test.sh NY9 holds the two equal), since that script loads this one.
+LEFT_OUT_SECTION = "## Left out at schedule"
 DEFAULT_VAULT = "~/repos/obsidian"
 DEFAULT_LAUNCH_FOLDERS = "~/repos/workspaces/_shared/state/launch-folders.json"
 GITHUB_PREFIXES = ("https://github.com/", "git@github.com:", "ssh://git@github.com/")
@@ -647,6 +681,15 @@ def load_rr():
         return mod
     except Exception as e:  # noqa: BLE001 — any failure to load is the same exit-2 condition
         die(f"cannot load {RR_SRC} (skills/execute/scripts/reconcile-rollout.py): {e}")
+
+
+def load_gated(rr):
+    """gated_inputs.py, through reconcile-rollout.py's _gated() (the Unsigned gates paragraph): loaded only when a
+    member's note holds a record section or an --unsigned flag is passed; exit 2 when it will not load."""
+    try:
+        return rr._gated()
+    except Exception as e:  # noqa: BLE001 — any failure to load is the same exit-2 condition
+        die(f"cannot load gated_inputs.py (skills/_shared/scripts/gated_inputs.py): {e}")
 
 
 def plugin_origin() -> str:
@@ -1193,6 +1236,7 @@ def cmd_plan(args) -> int:
         surface_pairs.append((v, slug, raw))
     for v in args.dep or []:
         dep_pairs.append((v,) + split_pair("--dep", v))
+    unsigned_pairs = [(v,) + split_pair("--unsigned", v) for v in args.unsigned or []]
     signed_out = []
     for v in args.signed_out or []:
         ns, sep, rest = v.partition("@")
@@ -1220,6 +1264,15 @@ def cmd_plan(args) -> int:
         if norm(a) not in members:
             die(f"--dep {v}: {a} is not one of --tasks")
         extra_deps.setdefault(norm(a), []).append(rr._wikilink_slug(b) or b)
+    gi, flag_gates = None, {}
+    for v, slug, gate in unsigned_pairs:
+        gi = gi or load_gated(rr)
+        if gi.gate_kind(gate) not in gi.HOLD_KINDS or not gate.partition(":")[2].strip():
+            die(f"--unsigned {v}: write it as <slug>=<kind>: <the act>, its kind credential or irreversible (spend is "
+                "never held: it is recorded, never asked)")
+        if norm(slug) not in members:
+            die(f"--unsigned {v}: {slug} is not one of --tasks")
+        flag_gates.setdefault(norm(slug), []).append(gate.strip())
     porigin = plugin_origin()
 
     vault = Path(os.path.expanduser(args.vault))
@@ -1470,9 +1523,33 @@ def cmd_plan(args) -> int:
             refusals.append(pending)
 
     lane_slugs = {s["slug"] for s in session}
-    # Sign-ins (ADR 0074 d2): a --signed-out key leaves out each non-lane member needing its namespace from its launch,
-    # then each in-set dependant of a left-out member, directly or through a session-lane member that waits on one
-    # (never left out itself), to a fixpoint in notes order (the header's Sign-ins paragraph).
+    for v, slug, _gate in unsigned_pairs:
+        if by_key.get(norm(slug)) in lane_slugs:
+            warns.append(f"WARN: --unsigned {v}: {slug} is a session-lane member, never left out")
+    # Unsigned gates (p56-3, ADR 0034): each non-lane member's own records (gated_inputs.py's unsigned_hold), then each
+    # --unsigned gate they do not already name; a member any gate holds is left out (the header's Unsigned gates).
+    held = {}
+    for s in notes:
+        if s in lane_slugs:
+            continue
+        note = notes[s]
+        pending_text, left_text = note.section_text(rr.GATE_PENDING_SECTION), note.section_text(LEFT_OUT_SECTION)
+        rows = []
+        if pending_text or left_text:
+            gi = gi or load_gated(rr)
+            rows = gi.unsigned_hold(pending_text, note.section_text(rr.APPROVED_GATES_SECTION), left_text,
+                                    rr._norm_gate)
+        named = {rr._norm_gate(r["gate"]) for r in rows}
+        for gate in flag_gates.get(s.lower(), []):
+            if rr._norm_gate(gate) not in named:
+                named.add(rr._norm_gate(gate))
+                rows.append({"kind": gi.hold_kind(gate), "gate": gate, "from": "flag", "pending": False})
+        if rows:
+            held[s] = rows
+    # Sign-ins (ADR 0074 d2): a --signed-out key leaves out each non-lane member needing its namespace from its launch.
+    # A held member leaves too, both causes on one line, the gate first. Then each in-set dependant of a left-out member,
+    # directly or through a session-lane member that waits on one (never left out itself), leaves, to a fixpoint in notes
+    # order (the header's Sign-ins paragraph). left[s] is (the remedy its dependants name, its line).
     left, hit = {}, set()
     for s in notes:
         if s in lane_slugs:
@@ -1485,10 +1562,16 @@ def cmd_plan(args) -> int:
                 hit.add(v)
                 if ns not in needs:
                     needs.append(ns)
+        remedy, line = None, None
+        if s in held:
+            remedy, line = gi.gate_remedy(s), gi.gate_line(s, [r["gate"] for r in held[s]])
         if needs:
-            servers = list(dict.fromkeys(mcp_server(n) for n in needs))
-            left[s] = (servers, f"{s}: needs {', '.join(needs)}, which did not read signed in from its launch "
-                                f"{launch['alias']} from {f}: sign in to {', '.join(servers)}, then /thread:orient --steer")
+            sign_in = f"sign in to {', '.join(dict.fromkeys(mcp_server(n) for n in needs))}"
+            tail = (f"needs {', '.join(needs)}, which did not read signed in from its launch {launch['alias']} from "
+                    f"{f}: {sign_in}, then /thread:orient --steer")
+            remedy, line = (f"{remedy} and {sign_in}", f"{line}; also {tail}") if line else (sign_in, f"{s}: {tail}")
+        if line:
+            left[s] = (remedy, line)
     waits = {}  # a session-lane member that waits on a left-out one -> the first left-out member it reaches
     grew = bool(left)
     while grew:
@@ -1504,10 +1587,9 @@ def cmd_plan(args) -> int:
             if s in lane_slugs:
                 waits[s] = row
                 continue
-            servers = left[row][0]
+            remedy = left[row][0]
             link = "" if via in left else f", a session-lane row waiting on [[{row}]]"
-            left[s] = (servers, f"{s}: depends on [[{via}]]{link}, left out: sign in to {', '.join(servers)}, then "
-                                "/thread:orient --steer")
+            left[s] = (remedy, f"{s}: depends on [[{via}]]{link}, left out: {remedy}, then /thread:orient --steer")
     for v, *_ in signed_out:
         if v not in hit:
             warns.append(f"WARN: --signed-out {v}: it leaves out no chain member")
@@ -1574,7 +1656,8 @@ def cmd_plan(args) -> int:
                      "none needs it")
     chains.sort(key=lambda c: (phase_key(c["tasks"][0]), c["tasks"][0].lower()))
     out = {"chains": chains, "sessionLane": session,
-           "leftOut": [{"slug": s, "why": left[s][1]} for s in notes if s in left],
+           "leftOut": [{"slug": s, "why": left[s][1], **({"unsigned": held[s]} if s in held else {})}
+                       for s in notes if s in left],
            "warns": list(dict.fromkeys(warns))}
     print(json.dumps(out, ensure_ascii=False, separators=(",", ":")))
     return 0
@@ -1594,6 +1677,9 @@ def main() -> int:
                    help="<namespace>@<alias>, or <namespace>@claude:<folder> for an alias-less row: a sign-in that did "
                         "not read signed in from that launch (S3.7); leaves out its members and their dependants "
                         "(repeatable)")
+    c.add_argument("--unsigned", action="append", default=None,
+                   help="<slug>=<kind>: <the act>: a credential or irreversible gate S4 read as unsigned; leaves out "
+                        "that member and its dependants (repeatable; quote it as one shell word)")
     c.add_argument("--vault", default=DEFAULT_VAULT, help="the vault root (tasks at Work/Tasks, projects under "
                                                           "Work/Projects)")
     c.add_argument("--launch-folders", default=DEFAULT_LAUNCH_FOLDERS, help="the launch-folders JSON")

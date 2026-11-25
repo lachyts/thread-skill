@@ -199,7 +199,9 @@ orient.** paragraph cites this list. A `## Decided for you` bullet is an agent's
     is answer 8, and S4's gates are answers 15 and 16. S3.7 checks each pair from its launch, raises no `hands_steps`
     list and puts no question: every pair that does not read signed in goes as `--signed-out`, and the fork returns
     those pairs as `signIns` (each with its server, launch, account and reading), with S2's `leftOut` rows and their
-    lines, for B7's Left out section and B9's sign-in list. S7 is returned, and no Leg is started.
+    lines, for B7's Left out section and B9's sign-in list. S2.5 and S4 put no question either, so a row held for an
+    unsigned credential or irreversible gate leaves with its dependants, returned in `leftOut` with its line (p56-3).
+    S7 is returned, and no Leg is started.
 
 ## B7. The record, then write-back #1
 
@@ -309,7 +311,8 @@ cluster by cluster. Each question holds only its tasks.
   ticked; the same question comes again while one stays open. On `Leave those rows out`, or once none stays open, the
   list is cleared. Each fork whose `signIns` now holds a pair that reads signed in puts its `leftOut` rows in the
   post-question round: in that project's serial fork's `--tasks`, never in `decided`. That round's own S3.7 leaves
-  out again any row whose server still does not read signed in, and a row that stays out keeps its Left out row and
+  out again any row whose server still does not read signed in, and its own S2 leaves out again a row its record
+  still holds for an unsigned gate, with its dependants (p56-3); a row that stays out keeps its Left out row and
   line, with no `wait`.
 - Every answer then gets `record --append` of its Questions asked row. Questions left open (his "stop", or no reply)
   go under Questions waiting; the rollouts already run.
