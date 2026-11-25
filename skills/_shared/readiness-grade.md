@@ -191,7 +191,9 @@ decision of his it may hide, owner `yours`, `confidence: low`.
   with a warning. A task's `due:` comes from the scan, and an overdue `due:` still counts; the earlier of the two
   counts.
 - `gates`: the kinds of gated input (ADR 0008) the task will need: `spend`, `credential` or `irreversible`. An
-  external publish is `irreversible`, per execution-fit.md's ruling (a).
+  external publish is `irreversible`, per execution-fit.md's ruling (a). A `credential` or `irreversible` kind
+  is listed even when the note never words the act: schedule's Pre-flight then puts its sign-off ahead
+  (schedule § 1.5), and the task's `why` names the act it means.
 - `eyeCheck`: `true` when only Lachy can judge the result (how it looks, sounds, reads or feels).
 
 Together they are the task's Review load: a parallel task's PR to read, a sign-off for its gates (none for a

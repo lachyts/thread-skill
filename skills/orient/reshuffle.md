@@ -205,7 +205,9 @@ Resolving:
   declared test Logins could not be read: those hits carry no `login` and keep the ask; every note
   still printed. Any other credential, or an irreversible gate, still gets § 3.6's ask-ahead
   question in the grill: a sign-off now or none. Asked or recorded here, it is not asked again at
-  schedule.
+  schedule. A gate only the Readiness grade names is not R3's to find, since the reshuffle grades nothing:
+  schedule's Pre-flight puts it (schedule § 1.5), and under `--backlog` the run puts it last
+  (`skills/orient/backlog.md` § B9).
 
 Clear items are not grilled; they go straight to the gate. Grill cluster by cluster, highest value
 first (the cluster holding orient's recommendation leads). **Lachy can stop at any point**: what is

@@ -112,7 +112,9 @@ through time, from attention to merged PRs. Terms only — no implementation.
   and Grill tasks first get a **Decision round** with Lachy, and Orient tasks,
   tasks whose note does not parse and tasks that wait on a task outside the
   rollout that nobody is building (ADR 0078 d7) stay out with their Dependent
-  closure; it runs no plan gate (ADR 0047). Not
+  closure; a task whose grade names a credential or irreversible sign-off its
+  note never words is put that sign-off in the round, and stays out until it
+  is signed (ADR 0034); it runs no plan gate (ADR 0047). Not
   schedule step 8's "Checklist —" report blocks (called "Pre-flight —"
   before ADR 0047), nor a Leg's preflight.
   _Avoid_: preflight check, dry run.

@@ -451,8 +451,9 @@ non-zero exit is one `thread-placement:` line, never a blocker.
     route), then an orient with `--steer` schedules.
 
   Schedule's own § 0 checks can still stop it with a named remedy, which orient reports.
-  Schedule's Pre-flight (schedule § 1.5) may ask its decision round here (decisions, never a confirm) and leave
-  Orient-graded or undecided tasks out with their dependants, unstamped; orient reports them from schedule's summary.
+  Schedule's Pre-flight (schedule § 1.5) may ask its decision round here (decisions and the sign-offs its grades
+  name, never a confirm) and leave Orient-graded, undecided or unsigned tasks out with their dependants, unstamped;
+  orient reports them from schedule's summary.
   A serial rollout never takes parallel-shaped work; orient never re-implements the
   merge engine.
 - **Serial-shaped and session-lane work → steer.** If any serial-shaped or session-lane work is
@@ -518,8 +519,9 @@ per chain (schedule § Serial path). Never a bare project run: it would also swe
 session-lane phases (§ 6). Schedule's serial path decides chains
 and surfaces (ADR 0040). The steering answer authorises every call, and § 9 follows each
 note written. A project with nothing left gets no call, and orient says so. Schedule's Pre-flight (its serial
-path's S3.5, schedule § Serial path) may ask its decision round here too (decisions, never a confirm) and leave
-Orient-graded or undecided members out with their dependants, unstamped; orient reports them from schedule's summary.
+path's S3.5, schedule § Serial path) may ask its decision round here too (decisions and the sign-offs its grades
+name, never a confirm) and leave Orient-graded, undecided or unsigned members out with their dependants, unstamped;
+orient reports them from schedule's summary.
 Schedule's sign-ins (its serial path's S3.7, ADR 0074 d2) may put one `hands_steps` sign-in list and its check-again
 question here, before any note is written: a sign-in, never a confirm. A server he will not sign in to now, or a
 check that cannot run, leaves the rows needing it out with their dependants, unstamped. Orient reports each from
