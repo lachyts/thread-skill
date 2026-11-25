@@ -213,8 +213,8 @@ Resolving:
   Login is a test Login"), run `rollout-settings.py declare` with those words quoted exactly and
   today's date, as schedule § 3.6's paragraph of that name says, name the `declared` line it prints
   in R5's **Report**, then run the sweep again for that task and handle the hit as it now reads. A
-  sign-off of one gate rules on nothing, and a non-zero exit prints its line and keeps the ask. A
-  gate only the Readiness grade names is not R3's to find, since the reshuffle grades nothing:
+  sign-off of one gate rules on nothing, and a non-zero exit prints its line and keeps the ask.
+  A gate only the Readiness grade names is not R3's to find, since the reshuffle grades nothing:
   schedule's Pre-flight puts it (schedule § 1.5), and under `--backlog` the run puts it last
   (`skills/orient/backlog.md` § B9).
 
