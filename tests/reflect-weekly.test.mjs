@@ -280,7 +280,7 @@ test('span: sweepMiss names a signed gate the sweep could have seen; gateMisses 
     ['2026-09-01T02:00:00Z', 'gate-signed', 'early', { standing: false, gates: 1 }],   // before the window
     signed(W(4, '02:00'), 'missed'), signed(W(4, '03:00'), 'unseen'), signed(W(4, '04:00'), 'recorded'),
     [W(4, '05:00'), 'gate-signed', 'standing', { standing: true, gates: 1 }],
-    signed(W(4, '06:00'), 'scanned'), signed(W(4, '07:00'), 'noteless'),
+    signed(W(4, '06:00'), 'scanned'), signed(W(4, '07:00'), 'noteless'), signed(W(4, '08:00'), 'metered'),
   ]))
   rolloutNote(h, 'demo')
   const gates = (...lines) => `## Approved gates\n\n${lines.map((l) => `- ${l}`).join('\n')}`
@@ -294,6 +294,9 @@ test('span: sweepMiss names a signed gate the sweep could have seen; gateMisses 
   // a declared test credential is recorded ahead and signed or asked at the stop by design
   taskNote(h, 'recorded', { body: ['Stripe test mode end to end.', '', '## Decisions (recorded 2026-09-01)', '',
     '- Planner: word each test-credential gate as one line', '', gates('credential: test-mode STRIPE_SECRET (sk_test_) (approved 2026-09-04)')].join('\n') })
+  // p56-6: a declared metered key is recorded ahead too, its Planner line written by schedule step 7
+  taskNote(h, 'metered', { body: ['Sample the Cartesia voice.', '', '## Decisions (recorded 2026-09-01)', '',
+    '- Planner: word each metered-key gate as one line', '', gates('credential: CARTESIA_API_KEY into the sampler (approved 2026-09-04)')].join('\n') })
   taskNote(h, 'early', { body: ['Read the Supabase table.', '', gates('credential: the Supabase key (approved 2026-09-01)')].join('\n') })
   taskNote(h, 'standing', { body: ['Stripe test mode.', '', gates('credential: x (approved 2026-09-04 under the standing approval: test credential X present in f, class from repo)')].join('\n') })
   // its only credential words sit in leg.py's ## Security check, a section the run wrote; noteless has no note at all
@@ -302,7 +305,7 @@ test('span: sweepMiss names a signed gate the sweep could have seen; gateMisses 
     gates('credential: the probe key (approved 2026-09-04)')].join('\n') })
   const s = span(h)
   const asks = Object.fromEntries(entryOf(s, 'demo').friction.filter((x) => x.kind === 'ask').map((x) => [x.task, x.sweepMiss]))
-  assert.deepEqual(asks, { missed: ['credential'], unseen: [], recorded: [], scanned: [], noteless: [] }, 'one signOff ask per in-window sign-off; standing is no ask')
+  assert.deepEqual(asks, { missed: ['credential'], unseen: [], recorded: [], scanned: [], noteless: [], metered: [] }, 'one signOff ask per in-window sign-off; standing is no ask')
   assert.deepEqual(s.cannotShow.filter((c) => c.includes('sweepMiss')),
     ['[[noteless]] (demo): a gate signed with no task note read (none in Work/Tasks or Archive, or unreadable): its sweepMiss cannot be read'],
     'only the sign-off with no note is named: its [] is no word-list miss')

@@ -308,8 +308,8 @@ approval would sign is still charged (ADR 0034's 2026-10-27 amendment, residual 
 (the sweep's `login.names`, under the machine's `[defaults] test_logins`; the recorded test-Login Planner line left
 out), costs no sign-off, since execute's standing approval signs it at the stop (ADR 0034's 2026-11-20 amendment). The
 ranker reads that from the note itself, fail closed: any other credential hit, an unreadable note, no declaration or a
-refused file charges it. A test-credential class gate (ADR 0063) is still charged: the class needs `--repo` and its
-keys' presence (ADR 0063 residual (viii)). A session task adds its whole agent time, since Lachy is there throughout.
+refused file charges it. A test-credential class gate (ADR 0063) or a metered-key gate (p56-6) is still charged: each
+class needs `--repo` and its keys' presence (ADR 0063 residual (viii)). A session task adds its whole agent time, since Lachy is there throughout.
 
 **Runs.** The candidate runs group the ranked parallel and serial tasks by home, shape and root:
 

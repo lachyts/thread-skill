@@ -41,6 +41,15 @@
 // the README's two paragraphs, CONTEXT.md's entry, the ADR's amendment with its Decided for him list, and three
 // sentences of rollout-settings.py's header (the forms that write, the clock, the comment). The verbs' behaviour is
 // pinned by tests/rollout-settings-declare.test.mjs D1-D9.
+// p56-6 (ADR 0063's 2026-11-26 amendment, a metered API key on file signs with its spend): a declared metered key signs
+// with the spend gate the standing approval signed on its task, reading no limit of its own (one sentence, pinned in
+// execute § 3.7's *Metered keys* paragraph, § 3's `metered_keys` row, schedule § 2.8's bullet and the README), and is
+// recorded, never asked ahead (metered-key): schedule § 3.6's paragraph with its sentences (a) and (b), its keeps-the-ask
+// sentence after (b) and its serial residual, § 7's sanctioned exceptions, spend-bullet exclusion and Planner line,
+// the Signed ahead sentence, step 1.2's and § 6.5 (a)'s ASK reasons, step 8's Settings clause, reshuffle R3 (c),
+// orient-all and the Backlog orient's twin sentences, asking.md, execution-fit, engine-snapshot.md, CONTEXT.md's entry,
+// ADR 0008's line and ADR 0063's amendment. Its first sentence of *Test credentials*, its Standing approval clause and
+// its "metered key" in § 3.6's Ask ahead move the test-login and test-login-sweep pins that read those sentences.
 //
 // Same shape as execute-signed-gate.test.mjs: every rule lives in one function, checkStanding(files), returning named
 // failures, so the real text and the controls run through identical logic; each control mutates the real text in one
@@ -321,7 +330,7 @@ function checkStanding(f) {
   if (collapse(f.execute).split(askReasons).length !== 3 ||
     !tl.includes('nothing joined beside it (an `@` address, or a conjunction that joins a second thing') ||
     !standing.includes('or a declared test Login (*A declared test Login* below)') ||
-    !tc.startsWith('**Test credentials (ADR 0063).** A credential gate passes the standing approval only as a declared test credential or a declared test Login (below). A declared test credential is one of') ||
+    !tc.startsWith('**Test credentials (ADR 0063).** A credential gate passes the standing approval only as a declared test credential or a declared test Login (below), or as a declared metered key (*Metered keys* below). A declared test credential is one of') ||
     !tc.includes('so no class resolves and every class credential there asks') ||
     !tl.includes('one of the machine\'s declared test Logins') || !tl.includes('`(approved <date> under the standing approval: test Login <name>, from <source>)`') ||
     !tl.includes('with no limit, no ledger, no month line and no Needs-you line') ||
@@ -360,7 +369,7 @@ function checkStanding(f) {
     !tls.includes('The test Logins are machine-wide, so on § Serial path a declared test Login is recorded too: a Leg signs one.') ||
     !s36.includes('A credential hit on a `credential:` gate line naming a Login also carries its `login` reading (`{names, why}`)') ||
     !s36.includes('A `gated_inputs: test_logins:` stderr line (exit 1) means they could not be read: those hits carry no `login` and keep the ask, and every note still printed.') ||
-    !s36.includes('(not a test credential or test Login recorded below)') ||
+    !s36.includes('(not a test credential, test Login or metered key recorded below)') ||
     !sch7.includes('For each credential hit § 3.6 recorded as a declared test Login, append the recorded section with the test-Login Planner line below') ||
     tlAt < 0 || tlAt < tcAt ||
     !s28.includes('**`test_logins`** resolves here too (p37-4') || !s28.includes("§ 3.6's sweep reads it itself") ||
@@ -425,6 +434,43 @@ function checkStanding(f) {
     !collapse(f.settings).includes("The comment names the line's last declaration and nothing more: the log is the record.")) {
     fails.push('ruled-declaration')
   }
+
+  // metered-key (p56-6, ADR 0063's 2026-11-26 amendment): a declared metered key signs with the spend gate the standing
+  // approval signed on its task, reading no limit of its own (MK_S, in four places); schedule and orient record it and
+  // its spend Planner line, never asking it ahead; each keeps-the-ask sentence follows its (b); a Leg never signs one.
+  const MK_S = 'it signs only with a spend gate the standing approval signed on this task, earlier or in this pass, so with `spend_approval_usd` at 0 it signs only on an earlier signing'
+  const mk = labelled(f.execute, S37, 'Metered keys (p56-6).')
+  const rowM = collapse((section(f.execute, /^### 3\. /) ?? '').split('\n').find((l) => l.startsWith('| `metered_keys` |')) ?? '')
+  const mks = labelled(f.schedule, S36, 'A declared metered key is recorded, never asked')
+  const MK_A = 'A hit inside the recorded metered-key Planner line is dismissed and listed as `swept, dismissed: [[task]] <word> (the recorded metered-key Planner line)`.'
+  const MK_B = 'A task that already holds the metered-key Planner line is recorded, never asked.'
+  const MK_KEEP = 'A hit naming live or production use, or a key or service the class does not declare, keeps the ask-ahead above.'
+  const MK_KEEP_R3 = 'A non-zero exit, no metered keys, a hit naming live or production use, or a key or service the metered keys do not declare keeps the ask.'
+  const MK_SERIAL = "On § Serial path a metered key keeps the ask-ahead and holds its row (S4): a Leg resolves no repo class, a named residual of ADR 0063's 2026-11-26 amendment whose follow-up gives a serial note its repo's metered keys."
+  const MK_REASONS = ", or a metered key no spend gate it signed carries, one beside an undeclared key or another service, or one missing from its file, § 3.7's *Metered keys*"
+  const MK_TWIN = 'A credential hit § 3.6 records as a declared metered key (p56-6) gets the metered-key Planner line, and the spend one when its note holds none.'
+  if (!mk.includes(MK_S) || !rowM.includes(MK_S) || !s28.includes(MK_S) || !collapse(f.readme).includes(MK_S) ||
+    !standing.includes('or as a declared metered key with its spend gate (*Metered keys* below)') ||
+    !sch7.includes('and the metered-key Planner line for a declared metered key it recorded, with the spend Planner line when the note holds none') ||
+    !sch7.includes('other than a test-credential, test-Login or metered-key one') ||
+    !s36.includes('A hit inside a recorded test-credential, test-Login or metered-key Planner line is still dismissed by that name, and a declared test credential, test Login or metered key is still recorded.') ||
+    collapse(f.execute).split(MK_REASONS).length !== 3 ||
+    !s36.includes("**A declared metered key is recorded, never asked** (p56-6, ADR 0063's 2026-11-26 amendment).") ||
+    !mks.includes(MK_A) || !mks.includes(MK_B) || !before(mks, MK_B, MK_KEEP) || !mks.includes(MK_SERIAL) ||
+    !r3.includes(MK_A) || !r3.includes(MK_B) || !before(r3, MK_B, MK_KEEP_R3) ||
+    !sch7raw.split('\n').some((l) => l.startsWith('- Planner: word each metered-key gate')) ||
+    !s8.includes('; metered keys <NAME> (<service>), … in <file> (file:repo), or none (built-in)') ||
+    !collapse(f.orientAll).includes(MK_TWIN) || !collapse(f.backlog).includes(MK_TWIN) ||
+    !collapse(f.asking).includes("A credential gate naming only the repo's declared metered keys (`metered_keys`) is never asked ahead (p56-6)") ||
+    !collapse(f.execfit).includes("Nor a declared metered key (ADR 0063's 2026-11-26 amendment).") ||
+    !collapse(f.snapshot).includes('`metered_keys` (p56-6) is the first schema-9 key: an older snapshot ignores it, so its rollouts ask the metered-key gate as before.') ||
+    !f.context.includes('- **Metered key** —') ||
+    !f.adr0008.includes('*(Amended 2026-11-26 by p56-6') ||
+    !f.adr0063.includes('*(Amended 2026-11-26 by p56-6') ||
+    !f.adr0063.includes('## Amendment (2026-11-26, p56-6: a metered key signs with its spend)') ||
+    !f.adr0063.includes('**"I shouldn\'t be asked about this."**')) {
+    fails.push('metered-key')
+  }
   return fails
 }
 
@@ -436,7 +482,7 @@ test('execute, schedule, reshuffle, status, README and CONTEXT.md hold every sta
 
 const RULES = ['step12', 'halt-guard', 'form', 'question-tool', 'standing-37', 's7', 'reinstate', 'exclusion-e',
   'schedule-sweep', 'spend-recorded', 'reshuffle', 'month-line', 'one-unfinished', 'docs', 'test-credential', 'cap-only', 'test-login',
-  'test-login-sweep', 'widest', 'ruled-declaration']
+  'test-login-sweep', 'widest', 'ruled-declaration', 'metered-key']
 const CONTROLLED = new Set()
 
 function edit(text, from, to) {
@@ -607,8 +653,8 @@ test('control: each widest pin, removed in one place, fails widest alone', () =>
 
 test('control: each test-login pin, removed in one place, fails test-login alone', () => {
   const L = 'test-login'
-  only('execute', ' or a declared test Login (*A declared test Login* below).', '.', L, '§ 3.7: standing names no test Login')
-  only('execute', 'only as a declared test credential or a declared test Login (below). A declared test credential is one of', 'only as a declared test credential: one of', L, 'Test credentials: old first sentence')
+  only('execute', ' or a declared test Login (*A declared test Login* below),', ',', L, '§ 3.7: standing names no test Login')
+  only('execute', 'only as a declared test credential or a declared test Login (below), or as', 'only as a declared test credential, or as', L, 'Test credentials: old first sentence')
   only('execute', 'so no class resolves and every class credential there asks', 'so no class resolves and every credential there asks', L, 'Test credentials: every credential asks on a Leg')
   only('execute', ' It is machine-wide, so a Leg\'s serial note signs one too, and a bounced note signs none.', '', L, 'the paragraph: not machine-wide')
   only('execute', "Declared on his ruling only (ADR 0063's 2026-11-24 amendment): `test_logins` is his hand edit, or,", 'Any agent may write `test_logins`: it is his hand edit, or,', L, 'the paragraph: not on his ruling only')
@@ -621,10 +667,11 @@ test('control: each test-login pin, removed in one place, fails test-login alone
   only('context', '(a Test Login is machine-wide)', '(none is)', L, 'CONTEXT.md: Test credential entry')
   only('readme', span(real.readme, "It is declared on your ruling only: your hand edit, or an agent's once you have ruled on it in words"), 'Any agent may write it', L, 'README: not on his ruling only')
   // review round 1: step 1.2's Exit 3 and § 6.5 (a) name the test-Login asks, and § 3.7 names step 5 (nothing joined)
-  only('execute', "a key missing from it, or a Login gate that names an undeclared Login or anything beside it, § 3.7's *A declared test Login*). Exit 1:",
-    'or a key missing from it). Exit 1:', L, 'step 1.2: no test-Login asks')
-  only('execute', "a key missing from it, or a Login gate that names an undeclared Login or anything beside it, § 3.7's *A declared test Login*) carries",
-    'or a key missing from it) carries', L, '§ 6.5 (a): no test-Login asks')
+  const MKR = ", or a metered key no spend gate it signed carries, one beside an undeclared key or another service, or one missing from its file, § 3.7's *Metered keys*"
+  only('execute', `a key missing from it, or a Login gate that names an undeclared Login or anything beside it, § 3.7's *A declared test Login*${MKR}). Exit 1:`,
+    `or a key missing from it${MKR}). Exit 1:`, L, 'step 1.2: no test-Login asks')
+  only('execute', `a key missing from it, or a Login gate that names an undeclared Login or anything beside it, § 3.7's *A declared test Login*${MKR}) carries`,
+    `or a key missing from it${MKR}) carries`, L, '§ 6.5 (a): no test-Login asks')
   only('execute', 'nothing joined beside it (an `@` address, or a conjunction that joins a second thing', 'nothing beside it (a second thing', L,
     'the paragraph: no step 5')
 })
@@ -639,7 +686,7 @@ test('control: each test-login-sweep pin, removed in one place, fails test-login
   only('schedule', ' A credential hit on a `credential:` gate line naming a Login also carries its `login` reading (`{names, why}`)', ' It', TLS, '§ 3.6: no login field')
   only('schedule', 'A `gated_inputs: test_logins:` stderr line (exit 1) means they could not be read: those hits carry no `login` and keep the ask, and every note still printed.',
     'A `gated_inputs: test_logins:` stderr line is a broken sweep.', TLS, '§ 3.6: the stderr line a failure')
-  only('schedule', '(not a test credential or test Login recorded below)', '(not a test credential recorded below)', TLS, '§ 3.6: Ask ahead holds the Login')
+  only('schedule', '(not a test credential, test Login or metered key recorded below)', '(not a test credential or metered key recorded below)', TLS, '§ 3.6: Ask ahead holds the Login')
   only('schedule', '- For each credential hit § 3.6 recorded as a declared test Login, append', '- For each credential hit § 3.6 recorded as a declared test Login, skip', TLS, '§ 7: no bullet')
   const tl = real.schedule.split('\n').find((x) => x.startsWith('- Planner: word each test-Login gate'))
   const tc = real.schedule.split('\n').find((x) => x.startsWith('- Planner: word each test-credential gate'))
@@ -725,7 +772,53 @@ test('control: each ruled-declaration pin, removed in one place, fails ruled-dec
   only('settings', span(real.settings, "The comment names the line's last declaration and nothing more: the log is the record."), 'The comment is the record.', RD, 'rollout-settings.py: no comment sentence')
 })
 
-test('the rules are all named (20) and each has a control', () => {
-  assert.equal(RULES.length, 20)
+test('control: each metered-key pin, removed in one place, fails metered-key alone', () => {
+  const MK = 'metered-key'
+  const MKR = ", or a metered key no spend gate it signed carries, one beside an undeclared key or another service, or one missing from its file, § 3.7's *Metered keys*"
+  only('execute', '(`Eleven Labs` names `ElevenLabs`). It reads no limit of its own: it signs only with a spend gate the standing approval signed',
+    '(`Eleven Labs` names `ElevenLabs`). It reads the limit, and signs only with a spend gate signed', MK, '§ 3.7 Metered keys: no sentence (S)')
+  only('execute', '*Metered keys*. It reads no limit of its own: it signs only with a spend gate the standing approval signed',
+    '*Metered keys*. It signs only with a spend gate signed', MK, '§ 3: the metered_keys row without (S)')
+  only('execute', ' or as a declared metered key with its spend gate (*Metered keys* below)', '', MK, '§ 3.7: standing names no metered key')
+  only('execute', `${MKR}). Exit 1:`, '). Exit 1:', MK, 'step 1.2: no metered-key asks')
+  only('execute', `${MKR}) carries`, ') carries', MK, '§ 6.5 (a): no metered-key asks')
+  only('schedule', 'instead of asking it ahead. It reads no limit of its own: it signs only with a spend gate the standing approval signed',
+    'instead of asking it ahead. It signs with any spend gate', MK, '§ 2.8: no sentence (S)')
+  only('readme', span(real.readme, 'it signs only with a spend gate the standing approval signed on this task, earlier or in this pass'),
+    'it signs with any spend gate', MK, 'README: no sentence (S)')
+  only('schedule', ', and the metered-key Planner line for a declared metered key it recorded, with the spend Planner line when the note holds none', '',
+    MK, '§ 7: no sanctioned exception')
+  only('schedule', 'other than a test-credential, test-Login or metered-key one', 'other than a test-credential or test-Login one', MK, '§ 7: the spend bullet excludes no metered-key line')
+  only('schedule', 'A hit inside a recorded test-credential, test-Login or metered-key Planner line is still dismissed by that name, and a declared test credential, test Login or metered key is still recorded.',
+    'A hit inside a recorded test-credential or test-Login Planner line is still dismissed by that name, and a declared test credential or test Login is still recorded.', MK, '§ 3.6: Signed ahead names no metered key')
+  only('schedule', '**A declared metered key is recorded, never asked** (p56-6', '**A declared metered key is asked ahead** (p56-6', MK, '§ 3.6: asked ahead')
+  only('schedule', ' A hit inside the recorded metered-key Planner line is dismissed and listed as `swept, dismissed: [[task]] <word> (the recorded metered-key Planner line)`.', '', MK, '§ 3.6: no sentence (a)')
+  only('schedule', ' A task that already holds the metered-key Planner line is recorded, never asked.', '', MK, '§ 3.6: no sentence (b)')
+  only('schedule', ' On § Serial path a metered key keeps the ask-ahead and holds its row (S4): a Leg resolves no repo class,', ' On § Serial path a metered key is recorded too: a Leg signs one,', MK, '§ 3.6: no serial residual')
+  CONTROLLED.add(MK)
+  assert.deepEqual(checkStanding(movedBefore('schedule', ' A hit naming live or production use, or a key or service the class does not declare, keeps the ask-ahead above.',
+    'A hit inside the recorded metered-key Planner line')), [MK], '§ 3.6: the keeps-the-ask sentence before (b)')
+  const pl = real.schedule.split('\n').find((x) => x.startsWith('- Planner: word each metered-key gate'))
+  only('schedule', pl + '\n', '', MK, '§ 7: no metered-key Planner line')
+  only('schedule', '; metered keys <NAME> (<service>), … in <file> (file:repo), or none (built-in)', '', MK, 'step 8: no Settings clause')
+  only('reshuffle', span(real.reshuffle, 'A hit inside the recorded metered-key Planner line is dismissed'), 'A hit inside the recorded metered-key Planner line is asked', MK, 'R3: no sentence (a)')
+  only('reshuffle', span(real.reshuffle, 'A task that already holds the metered-key Planner line is recorded, never asked.'), 'A task that already holds the metered-key Planner line is asked again.', MK, 'R3: no sentence (b)')
+  assert.deepEqual(checkStanding(movedBefore('reshuffle', ' A non-zero exit, no metered keys, a hit naming live or production use, or a key or service the metered keys do not declare keeps the ask.',
+    'A hit inside the recorded metered-key Planner line')), [MK], 'R3: the keeps-the-ask sentence before (b)')
+  const twin = 'A credential hit § 3.6 records as a declared metered key (p56-6) gets the metered-key Planner line, and the spend one when its note holds none.'
+  only('orientAll', span(real.orientAll, twin), '', MK, 'orient-all 9: no metered key')
+  only('backlog', span(real.backlog, twin), '', MK, 'backlog 16: no metered key')
+  only('asking', "- A credential gate naming only the repo's declared metered keys (`metered_keys`) is never asked ahead (p56-6): the standing approval signs it at the stop with its spend gate, or asks then.\n", '', MK, 'asking.md: no bullet')
+  only('execfit', span(real.execfit, "Nor a declared metered key (ADR 0063's 2026-11-26 amendment)."), '', MK, 'execution-fit: no metered key')
+  only('snapshot', '`metered_keys` (p56-6) is the first schema-9 key', '`metered_keys` (p56-6) is a key', MK, 'engine-snapshot.md: no schema-9 sentence')
+  only('context', '- **Metered key** —', '- **Paid key** —', MK, 'CONTEXT.md: no entry')
+  only('adr0008', '*(Amended 2026-11-26 by p56-6', '*(Amended 2026-11-26 by a later task', MK, 'ADR 0008: no p56-6 line')
+  only('adr0063', '*(Amended 2026-11-26 by p56-6', '*(Amended 2026-11-26 by a later task', MK, 'ADR 0063: no head note')
+  only('adr0063', '## Amendment (2026-11-26, p56-6: a metered key signs with its spend)', '## Amendment (2026-11-26)', MK, 'ADR 0063: no amendment heading')
+  only('adr0063', '**"I shouldn\'t be asked about this."**', 'his ruling', MK, 'ADR 0063: no ruling quoted')
+})
+
+test('the rules are all named (21) and each has a control', () => {
+  assert.equal(RULES.length, 21)
   assert.deepEqual(RULES.filter((r) => !CONTROLLED.has(r)), [])
 })

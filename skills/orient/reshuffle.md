@@ -18,8 +18,8 @@ vault: out-of-vault backlinks are reported, not rewritten (R5.3). Never git/gh. 
 `rollout:` or `scope:`: orient § 6 hands parallel-shaped phases to schedule, and § 7 serial-shaped
 ones under Autonomous or Mixed; schedule owns them. After the gate, a declared check's own
 `--advance` moves its record (§ Declared check): the check writes it and owns how it lands, so
-orient still runs no git. R3 (c) reads the repo's test-credential class through `rollout-settings.py
---repo`, which writes nothing (its one git call is a read-only `git remote get-url origin` inside the
+orient still runs no git. R3 (c) reads the repo's test-credential class and its metered keys through
+`rollout-settings.py --repo`, which writes nothing (its one git call is a read-only `git remote get-url origin` inside the
 script). The sweep R3 (c) runs reads `[defaults] test_logins` from the same file through
 `rollout-settings.py`'s resolve(repo=None), in process, only when a `credential:` gate line naming a
 Login needs it: read-only, with no git. A ruled declaration (R3 (c)) is the one write outside the
@@ -211,7 +211,15 @@ Resolving:
   already holds the test-Login Planner line is recorded, never asked. A hit with no `login`, or with
   `login.names` null, keeps the ask. A `gated_inputs: test_logins:` stderr line (exit 1) means the
   declared test Logins could not be read: those hits carry no `login` and keep the ask; every note
-  still printed. Any other credential, or an irreversible gate, still gets § 3.6's ask-ahead
+  still printed. A credential hit whose context names only keys the repo declares as metered keys,
+  or their declared services, is recorded, never grilled (p56-6, ADR 0063's 2026-11-26
+  amendment), read from the same call's `metered_keys`: R5.2 writes the metered-key Planner line,
+  and the spend Planner line when the note holds none, and the standing approval signs its gate at
+  the stop with the spend gate that names its service. A hit inside the recorded metered-key
+  Planner line is dismissed and listed as `swept, dismissed: [[task]] <word> (the recorded
+  metered-key Planner line)`. A task that already holds the metered-key Planner line is recorded,
+  never asked. A non-zero exit, no metered keys, a hit naming live or production use, or a key or
+  service the metered keys do not declare keeps the ask. Any other credential, or an irreversible gate, still gets § 3.6's ask-ahead
   question in the grill: a sign-off now or none. Asked or recorded here, it is not asked again at
   schedule. A ruled declaration is written, never handed back (ADR 0063's 2026-11-24 amendment):
   when his answer in the grill rules on the declaration itself, in words that name it ("the dummy
@@ -359,7 +367,9 @@ signal (a repo, named MCP servers, live branch state), `add-task.md` § Launch c
      split in sub-bullets nested under the gate, ADR 0038); for a credential recorded in the repo's
      test-credential class, the test-credential Planner line (schedule step 7's, ADR 0063) in the
      `## Decisions (recorded <date>)` section; for a credential recorded as a declared test Login, the test-Login
-     Planner line (schedule step 7's, p37-4) in the `## Decisions (recorded <date>)` section; and a credential or
+     Planner line (schedule step 7's, p37-4) in the `## Decisions (recorded <date>)` section; for a credential
+     recorded as a declared metered key, the metered-key Planner line (schedule step 7's, p56-6), and the spend
+     Planner line when the note holds none, in the `## Decisions (recorded <date>)` section; and a credential or
      irreversible sign-off's `## Approved gates` bullet,
      `- <kind>: <his words> (approved <date>, asked ahead at orient)`.
 3. **Renames rewrite backlinks, in one pass.** First check every target basename is free, in one

@@ -255,6 +255,8 @@ rounds. A Grill task is decided only when every one of its decisions is answered
    9. schedule § 3.6's sweep: every undismissed hit is stamped `plan_approval: required`, with no ask-ahead (ADR 0034),
       and a spend hit, or a credential hit § 3.6 records in the repo's test-credential class (ADR 0063)
       or as a declared test Login (p37-4), also gets its step 7 `## Decisions (recorded <date>)` Planner line.
+      A credential hit § 3.6 records as a declared metered key (p56-6) gets the metered-key Planner line, and the
+      spend one when its note holds none.
    10. Step 4.5's affine merges: none; the candidates are named.
    11. Step 4.7's rung offers: none.
    12. Step 5's Solo: none stamped; the proposals are named.

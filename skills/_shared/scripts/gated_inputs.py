@@ -50,8 +50,8 @@ a reading needs it (part 1), with no git and no bytecode.
    `publish animately.co live` and `publish the site live` hit, and `publish to staging`, `save as draft`, `push the
    branch, then check the live site` and a list item under `push the branch` that names the live site do not) and
    `delete the` (delete in any form, an optional article, at most two words, then a repo, repository, user, account,
-   bucket or database, plural allowed). The credential and test-Login readings' deny list (parts 4 and 5) reads
-   IRREVERSIBLE_WORDS alone, unchanged. Accepted residual: a gate whose note names neither (smart-slider
+   bucket or database, plural allowed). The credential, test-Login and metered-key readings' deny lists (parts 4, 5
+   and 7) read IRREVERSIBLE_WORDS alone, unchanged. Accepted residual: a gate whose note names neither (smart-slider
    p8-2's staging key, reached only through its dependency's hook) is still first seen at the plan gate; the
    Reflection counts each gate signed mid-run whose note the sweep does hit as a miss (reflect.py's `sweepMiss`).
 
@@ -456,6 +456,54 @@ a reading needs it (part 1), with no git and no bytecode.
        in entry order, then the pending rows. `pending` is true on any row whose gate is also an unsigned pending gate,
        so schedule S2.5's sign-off removes that bullet, whatever the row's `from`.
 
+7. The metered-key reading (p56-6, ADR 0063's 2026-11-26 amendment): a credential gate the standing approval may sign
+   because it names only the repo's declared metered keys (rollout-settings.py's `metered_keys`, schema 9, `cls`
+   below: {file, keys: [{name, service}]}, or None), keys whose only risk is metered spend (a paid voice API with no
+   test mode), each present in the declared file, and because a spend gate the standing approval signed on the same
+   task names each key's service. It reads no limit of its own: it signs only with a spend gate the standing approval
+   signed on this task, earlier or in this pass, so with `spend_approval_usd` at 0 it signs only on an earlier
+   signing. Every why is fixed text that names a key, a token, a service or the file, never a value from the file.
+   - `metered_reading(gate, cls)` -> {"names": [...] | None, "why"}: fail closed, the first failure wins, reading only
+     the text after the first `:`. Steps 1-3 need no class:
+       1. The kind is `credential` ("not a credential gate").
+       2. No METERED_DENY_RES match, the first in text order giving `deny word: <match>` as part 4's does:
+          DENY_LIVE_PROD_RE, IRREVERSIBLE_WORDS and METERED_DENY_NOUNS (password, passphrase, private key, ssh, oauth,
+          1password, keychain, cookie). "API key", "token", "secret" and "access" pass here (a metered key is an API
+          key) and stay deny words for parts 4 and 5, whose DENY_NOUNS and DENY_RES are untouched.
+       3. At least one upper-snake env token, ENV_TOKEN_RE ("it names no env key").
+       4. The class is set (NO_METERED_WHY: "no metered keys for this repo (set metered_keys in its
+          [repo."owner/name"] table in ~/.config/thread/rollouts.toml)").
+       5. Every env token is a declared name ("<TOKEN> is not a declared metered key").
+       6. The service guard: every SERVICES name in the text (matched as the sweep spells it, whole word, its inner
+          whitespace free, in any case), in text order, holds the declared service of a key the gate names, matched
+          as metered_spend matches it (_service_re: a whole word inside the name, ignoring case and inner spaces or
+          hyphens, so `OpenAI API` is a declared `OpenAI`'s own name) ("<Service> is not the declared service of a
+          key it names", the name as the gate spells it). So another service's key never rides along.
+     names are the env tokens in text order, each once. A residual, as part 4's (i): a service off SERVICES, or a
+     second credential named in plain prose with no env token or deny word, is not seen.
+   - `metered_names(gate, cls)`: the gate's env tokens that are declared metered keys, in text order, each once ([]
+     with no class): the standing approval's routing predicate. A gate naming one takes this reading, never part 4's.
+   - `metered_proof(cls, names)` -> {"ok", "why"}: read_env(cls["file"]) (part 4's read and its whys), then every
+     missing name ("<NAME> is not set in <file>", joined by `; `). No value is ever in a why.
+   - `approved_spend_gates(approved_text)` -> {"standing": [...], "other": [...]}: each `## Approved gates` line
+     whose kind is `spend`, its list marker and closing annotation stripped, by whether that annotation holds
+     STANDING_MARK (an agent's signing under the standing approval) or not (his sign-off, an asked-ahead line).
+   - `metered_spend(cls, names, signed, others=())` -> {"gates", "why"}: each named key's declared service, once each
+     in names order, rides the first gate in `signed` whose text after `:` names it (_service_re: the declared service
+     as a whole word, ignoring case and inner spaces or hyphens, so `Eleven Labs`, `eleven-labs` and `ELEVENLABS`
+     name a declared `ElevenLabs`, and `Cartesian` never names `Cartesia`). `gates` holds each carrying gate once, in
+     first-carry order: one gate that names two services is named once. A service no signed gate names is `unsigned`
+     when a gate in `others` names it, else `unnamed`; the whys, `unnamed` first, joined by `; `: "no spend gate on
+     this task names <S1>[, <S2>] (a metered key signs only with its spend gate: name <S1>[, <S2>] in the task's spend
+     gate)" and "the spend gate naming <S1>[, <S2>] is not signed under the standing approval (a metered key signs
+     only with a spend gate it signed)". why is "" when every service rides.
+   - `metered_annotation(date, names, file, source, spend_gates)`: the `## Approved gates` suffix, `(approved <date>
+     under the standing approval: metered key K1, K2 present in <file>, class from <source>, with its spend gate:
+     <g1>[ | <g2>])`, each spend gate named by metered_spend_part(): its text after `spend:`, stripped, `(` and `)`
+     swapped for `[` and `]`, cut to its first SPEND_GATE_CUT (80) characters, right-stripped, plus ` …` when longer.
+     It raises ValueError on a `)` in any part, as annotation() does. It keeps `under the standing approval`, so
+     unsigned_hold and reflect.py's STANDING_GATE_RE read it as an agent's signing, never his.
+
 Importable (reconcile-rollout.py loads it with importlib, beside rollout-settings.py): sweep, hits, body_of, SPEND,
 OLD_SPEND, CREDENTIAL, IRREVERSIBLE, OLD_CREDENTIAL, OLD_IRREVERSIBLE, IRREVERSIBLE_WORDS, CREDENTIAL_THINGS,
 IRREVERSIBLE_THINGS, SERVICES, UNIT_NOUNS, PERIOD_ADVERBS, RATE_UNITS, RATE_RE, CAP_ONLY_LEFTOVER_RES,
@@ -463,7 +511,8 @@ PER_UNIT_OUTSIDE_RE, exposure, standing_exposure, widest_exposure, CEILING_USD, 
 format_usd, gate_kind, credential_reading, read_env, env_proof, bootstrap_refreshes, credential_covered,
 credential_annotation, MAX_ENV_BYTES, DENY_NOUNS, has_login_phrase, login_reading, login_annotation, NO_LOGINS_WHY,
 APPROVED_SUFFIX_RE, declared_logins, HOLD_KINDS, GATE_TOKEN, hold_kind, gate_line, gate_remedy, read_gate_line,
-dependant_row, approved_date, unsigned_hold.
+dependant_row, approved_date, unsigned_hold, METERED_DENY_NOUNS, NO_METERED_WHY, metered_reading, metered_names,
+metered_proof, approved_spend_gates, metered_spend, metered_spend_part, metered_annotation.
 """
 import base64
 import binascii
@@ -505,7 +554,7 @@ OLD_SPEND = (
     _word("API cost"),
 )
 # The credential and irreversible lists before p51-3: each kind's own names alone. IRREVERSIBLE_WORDS is also the
-# credential and test-Login readings' deny list (parts 4 and 5), which the things below never widen.
+# credential, test-Login and metered-key readings' deny lists (parts 4, 5 and 7), which the things below never widen.
 OLD_CREDENTIAL = (_word("API key"), _word("token"), _word("secret"), _word("credential"), _word("prod access"))
 IRREVERSIBLE_WORDS = (_word("irreversible"), _word("cannot be undone"), _word("delete production"), _word("wipe"))
 OLD_IRREVERSIBLE = IRREVERSIBLE_WORDS
@@ -1931,6 +1980,168 @@ def unsigned_hold(pending_text, approved_text, left_out_text, norm):
     for gate in pending:
         add(gate, "set-aside")
     return rows
+
+
+# ---- the metered-key reading (p56-6, ADR 0063's 2026-11-26 amendment) -----------------------------------------------
+
+# A metered key's deny list (module docstring, 7): DENY_LIVE_PROD_RE, IRREVERSIBLE_WORDS and the nouns that name another
+# kind of credential. "API key", "token", "secret" and "access" are no deny words here (a metered key is an API key),
+# and DENY_NOUNS and DENY_RES, the class and Login readings' lists, are untouched.
+METERED_DENY_NOUNS = ("password", "passphrase", "private key", "ssh", "oauth", "1password", "keychain", "cookie")
+METERED_DENY_RES = (DENY_LIVE_PROD_RE,) + tuple(
+    re.compile(WS + r"\s+".join(re.escape(p) for p in phrase.split(" ")) + r"[A-Za-z]*", re.I)
+    for phrase in tuple(w for w, _r, _p in IRREVERSIBLE_WORDS) + METERED_DENY_NOUNS)
+NO_METERED_WHY = ('no metered keys for this repo (set metered_keys in its [repo."owner/name"] table in '
+                  '~/.config/thread/rollouts.toml)')
+# The service guard reads SERVICES as the sweep spells them, whole words with any inner whitespace, in any case.
+SERVICE_RES = tuple((s, re.compile(WS + r"\s+".join(re.escape(p) for p in s.split(" ")) + WE, re.I)) for s in SERVICES)
+SPEND_GATE_CUT = 80   # the characters of a spend gate the metered annotation names
+
+
+def _service_key(service):
+    """A service in its comparison form: lower-cased, its spaces, tabs and hyphens removed (`Eleven Labs` and
+    `ElevenLabs` are one service)."""
+    return re.sub(r"[ \t-]", "", str(service)).lower()
+
+
+def _service_re(service):
+    """The declared service as a whole word, ignoring case and inner spaces or hyphens: `Eleven Labs`, `eleven-labs`
+    and `ELEVENLABS` match a declared `ElevenLabs`; `Cartesian` and `CARTESIA_API_KEY` never match `Cartesia`."""
+    chars = re.sub(r"[ \t-]", "", str(service))
+    return re.compile(WS + r"[ \t-]*".join(re.escape(c) for c in chars) + WE, re.I)
+
+
+def _after_colon(gate):
+    gate = re.sub(r"^\s*[-*]\s+", "", str(gate or "")).strip()
+    return gate.split(":", 1)[1] if ":" in gate else ""
+
+
+def metered_reading(gate, cls):
+    """{"names": [...] | None, "why"}: the metered-key reading of one credential gate (module docstring, 7). Fail
+    closed, the first failure wins, reading only the text after the first `:`; steps 1-3 need no class."""
+    gate = re.sub(r"^\s*[-*]\s+", "", str(gate or "")).strip()
+    if gate_kind(gate) != "credential":
+        return _cred_none("not a credential gate")
+    text = gate.split(":", 1)[1]
+    found = []
+    for regex in METERED_DENY_RES:
+        found += [(m.start(), -len(m.group(0)), m.group(0)) for m in regex.finditer(text)]
+    if found:
+        word = re.sub(r"\s+", " ", min(found)[2]).lstrip("_")
+        return _cred_none(f"deny word: {word}")
+    tokens = [m.group(0) for m in ENV_TOKEN_RE.finditer(text)]
+    if not tokens:
+        return _cred_none("it names no env key")
+    if not cls:
+        return _cred_none(NO_METERED_WHY)
+    declared = {k["name"]: k["service"] for k in cls["keys"]}
+    names = []
+    for t in tokens:
+        if t not in declared:
+            return _cred_none(f"{t} is not a declared metered key")
+        if t not in names:
+            names.append(t)
+    own = [_service_re(declared[n]) for n in names]   # metered_spend's match, so the two readings agree
+    named = sorted((m.start(), m.group(0)) for _s, regex in SERVICE_RES for m in regex.finditer(text))
+    for _at, spelled in named:
+        if not any(regex.search(spelled) for regex in own):
+            spelled = re.sub(r"\s+", " ", spelled)
+            return _cred_none(f"{spelled} is not the declared service of a key it names")
+    return {"names": names, "why": ""}
+
+
+def metered_names(gate, cls):
+    """The gate's env tokens that are declared metered keys, in text order, each once ([] with no class): the
+    standing approval's routing predicate (module docstring, 7)."""
+    if not cls:
+        return []
+    declared = {k["name"] for k in cls["keys"]}
+    names = []
+    for m in ENV_TOKEN_RE.finditer(_after_colon(gate)):
+        if m.group(0) in declared and m.group(0) not in names:
+            names.append(m.group(0))
+    return names
+
+
+def metered_proof(cls, names):
+    """{"ok", "why"}: each named key is set in the class's file (module docstring, 7). No value ever in a why."""
+    env, why = read_env(cls["file"])
+    if why:
+        return {"ok": False, "why": why}
+    missing = [n for n in names if n not in env]
+    if missing:
+        return {"ok": False, "why": "; ".join(f"{n} is not set in {cls['file']}" for n in missing)}
+    return {"ok": True, "why": ""}
+
+
+def approved_spend_gates(approved_text):
+    """{"standing": [...], "other": [...]}: each `## Approved gates` line whose kind is `spend`, its list marker and
+    closing annotation stripped, by whether that annotation is a standing approval's (module docstring, 7)."""
+    out = {"standing": [], "other": []}
+    for line in str(approved_text or "").split("\n"):
+        gate = APPROVED_SUFFIX_RE.sub("", re.sub(r"^\s*[-*]\s+", "", line.strip())).strip()
+        if gate and gate_kind(gate) == "spend":
+            out["standing" if _standing(line) else "other"].append(gate)
+    return out
+
+
+def _join(words):
+    return ", ".join(words)
+
+
+def metered_spend(cls, names, signed, others=()):
+    """{"gates", "why"}: the spend gates the standing approval signed that carry the named metered keys (module
+    docstring, 7). Each named key's declared service, once each in names order, rides the first gate in `signed` whose
+    text after `:` names it; `gates` holds each carrying gate once, in first-carry order. A service no signed gate
+    names is `unsigned` when a gate in `others` names it, else `unnamed`; why is "" when every service is carried."""
+    declared = {k["name"]: k["service"] for k in cls["keys"]}
+    services, seen = [], set()
+    for n in names:
+        s = declared[n]
+        if _service_key(s) not in seen:
+            seen.add(_service_key(s))
+            services.append(s)
+    gates, unnamed, unsigned = [], [], []
+    for s in services:
+        regex = _service_re(s)
+        carry = next((g for g in signed if regex.search(_after_colon(g))), None)
+        if carry is not None:
+            if carry not in gates:
+                gates.append(carry)
+        elif any(regex.search(_after_colon(g)) for g in others):
+            unsigned.append(s)
+        else:
+            unnamed.append(s)
+    whys = []
+    if unnamed:
+        whys.append(f"no spend gate on this task names {_join(unnamed)} (a metered key signs only with its spend gate: "
+                    f"name {_join(unnamed)} in the task's spend gate)")
+    if unsigned:
+        whys.append(f"the spend gate naming {_join(unsigned)} is not signed under the standing approval (a metered key "
+                    "signs only with a spend gate it signed)")
+    return {"gates": gates, "why": "; ".join(whys)}
+
+
+def metered_spend_part(spend_gates):
+    """The spend gates a metered key rode on, as its annotation and approval line name them (module docstring, 7):
+    each its text after `spend:`, stripped, `(` and `)` swapped for `[` and `]`, cut to SPEND_GATE_CUT characters
+    (right-stripped) plus ` …` when longer, joined by ` | `."""
+    parts = []
+    for g in spend_gates:
+        text = _after_colon(g).strip().replace("(", "[").replace(")", "]")
+        parts.append(text[:SPEND_GATE_CUT].rstrip() + " …" if len(text) > SPEND_GATE_CUT else text)
+    return " | ".join(parts)
+
+
+def metered_annotation(date, names, file, source, spend_gates):
+    """The standing approval's `## Approved gates` suffix for a declared metered key (module docstring, 7): `(approved
+    <date> under the standing approval: metered key K1, K2 present in <file>, class from <source>, with its spend gate:
+    <g1>[ | <g2>])`. Raises ValueError on a `)` in any part, as annotation() does."""
+    text = (f"(approved {date} under the standing approval: metered key {', '.join(names)} present in {file}, "
+            f"class from {source}, with its spend gate: {metered_spend_part(spend_gates)})")
+    if text.count(")") != 1:
+        raise ValueError(f"an annotation part holds a ')': {date!r}, {names!r}, {file!r}, {source!r}")
+    return text
 
 
 # ---- CLI --------------------------------------------------------------------------------------------------------

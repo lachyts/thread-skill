@@ -187,7 +187,9 @@ orient.** paragraph cites this list. A `## Decided for you` bullet is an agent's
     irreversible hit of a kind its task's `preflight` row lists under `swept` is never dismissed for naming nothing
     (schedule § 3.6), so it is stamped. A spend or a
     test-credential hit gets its Planner line, or a credential hit § 3.6 records as a declared test Login (p37-4),
-    the test-Login Planner line. A gate sets aside its task, never the rollout (ADR 0008, ADR 0034).
+    the test-Login Planner line. A credential hit § 3.6 records as a declared metered key (p56-6) gets the
+    metered-key Planner line, and the spend one when its note holds none. A gate sets aside its task, never the
+    rollout (ADR 0008, ADR 0034).
 17. Step 4.5's merges: none, with the candidates named (the Pulse keys a task by its path).
 18. Step 4.7's rungs: none, with the hard tasks named.
 19. Step 5's order, Solo and Branch check: as written; Solo is listed in step 8's Decided for you.

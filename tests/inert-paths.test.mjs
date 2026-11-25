@@ -968,12 +968,14 @@ test('record refuses a dotted or multi-line inert_paths form: edit it by hand', 
 
 // ADR 0063: a repo's test-credential class is ONE line in its repo table, which the line-by-line edit keeps byte-identical
 // and inserts after; an edit whose result changes it is refused by the `mine` check; any other form refuses the file.
+// p56-6: a repo's one-line metered_keys beside it is kept byte-identical too.
 const IP_CLASS = 'test_credentials = { file = "/x/.env.local", keys = [{ name = "STRIPE_SECRET", prefix = "sk_test_" }] }  # test mode only'
+const IP_METERED = 'metered_keys = { file = "/m/env", keys = [{ name = "CARTESIA_API_KEY", service = "Cartesia" }] }  # the voice engine'
 
-test('record beside the one-line test_credentials class keeps it byte-identical and inserts after it', (t) => {
+test('record beside the one-line test_credentials class and metered_keys keeps both byte-identical and inserts after them', (t) => {
   const fx = fixture(t)
   fs.mkdirSync(tasksDir(fx.home))
-  const before = `schema = 3\n\n[repo."o/fx"]\nparallel_ceiling = 3\n${IP_CLASS}\n`
+  const before = `schema = 9\n\n[repo."o/fx"]\nparallel_ceiling = 3\n${IP_CLASS}\n${IP_METERED}\n`
   write(path.dirname(settingsPath(fx.home)), { 'rollouts.toml': before })
   const r = cli(fx.home, ['record', '--repo', fx.repo, '--glob', 'THREAD.md', '--verifier', 'true', '--tasks-dir', tasksDir(fx.home)])
   assert.equal(r.status, 0, r.stderr)
