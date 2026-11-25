@@ -289,9 +289,10 @@ declaration in words, an agent writes it into this file with `declare` and repor
 only forms that write, and no agent edits this file any other way (a Tuning stays tune.py's, an Inert path
 inert-paths.py's). Every rule of the two verbs is here:
 - Ruled. `--words` is his own words, quoted exactly: non-empty once stripped, at most MAX_WORDS (2000) characters, no
-  control character. `--said` is the day he said them, a real `YYYY-MM-DD` date that is not after today. `--source`,
-  optional, is where he said them (a note's link, the grill's name), held to the same check as `--words` at
-  MAX_SOURCE (300) characters, since it goes into the log and the one-line report. A failure is exit 2, nothing
+  control character. `--said` is the day he said them, a real `YYYY-MM-DD` date in ASCII digits that is not after
+  today, held as that date's ISO form. `--source`, optional, is where he said them (a note's link, the grill's
+  name), held to the same check as `--words` at MAX_SOURCE (300) characters, since it goes into the log and the
+  one-line report. A failure is exit 2, nothing
   written. That his words name the thing declared is the agent's rule (the ADR's Decided for him 1), never checked
   here: a sign-off of one gate, an inference or silence is no ruling, and with no such words the declaration stays
   his question.
@@ -352,9 +353,11 @@ inert-paths.py's). Every rule of the two verbs is here:
   lowered.
 - The report, one stdout line the agent pastes verbatim where Lachy reads the result: `declared [<table>] <key> =
   <value> in <path> (was: <old line | not set>); his words, <said>: "<words>"[, <source>]; logged <id> in <log>; undo:
-  rollout-settings.py undo --id <id>` (`removed [<table>] <key> from <path> …` for a removal, `undone <id>: [<table>]
-  <key> in <path> (now: <line | not set>); …` for an undo, which offers no undo). `--dry-run` prints the diff and the
-  would-be log line instead, the reader check still run, and writes nothing.
+  rollout-settings.py undo --id <id> --words "<his words>" --said <YYYY-MM-DD>[ --config <path>]` (`removed [<table>]
+  <key> from <path> …` for a removal, `undone <id>: [<table>] <key> in <path> (now: <line | not set>); …` for an undo,
+  which offers no undo). The undo hint holds the two placeholders an undo needs filled, his words taking it back and
+  their date, and `--config` when the write was given one. `--dry-run` prints the diff and the would-be log line
+  instead, the reader check still run, and writes nothing.
 - Exit codes: 0 written, nothing to change, or `--dry-run`; 1 the reader check refused or did not run, the file
   changed under it, or the log or the replace failed; 2 usage, no ruling, a refused key or value, a form it will not
   edit, an edit that does not validate, an undo it refuses; 3 tomllib missing. A failure is one stderr line,
@@ -1133,7 +1136,7 @@ UNDECLARABLE = {
     "schema": "the writer that adds a newer key raises it in the same edit",
 }
 _BARE_KEY_RE = re.compile(r"[A-Za-z0-9_-]+\Z")
-_SAID_RE = re.compile(r"(\d{4})-(\d\d)-(\d\d)\Z")
+_SAID_RE = re.compile(r"([0-9]{4})-([0-9]{2})-([0-9]{2})\Z")   # ASCII digits only: \d takes any Unicode digit
 _ABSENT = object()   # a key that is not set, where None could be a value
 _NO_TABLES = {"defaults": {}, "guardrails": {}, "repo": {}, "schema": 1, "ignored": [], "retired": []}
 
@@ -1192,7 +1195,7 @@ def _ruling(a):
     if a.source is not None:
         source = _ruling_text("--source", a.source, MAX_SOURCE,
                               "--source is empty (leave it out, or say where he said it)")
-    return words, a.said, source
+    return words, said.isoformat(), source
 
 
 def toml_value(value):
@@ -1652,7 +1655,8 @@ def cmd_declare(a):
         return 0
     log = declarations_path(config)
     was = "not set" if ed["replaced"] is None else ed["replaced"].strip()
-    undo = "undo: rollout-settings.py undo --id %s%s" % (entry["id"], " --config %s" % a.config if a.config else "")
+    undo = "undo: rollout-settings.py undo --id %s --words \"<his words>\" --said <YYYY-MM-DD>%s" % (
+        entry["id"], " --config %s" % a.config if a.config else "")
     if a.remove:
         print("removed %s %s from %s (was: %s); %s; logged %s in %s; %s"
               % (label, a.key, config, was, _said_of(words, said, source), entry["id"], log, undo))

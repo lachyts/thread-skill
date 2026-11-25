@@ -40,7 +40,7 @@
 // rows, schedule § 3.6's paragraph with its Scope clause, reshuffle R3 (c) and its Write surface, asking.md's bullet,
 // the README's two paragraphs, CONTEXT.md's entry, the ADR's amendment with its Decided for him list, and three
 // sentences of rollout-settings.py's header (the forms that write, the clock, the comment). The verbs' behaviour is
-// pinned by tests/rollout-settings.test.mjs D1-D10.
+// pinned by tests/rollout-settings-declare.test.mjs D1-D9.
 //
 // Same shape as execute-signed-gate.test.mjs: every rule lives in one function, checkStanding(files), returning named
 // failures, so the real text and the controls run through identical logic; each control mutates the real text in one
