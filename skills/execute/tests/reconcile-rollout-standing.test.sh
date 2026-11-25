@@ -49,6 +49,15 @@
 #          widest suffix; the ruling's split, range, counted rate and other currency sign at their widest, each detail
 #          naming the cap-only reading's why, each annotated with its total exposure; an undecided cap, a further
 #          rate, a count in another unit and an approximate amount still ask; a bounced note signs none of them.
+#   S13    a metered API key on file signs with its spend (p56-6, ADR 0063's 2026-11-26 amendment): chorus-p113-3's
+#          verbatim voice-key gate, its two keys declared in the repo's one-line `metered_keys` (schema 9) and present
+#          in their file, rides the spend gate the standing approval signs in the same pass or signed earlier (at the
+#          US$200 limit, the built-in 0 or a bad stamp: a rider reads no limit), named once in its annotation, in the
+#          gates' declared order; no spend gate, another service's, one over the limit, past the month line, off or
+#          signed by hand, a key missing from its file or the file itself, an undeclared key, another service's key,
+#          a production word and a bounce ask with their whys; no metered keys (no table, another repo's, a serial
+#          note) keep today's ASK byte-identical; a schema-8 file holding the key is exit 1; with both classes
+#          declared a test credential keeps the class path. No value from the file is ever printed or written.
 #   G1-G4  gate-pricer (ADR 0038): the gated_inputs.py path while the standing approval is on, "" with its why while it
 #          is off (built-in 0, or a task stamp of 0), and exit 1 with an ERROR line and no stdout on a bad stamp or a
 #          refused rollouts.toml. It writes nothing.
@@ -1011,6 +1020,186 @@ before=$(cat "$D/a.md")
 HH="$H200" sa a
 ok "$rc|$(cat "$D/a.md")" "3|$before" "S12c: a bounced note signs nothing (exit 3), nothing written"
 has "$out" "ASK: a: ${W_SIGN[0]}: the plan judge bounced this plan (ADR 0038; its feedback is under $BOUNCE_H), so the standing approval signs none of its gates; the pricer reads: exposure US\$15" "S12c: the split gate asks, its pricer reading US\$15"
+
+# ── S13: a metered API key on file signs with its spend (p56-6, ADR 0063's 2026-11-26 amendment) ──────────────────────
+# The Verify: chorus-p113-3's two gates, verbatim from Archive/chorus-p113-3-the-voice-says-pr.md:45-46 (their
+# annotations stripped). Its repo is a clone whose origin is o/chorus; HM declares the two voice keys as metered keys
+# (schema 9) beside the US$200 limit, HM0 the same keys with no spend_approval_usd anywhere (the built-in 0). The values
+# are fakes in a temp file whose path holds no `)`; none may reach stdout, stderr or a note.
+SP13="spend: sample synthesis of the candidate PR forms on the paid Cartesia and ElevenLabs engines, plus ElevenLabs Scribe speech-to-text of the samples — cap 3 USD"
+CR13="credential: CARTESIA_API_KEY and ELEVENLABS_API_KEY, read from the environment or ~/.config/chorus/env (calibrate.py's \`load_keys\`) into the scratch sampler's process only; never printed, logged or written."
+mkdir -p "$TMP/s13"
+MSRC="$TMP/s13/chorus.env"
+msrcok() { printf '%s\n' '# the voice engines' 'CARTESIA_API_KEY=sk_car_FAKE51cartesia' 'export ELEVENLABS_API_KEY="FAKE51elevenlabs"' > "$MSRC"; }
+msrcok
+METERED="metered_keys = { file = \"$MSRC\", keys = [{ name = \"CARTESIA_API_KEY\", service = \"Cartesia\" }, { name = \"ELEVENLABS_API_KEY\", service = \"ElevenLabs\" }] }"
+HM="$TMP/home-metered"; mkdir -p "$HM/.config/thread"
+printf 'schema = 9\n\n[defaults]\nspend_approval_usd = 200\n\n[repo."o/chorus"]\n%s   # the paid voice engines\n' "$METERED" > "$HM/.config/thread/rollouts.toml"
+HM0="$TMP/home-metered-0"; mkdir -p "$HM0/.config/thread"
+printf 'schema = 9\n\n[repo."o/chorus"]\n%s\n' "$METERED" > "$HM0/.config/thread/rollouts.toml"
+SPANN13="(approved $DATE under the standing approval: total exposure US\$3, limit US\$200 from file:defaults)"
+SPPART13='sample synthesis of the candidate PR forms on the paid Cartesia and ElevenLabs e …'
+MANN13="(approved $DATE under the standing approval: metered key CARTESIA_API_KEY, ELEVENLABS_API_KEY present in $MSRC, class from file:repo, with its spend gate: $SPPART13)"
+MDETAIL13="metered key CARTESIA_API_KEY, ELEVENLABS_API_KEY present in $MSRC, file:repo, with its spend gate: $SPPART13"
+UNNAMED13='no spend gate on this task names Cartesia, ElevenLabs (a metered key signs only with its spend gate: name Cartesia, ElevenLabs in the task'"'"'s spend gate)'
+UNSIGNED13='the spend gate naming Cartesia, ElevenLabs is not signed under the standing approval (a metered key signs only with a spend gate it signed)'
+NOMODE='no test-mode, staging or sandbox word'
+s13() { s10 "$1" "${2:-o/chorus}"; }
+apg() {  # apg <slug> <line>... — append a `## Approved gates` section holding the lines
+  local s="$1"; shift
+  { printf '\n## Approved gates\n\n'; for l in "$@"; do printf '%s\n' "$l"; done; } >> "$D/$s.md"
+}
+mnovalue() { hasnt "$1" "FAKE" "$2: no metered key value printed or written"; }
+
+# S13a: the Verify, at the US$200 limit: both gates sign, in their declared order, the credential riding the spend gate
+s13 s13a
+mkro; mkt a gate-pending; gate a "$SP13" "$CR13"
+HH="$HM" sa a
+ok "$rc" 0 "S13a: p113-3's spend and voice-key gates are both signed: exit 0"
+ok "$(section a '## Approved gates')" "- $SP13 $SPANN13
+- $CR13 $MANN13" "S13a: both in ## Approved gates, in declared order, the credential naming its one spend gate once"
+has "$out" "a: gate approved under the standing approval: $CR13 ($MDETAIL13) [written]" "S13a: the approval line names the keys, the file, the source and the spend gate"
+hasnt "$out" "ASK:" "S13a: nothing asks"
+ok "$(section ro '## Needs-you log')" "$(logl a 3 3 "$SP13")" "S13a: one Needs-you log line, the spend gate's"
+ok "$(fm a status)" "status: in_progress" "S13a: it flips to in_progress"
+ok "$(events | tail -1 | python3 -c 'import json,sys; d=json.loads(sys.stdin.read()); print(d["kind"], d["task"], d["standing"], d["gates"])')" "gate-signed a True 2" "S13a: the event is gate-signed, standing, 2 gates"
+mnovalue "$out$(cat "$D/a.md" "$D/ro.md")" "S13a"
+HH="$HM" sa a
+ok "$rc|$(echo "$out" | grep -c '\[no-change\]')" "0|1" "S13a: a re-run on the signed note is [no-change]"
+
+# S13b: the incident's state: the spend gate standing-signed on 20 Nov, the voice-key gate alone pending. It signs at
+# the US$200 limit, at the built-in 0 and beside a bad spend stamp: a rider reads no limit
+SPLINE13="- $SP13 (approved 2026-11-20 under the standing approval: total exposure US\$3, limit US\$200 from file:defaults)"
+for row in "200|$HM|-" "0|$HM0|-" "stamp|$HM|spend_approval_usd: fifty"; do
+  lbl="${row%%|*}"; rest="${row#*|}"; home="${rest%%|*}"; stamp="${rest#*|}"
+  s13 "s13b-$lbl"
+  mkro
+  if [ "$stamp" = "-" ]; then mkt a gate-pending; else mkt a gate-pending "$stamp"; fi
+  apg a "$SPLINE13"; gate a "$CR13"
+  HH="$home" sa a
+  ok "$rc|$(fm a status)" "0|status: in_progress" "S13b ($lbl): the voice-key gate signs alone: exit 0, in_progress"
+  ok "$(section a '## Approved gates')" "$SPLINE13
+- $CR13 $MANN13" "S13b ($lbl): … riding the earlier standing line"
+  ok "$(section ro '## Needs-you log')" "" "S13b ($lbl): … with no Needs-you line"
+  hasnt "$out" "ASK:" "S13b ($lbl): nothing asks"
+done
+
+# S13c: the credential listed before its spend gate still rides it, signed in the same pass; the order is kept
+s13 s13c
+mkro; mkt a gate-pending; gate a "$CR13" "$SP13"
+HH="$HM" sa a
+ok "$rc" 0 "S13c: the credential before its spend gate: both signed, exit 0"
+ok "$(section a '## Approved gates')" "- $CR13 $MANN13
+- $SP13 $SPANN13" "S13c: … in their declared order"
+ok "$(echo "$out" | grep 'gate approved' | cut -c1-40 | tr '\n' '|')" "a: gate approved under the standing appr|a: gate approved under the standing appr|" "S13c: two approval lines"
+has "$(echo "$out" | grep -m1 'gate approved')" "$CR13" "S13c: … the credential's printed first"
+
+# S13d: what asks, the credential left pending, each with its exact why
+s13 s13d
+OTHER13='spend: a probe on Replicate — cap 3 USD'
+OVER13='spend: sample synthesis on the paid Cartesia and ElevenLabs engines — cap 300 USD'
+d13() {  # d13 <slug> <label> <expected why> [home] — the slug's voice-key gate asks with that why
+  HH="${4:-$HM}" sa "$1"
+  ok "$rc" 3 "S13d: $2: exit 3"
+  has "$out" "ASK: $1: $CR13: $3" "S13d: $2: the ASK says why"
+  ok "$(section "$1" '## Gated inputs (awaiting sign-off)' | grep -c 'CARTESIA_API_KEY')" 1 "S13d: $2: the credential stays pending"
+}
+ORDER=$'- [[n1]]\n- [[n2]]\n- [[n3]]\n- [[n4]]\n- [[n5]]' mkro
+mkt n1 gate-pending; gate n1 "$CR13"
+before=$(cat "$D/n1.md")
+d13 n1 "no spend gate" "$UNNAMED13"
+ok "$(cat "$D/n1.md")" "$before" "S13d: no spend gate: nothing written"
+mkt n2 gate-pending; gate n2 "$OTHER13" "$CR13"
+d13 n2 "a spend gate naming another service" "$UNNAMED13"
+ok "$(section n2 '## Approved gates' | grep -c Replicate)" 1 "S13d: … the other service's spend gate signs alone"
+mkt n3 gate-pending; gate n3 "$OVER13" "$CR13"
+d13 n3 "the spend gate over the limit" "$UNSIGNED13"
+has "$out" "ASK: n3: $OVER13: total exposure US\$300 is over the standing approval's US\$200 (file:defaults)" "S13d: … the spend gate asks with its own why"
+mkt n4 gate-pending; gate n4 "$SP13" "$CR13"
+d13 n4 "the standing approval off (built-in 0), both pending, no earlier signed spend line" "$UNSIGNED13" "$HM0"
+has "$out" "ASK: n4: $SP13: standing approval off (built-in 0): set [defaults] spend_approval_usd in ~/.config/thread/rollouts.toml" "S13d: … the spend gate asks with its off why"
+ok "$(section n4 '## Approved gates')" "" "S13d: … and nothing is signed"
+mkt n5 gate-pending; apg n5 "- $SP13 (approved 2026-11-20)"; gate n5 "$CR13"
+d13 n5 "a spend gate signed by hand only" "$UNSIGNED13"
+s13 s13d-month
+mkro
+printf '\n## Needs-you log\n\n%s\n' "$(SL 2026-10-03 p0 199 199 200 file:defaults 'spend: p0 — cap 199 USD')" >> "$D/ro.md"
+mkt a gate-pending; gate a "$SP13" "$CR13"
+d13 a "the spend gate past the month line" "$UNSIGNED13"
+has "$out" "ASK: a: $SP13: this month's (2026-10) standing approvals would reach US\$202 with this gate, past the US\$200 month line (file:defaults)" "S13d: … the spend gate asks with its month why"
+s13 s13d-file
+ORDER=$'- [[k1]]\n- [[k2]]\n- [[u1]]\n- [[u2]]\n- [[p1]]\n- [[b1]]\n- [[r1]]' mkro
+printf '%s\n' 'CARTESIA_API_KEY=sk_car_FAKE51cartesia' > "$MSRC"
+mkt k1 gate-pending; gate k1 "$SP13" "$CR13"
+d13 k1 "a key missing from the file" "ELEVENLABS_API_KEY is not set in $MSRC"
+rm -f "$MSRC"
+mkt k2 gate-pending; gate k2 "$CR13"
+before=$(cat "$D/k2.md")
+d13 k2 "the file missing" "$MSRC is not a regular file"
+ok "$(cat "$D/k2.md")" "$before" "S13d: the file missing: nothing written"
+msrcok
+U1='credential: CARTESIA_API_KEY and OPENAI_API_KEY for the voice probe'
+U2='credential: CARTESIA_API_KEY and the Stripe secret key for the voice probe'
+P1='credential: CARTESIA_API_KEY for the production voice probe'
+mkt u1 gate-pending; gate u1 "$SP13" "$U1"
+mkt u2 gate-pending; gate u2 "$SP13" "$U2"
+mkt p1 gate-pending; gate p1 "$SP13" "$P1"
+HH="$HM" sa u1,u2,p1
+ok "$rc" 3 "S13d: an undeclared key, another service and a production word ask: exit 3"
+has "$out" "ASK: u1: $U1: OPENAI_API_KEY is not a declared metered key" "S13d: an undeclared env key beside a declared one asks, naming it"
+has "$out" "ASK: u2: $U2: Stripe is not the declared service of a key it names" "S13d: another service's key beside a declared one asks (the guard)"
+has "$out" "ASK: p1: $P1: deny word: production" "S13d: a production word asks"
+mkt b1 gate-pending; gate b1 "$SP13" "$CR13"
+printf '\n%s\n\nbounced by the plan judge (ADR 0038): it still read these gates as unpriceable after one bounce\n' "$BOUNCE_H" >> "$D/b1.md"
+before=$(cat "$D/b1.md")
+HH="$HM" sa b1
+ok "$rc|$(cat "$D/b1.md")" "3|$before" "S13d: a bounced note signs nothing (exit 3), nothing written"
+has "$out" "ASK: b1: $CR13: the plan judge bounced this plan (ADR 0038; its feedback is under $BOUNCE_H), so the standing approval signs none of its gates; the pricer reads: not a spend gate" "S13d: … the voice-key gate names the bounce"
+mkt r1 gate-pending; gate r1 "$SP13" "$CR13"
+before=$(cat "$D/r1.md" "$D/ro.md")
+HH="$HM" sa r1 --dry-run
+ok "$rc|$(cat "$D/r1.md" "$D/ro.md")" "0|$before" "S13d: --dry-run exits 0 and writes nothing"
+has "$out" "r1: gate approved under the standing approval: $CR13 ($MDETAIL13) (dry-run)" "S13d: … and says what it would sign"
+mnovalue "$out" "S13d"
+
+# S13e: no metered keys (no repo table, another repo's table, a serial note): today's ASK, byte-identical
+s13 s13e
+HMO="$TMP/home-metered-other"; mkdir -p "$HMO/.config/thread"
+printf 'schema = 9\n\n[repo."o/other"]\n%s\n' "$METERED" > "$HMO/.config/thread/rollouts.toml"
+mkro; mkt a gate-pending; gate a "$CR13"
+for h in "$H200" "$HMO"; do
+  before=$(cat "$D/a.md")
+  HH="$h" sa a
+  ok "$rc|$(cat "$D/a.md")" "3|$before" "S13e: no metered keys for this repo ($h): exit 3, nothing written"
+  ok "$(echo "$out" | grep '^ASK:')" "ASK: a: $CR13: $NOMODE" "S13e: … today's ASK, byte-identical"
+done
+s13 s13e-serial
+printf -- '---\ntags: [task, rollout]\nstatus: open\nprotocol_version: 5\nshape: serial\n---\n\n## Queue\n\n- [[a]]\n' > "$D/ro.md"
+mkt a gate-pending; gate a "$SP13" "$CR13"
+HH="$HM" sa a
+ok "$rc" 3 "S13e: on a serial note the voice-key gate asks: exit 3"
+ok "$(echo "$out" | grep '^ASK:')" "ASK: a: $CR13: $NOMODE" "S13e: … a Leg resolves no repo table, so today's ASK"
+
+# S13f: a refused rollouts.toml (metered_keys under schema 8) is exit 1 for the slug, nothing written
+s13 s13f
+HMR="$TMP/home-metered-refused"; mkdir -p "$HMR/.config/thread"
+printf 'schema = 8\n\n[repo."o/chorus"]\n%s\n' "$METERED" > "$HMR/.config/thread/rollouts.toml"
+mkro; mkt a gate-pending; gate a "$SP13" "$CR13"
+before=$(cat "$D/a.md" "$D/ro.md")
+HH="$HMR" sa a
+ok "$rc|$(cat "$D/a.md" "$D/ro.md")" "1|$before" "S13f: a refused file exits 1, nothing written"
+has "$out" "ERROR: a: rollout settings refused: " "S13f: … the ERROR names the refusal"
+has "$out" "rollout.metered_keys is a schema-9 key but the file says schema = 8" "S13f: … and the raise remedy"
+
+# S13g: both classes declared: S10a's two test-credential gates still sign on the class path
+s10 s13g
+HBOTH="$TMP/home-both"; mkdir -p "$HBOTH/.config/thread"
+printf 'schema = 9\n\n[repo."Animately/optimizer"]\n%s\nmetered_keys = { file = "%s", keys = [{ name = "CARTESIA_API_KEY", service = "Cartesia" }] }\n' "$CLASS" "$MSRC" > "$HBOTH/.config/thread/rollouts.toml"
+mkro "$BOOT"; mkt a gate-pending; gate a "$G1" "$G2"
+HH="$HBOTH" sa a
+ok "$rc" 0 "S13g: both classes declared, p8-1's gates sign: exit 0"
+ok "$(section a '## Approved gates')" "- $G1 $ANN1
+- $G2 $ANN2" "S13g: … each with the test-credential annotation"
 
 # ── G1-G4: gate-pricer, the plan judge's pricer path for one call (ADR 0038) ─────────────────────────
 GI="$(cd "$HERE/../../_shared/scripts" && pwd -P)/gated_inputs.py"

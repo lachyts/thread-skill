@@ -123,8 +123,9 @@ result goes to a temp file in the same directory and must resolve with each pick
 key from `file:defaults`, a repo one from `file:repo`, a Weight key in `weight`), every other rollout key, Weight part
 and Guardrail unchanged, and every
 repo's `inert_paths` (p29-3, ADR 0045: schedule's inert-paths.py `record` and `drop` are its only writers),
-every repo's `test_credentials` (ADR 0063: declared on his ruling only, never a Tuning) and the resolved `[defaults]
-test_logins` (p37-4: the operator's declared test Logins, declared on his ruling only, never a Tuning) unchanged.
+every repo's `test_credentials` (ADR 0063: declared on his ruling only, never a Tuning), every repo's `metered_keys`
+(p56-6: the same rule) and the resolved `[defaults] test_logins` (p37-4: the operator's declared test Logins, declared
+on his ruling only, never a Tuning) unchanged.
 
 The reader check (rollout-settings.py's header: a writer that raises the schema runs it), only when the edit raises the
 file's `schema`: a capacity_max Tuning raises it to 4, a Weight Tuning to 6 and an overtime_runs Tuning to 8 (p39-14), an
@@ -647,8 +648,8 @@ def edit_text(text, slug, picks, doc):
 
 def _repo_tables(path, key):
     """{repo key (lowered): its `key`} over every repo table of the file at `path` that sets it ({} for no file): a
-    repo-only key no Tuning may touch (inert_paths, test_credentials). The machine-wide `test_logins` (p37-4) is
-    compared on resolve()'s result instead, in _apply."""
+    repo-only key no Tuning may touch (inert_paths, test_credentials, metered_keys). The machine-wide `test_logins`
+    (p37-4) is compared on resolve()'s result instead, in _apply."""
     try:
         tables = RS.load_tables(path)
     except RS.SettingsError as e:
@@ -836,8 +837,9 @@ def _apply(scores, applied, names, repo, config, before, dry_run, auto=None, tas
                 raise Stop("the edit resolves %s to %s, not %s: nothing written" % (k, after["weight"][part], want), 2)
         if after["guardrails"] != before["guardrails"]:
             raise Stop("the edit changes the Guardrails: nothing written", 2)
-        # p29-3 (ADR 0045) and ADR 0063: a Tuning never touches any repo's Inert paths or test-credential class.
-        for key in ("inert_paths", "test_credentials"):
+        # p29-3 (ADR 0045), ADR 0063 and p56-6: a Tuning never touches any repo's Inert paths, test-credential class
+        # or metered keys.
+        for key in ("inert_paths", "test_credentials", "metered_keys"):
             if _repo_tables(tmp, key) != _repo_tables(config, key):
                 raise Stop("the edit changes a repo's %s: nothing written" % key, 2)
         # p37-4: the declared test Logins are declared on his ruling only (machine-wide, [defaults]): no Tuning moves

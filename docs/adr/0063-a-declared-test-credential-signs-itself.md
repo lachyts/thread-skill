@@ -9,6 +9,9 @@ schema 5, operator-only by this ADR's d1 rule) signs a credential gate that name
 *(Amended 2026-11-24 by p56-5, the Amendment at the end: an agent writes a declaration Lachy has ruled on in words,
 through `rollout-settings.py declare`, and reports it. Decision 1's "No automated writer adds or changes it" holds
 from then on for a declaration he has not ruled on.)*
+*(Amended 2026-11-26 by p56-6, the second Amendment at the end: a repo's declared metered keys (`metered_keys`, schema
+9), keys whose only risk is metered spend, sign a credential gate with the spend gate the standing approval signed on
+the same task that names each key's service.)*
 
 ## Context
 
@@ -210,3 +213,67 @@ needs-you item or an ask ahead, never an agent's inference.
    UTC.
 9. **A line's comment names its last declaration only.** The log is the record. A Tuning that later moves a declared
    Tuning key keeps the comment while the value is tune.py's, recorded in tunings.jsonl.
+
+## Amendment (2026-11-26, p56-6: a metered key signs with its spend)
+
+[[chorus-p113-3-the-voice-says-pr]] sat set aside from 20 to 23 Nov waiting for Lachy, though its US$3 spend gate was
+already signed under the standing approval (limit US$200). What held it was its separate credential gate for
+`CARTESIA_API_KEY` and `ELEVENLABS_API_KEY`. The class of decision 1 signs only a test-mode key: the gate must carry a
+test, staging or sandbox word and no "API key" noun. Cartesia and ElevenLabs have no test mode, and Chorus uses the same
+keys every day, so the class could never sign them. His ruling, on 2026-11-23: **"I shouldn't be asked about this."**
+
+**The rule.** A third class beside the test credential and the test Login: the **metered key**, a key whose only risk is
+metered spend. A repo declares them in one line of its `[repo."owner/name"]` table, `metered_keys = { file = "<path>",
+keys = [{ name = "<NAME>", service = "<Service>" }, …] }` (schema 9), each key with the service its spend gate names.
+`approve-gates --standing` signs a credential gate when every env name in it is a declared metered key, each present in
+the declared file; no live or production word, irreversible word or other kind of credential (password, private key,
+SSH, OAuth, keychain, cookie) is in it, while "API key", "token" and "secret" stay deny words for the other two classes
+only; no other listed service is named beside the keys; and a spend gate the standing approval signed on the same task,
+earlier or in the same pass, names each key's service. It reads no limit of its own: it signs only with a spend gate
+the standing approval signed on this task, earlier or in this pass, so with `spend_approval_usd` at 0 it signs only on
+an earlier signing. Its annotation names the keys, the file and the spend gate it rode on. Schedule § 3.6 and orient's
+reshuffle R3 (c) record such a credential ahead, with a metered-key Planner line and, when the note holds none, the
+spend Planner line. It is declared on his ruling only, by the 2026-11-24 amendment: Chorus's two voice keys are an
+agent's `declare` after this lands, quoting his words of 23 Nov.
+
+**What stands.** Decision 5, "the class is its own switch", is about the test-credential class and is unchanged: a
+metered key is no switch of its own, and no limit either. A key is in one class: a name in both `test_credentials` and
+`metered_keys` refuses the file. Decision 7 stands for metered keys too: a Leg resolves no repo table.
+
+**Named residuals.**
+
+a. *The serial path.* A `shape: serial` chain's Leg resolves no repo table (decision 7), so a paid probe routed serial
+   is still asked ahead at schedule S4 and held by p56-3's unsigned hold. Follow-up: a serial note resolves its repo's
+   metered keys.
+b. *No Planner line.* A brief with no sweep hit gets no Planner line, so nothing tells its planner to name env keys and
+   the service. Its gate signs when its words do, and asks once otherwise. Its second shape is a `credential` the
+   Readiness grade names with no sweep hit: schedule § 1.5 asks it ahead, since `preflight --ask-gates` reads no
+   settings. Follow-up: § 1.5 does not ask a grade-named credential the repo's metered keys cover.
+c. *No `env_bootstrap` check.* Presence in the declared file is proved, not its copy into the task tree: a metered
+   file that is a repo-local `.env` the bootstrap does not copy signs, then fails at the build, as p8-1 did.
+d. *A service outside SERVICES*, or a second credential named in plain prose with no env token or deny word, is not
+   seen (residual (i)'s shape).
+e. *estate-rank's charge.* A metered-key gate is still charged a sign-off (residual (viii)).
+
+### Decided for him (p56-6, overturnable)
+
+a. **Recorded whether or not the brief names a spend.** A note that names the service but pays for nothing gets
+   `plan_approval: required` and two Planner lines it may not need; its plan declares no gate, and nothing stops.
+b. **The spend Planner line is written with the metered-key one** when the note holds none: the key signs only with a
+   priced spend gate.
+c. **A service is declared per key**, never derived from the env name: the rule needs the service a spend gate must
+   name, and a declared word is one he ruled on.
+d. **The service match ignores case and inner spaces or hyphens** (`Eleven Labs` names `ElevenLabs`; `Cartesian` never
+   names `Cartesia`).
+e. **Eight deny nouns, and the service guard.** A key of another kind, or another listed service's key beside the
+   declared ones, asks; the guard reads any case, so a gate holding the verb "replicate" asks too.
+f. **A spend gate signed by hand does not carry the key**: the note's rule is "a spend gate the standing approval
+   signed", and the ASK says so.
+g. **No `env_bootstrap` check** (residual c): Chorus reads its env file in place.
+h. **Routing reads the settings** for a credential gate with an env token, no metered deny word and no mode word, so
+   under a refused file its slug exits 1, as every other reader of that file does.
+i. **No limit of its own.** Turning the standing approval off stops a metered key only where no earlier standing
+   signing carries it; re-reading the limit for a rider would ask the incident's own state whenever the limit moved
+   after the spend was signed.
+j. **The serial path stays off** (residual a), a decision of its own.
+k. **The grade-named credential** (residual b's second shape) is its own task: a grade names a kind, never a key.

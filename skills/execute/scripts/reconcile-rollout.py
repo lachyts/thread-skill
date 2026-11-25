@@ -1121,12 +1121,13 @@ Subcommands:
               line with no `pr:` goes to in_progress with a WARN. Refuses a note that isn't
               gate-pending; idempotent once approved (already-approved note = no-op). Run by the lead
               session only after Lachy explicitly signs off.
-              --standing --rollout <note> (ADR 0034, ADR 0063, p37-4): the standing approval, run by the lead
-              unattended. It signs only the spend gates Lachy's recorded standing approval covers, the
-              credential gates his declared test-credential class covers, and the credential gates naming only a
-              declared test Login (below). Each pending spend bullet is priced by
-              skills/_shared/scripts/gated_inputs.py's standing reading, covered() (fail closed: irreversible
-              gates, a credential outside the class and the test Logins, and any shape it cannot price even from
+              --standing --rollout <note> (ADR 0034, ADR 0063, p37-4, p56-6): the standing approval, run by the
+              lead unattended. It signs only the spend gates Lachy's recorded standing approval covers, the
+              credential gates his declared test-credential class covers, the credential gates naming only a
+              declared test Login, and the credential gates naming only declared metered keys with their spend
+              gate (below). Each pending spend bullet is priced by skills/_shared/scripts/gated_inputs.py's
+              standing reading, covered() (fail closed: irreversible gates, a credential outside the class, the
+              test Logins and the metered keys, and any shape it cannot price even from
               its cap or at its widest, never pass): the full exposure() reading, else (p37-4, ADR 0034's
               2026-11-05 amendment: unpriceable never means asked) the cap-only reading, the cap times the
               clause's count plus every other USD amount, where prose around a readable cap never asks; a gate
@@ -1168,7 +1169,27 @@ Subcommands:
               names the residual). It reads no limit and gets no ledger, month line, Needs-you line or
               spend lock; its annotation is gated_inputs.login_annotation()'s `(approved <date> under the standing
               approval: test Login <n1, n2>, from <source>)`, and its line prints `<slug>: gate approved under the
-              standing approval: <gate> (test Login <n1, n2>, <source>)`. A spend gate is covered iff
+              standing approval: <gate> (test Login <n1, n2>, <source>)`. A credential gate on an unbounced note
+              that names a declared metered key (p56-6, ADR 0063's 2026-11-26 amendment: gated_inputs.py's module
+              docstring, 7) takes the metered-key reading instead, never the class one: the settings are resolved
+              only when the class reading with no class gives NO_CLASS_WHY or the metered reading with no class
+              gives NO_METERED_WHY (any other pair of whys is the gate's ASK with the class reading's why, today's),
+              and a gate whose env tokens include one of rollouts.toml's `metered_keys` (gated_inputs.metered_names)
+              is covered iff gated_inputs.metered_reading() reads every env token as a declared metered key with no
+              deny word and no other service, metered_proof() finds each in the declared file, and, judged after
+              the slug's other gates (a rider), gated_inputs.metered_spend() finds each key's declared service
+              named by a spend gate the standing approval signed on this task: a standing line already in
+              `## Approved gates`, or a spend gate this call covers and newly writes. It reads no limit of its
+              own: it signs only with a spend gate the standing approval signed on this task, earlier or in this
+              pass, so with `spend_approval_usd` at 0 it signs only on an earlier signing; the limit is never
+              resolved for a rider, and it gets no ledger, month line, Needs-you line or spend lock. A service a
+              hand-signed or pending spend gate names asks `the spend gate naming <S> is not signed under the
+              standing approval …`; one no spend gate names asks `no spend gate on this task names <S> …`. Its
+              annotation is gated_inputs.metered_annotation()'s `(approved <date> under the standing approval:
+              metered key K1, K2 present in <file>, class from <source>, with its spend gate: <g>)`, and its line
+              prints `<slug>: gate approved under the standing approval: <gate> (metered key K1, K2 present in
+              <file>, <source>, with its spend gate: <g>)`. The approved and pending bullets and the printed
+              lines keep the gates' declared order. A spend gate is covered iff
               the limit is > 0, its total exposure is at most the limit, and (p30-8, ADR 0034's 2026-10-27
               amendment: spend is never asked ahead) this calendar month's standing-approved spend with it stays
               within the same limit, the month line, inclusive. Each limit keeps its own month line (p48-2, ADR
@@ -4459,22 +4480,23 @@ def _machine_settings():
 
 def _resolved_settings(rollout_note) -> dict:
     """rollout-settings.py's resolve() for the rollout note's Project root (repo=None when it has no Project root line):
-    rollouts.toml's [repo."<slug>"], then [defaults], then the built-in. {settings, test_credentials, test_logins,
-    weight, error, cause, where}: settings is resolve()'s `settings` object (each key {value, source}), or None when it cannot
-    resolve, and then error is the resolver's own words and cause what the error needs: "resolver"
+    rollouts.toml's [repo."<slug>"], then [defaults], then the built-in. {settings, test_credentials, metered_keys,
+    test_logins, weight, error, cause, where}: settings is resolve()'s `settings` object (each key {value, source}), or
+    None when it cannot resolve, and then error is the resolver's own words and cause what the error needs: "resolver"
     (rollout-settings.py would not load, or failed), "root" (a `--repo` refusal: the Project root is gone or its origin
     unreadable) or "file" (rollouts.toml was refused; `where` names its path and line). test_credentials is resolve()'s
     field of that name ({value, source}: the repo's test-credential class, ADR 0063; value None with no class, as with
-    no Project root), and test_logins resolve()'s ({value, source}: the machine's declared test Logins, p37-4; value []
-    with none; read from [defaults], so a note with no Project root resolves it too), and weight resolve()'s ({mem_gb,
+    no Project root), metered_keys resolve()'s ({value, source}: the repo's metered keys, p56-6; value None with none,
+    as with no Project root), and test_logins resolve()'s ({value, source}: the machine's declared test Logins, p37-4;
+    value [] with none; read from [defaults], so a note with no Project root resolves it too), and weight resolve()'s ({mem_gb,
     cores}, each {value, source}: the repo's estimated Weight, p53-3); each is None on an error. The one loader
     _resolved_ceiling and _resolved_caps (both through _root_resolved, as _weight_estimate), _retry_budget and the
     standing approval share; it writes nothing and never raises."""
     root = _project_root(rollout_note)
 
     def failed(error, cause, where=""):
-        return {"settings": None, "test_credentials": None, "test_logins": None, "weight": None, "error": error,
-                "cause": cause, "where": where}
+        return {"settings": None, "test_credentials": None, "metered_keys": None, "test_logins": None, "weight": None,
+                "error": error, "cause": cause, "where": where}
 
     try:
         mod = _settings_module()
@@ -4483,8 +4505,8 @@ def _resolved_settings(rollout_note) -> dict:
     try:
         out = mod.resolve(repo=None if root is None else str(root))
         return {"settings": out["settings"], "test_credentials": out.get("test_credentials"),
-                "test_logins": out.get("test_logins"), "weight": out.get("weight"), "error": None, "cause": None,
-                "where": ""}
+                "metered_keys": out.get("metered_keys"), "test_logins": out.get("test_logins"),
+                "weight": out.get("weight"), "error": None, "cause": None, "where": ""}
     except mod.SettingsError as e:
         if (e.subject or "").startswith("--repo "):
             return failed(str(e), "root")
@@ -18782,16 +18804,17 @@ def _month_why(month, total, limit, gi):
 
 
 class _CredentialContext:
-    """The repo's test-credential class, the machine's declared test Logins and the rollout's env_bootstrap for one
-    approve-gates --standing call (ADR 0063, p37-4), resolved lazily, once: only a credential gate on an unbounced note
-    that passes its reading's settings-independent steps (credential_reading with no class gives NO_CLASS_WHY,
-    login_reading with no Logins NO_LOGINS_WHY) asks for it. get() -> {error, cls, source, logins, logins_source, boot,
+    """The repo's test-credential class, its metered keys, the machine's declared test Logins and the rollout's
+    env_bootstrap for one approve-gates --standing call (ADR 0063, p37-4, p56-6), resolved lazily, once: only a
+    credential gate on an unbounced note that passes its reading's settings-independent steps (credential_reading with
+    no class gives NO_CLASS_WHY, metered_reading with no class NO_METERED_WHY, login_reading with no Logins
+    NO_LOGINS_WHY) asks for it. get() -> {error, cls, source, metered, metered_source, logins, logins_source, boot,
     boot_err}: error is `rollout settings refused: <the resolver's words>` (exit 1 for each slug that needs it, nothing
     written for it); otherwise cls is rollouts.toml's `test_credentials` value (None with no class: no Project root,
-    as on every serial note, no repo table, or no GitHub origin), logins its `[defaults] test_logins` value ([] with
-    none; machine-wide, so a serial note reads it too) and logins_source its source, and boot the rollout's
-    `env_bootstrap` (_command_value), or boot_err its CompletionValueError's words, which each class credential gate
-    then asks with."""
+    as on every serial note, no repo table, or no GitHub origin), metered its `metered_keys` value (None with none, the
+    same way) and metered_source its source, logins its `[defaults] test_logins` value ([] with none; machine-wide, so
+    a serial note reads it too) and logins_source its source, and boot the rollout's `env_bootstrap` (_command_value),
+    or boot_err its CompletionValueError's words, which each class credential gate then asks with."""
 
     def __init__(self, rollout_note):
         self.rollout_note, self._ctx = rollout_note, None
@@ -18803,12 +18826,14 @@ class _CredentialContext:
                 self._ctx = {"error": f"rollout settings refused: {res['error']}"}
             else:
                 tc = res.get("test_credentials") or {"value": None, "source": "built-in"}
+                mk = res.get("metered_keys") or {"value": None, "source": "built-in"}
                 tl = res.get("test_logins") or {"value": [], "source": "built-in"}
                 try:
                     boot, boot_err = _command_value(self.rollout_note, ENV_BOOTSTRAP_KEY), None
                 except CompletionValueError as e:
                     boot, boot_err = "", str(e)
                 self._ctx = {"error": None, "cls": tc.get("value"), "source": tc.get("source") or "built-in",
+                             "metered": mk.get("value"), "metered_source": mk.get("source") or "built-in",
                              "logins": list(tl.get("value") or []), "logins_source": tl.get("source") or "built-in",
                              "boot": boot, "boot_err": boot_err}
         return self._ctx
@@ -18839,7 +18864,14 @@ def _approve_standing(args) -> int:
     never resolved for it, so the class is its own switch. A credential gate holding a Login word and no env token
     (gated_inputs.has_login_phrase) takes the test-Login reading instead (p37-4): covered when every Login it names is
     a declared test Login and the reading finds nothing beside it (gated_inputs.login_reading: no deny word, env key,
-    other credential word, `@` or conjunction), under the same no-limit rules. The limit resolves lazily, at a slug's
+    other credential word, `@` or conjunction), under the same no-limit rules. A credential gate naming a declared
+    metered key (p56-6, gated_inputs.metered_names) takes the metered-key reading instead of the class one: covered
+    when every env token it names is a declared metered key present in its file, no deny word or other service is
+    beside them (gated_inputs.metered_reading, metered_proof), and, judged as a rider after the slug's other gates, a
+    spend gate the standing approval signed on this task names each key's service (gated_inputs.metered_spend). It
+    reads no limit of its own: it signs only with a spend gate the standing approval signed on this task, earlier or
+    in this pass, so with `spend_approval_usd` at 0 it signs only on an earlier signing; the limit is never resolved
+    for a rider. covered and left keep the gates' declared order. The limit resolves lazily, at a slug's
     first gate that is not such a credential gate. A slug's new spend signings are logged in the rollout note's
     `## Needs-you log` first, then its task note is written, so a failure between the two over-counts (fails closed).
     Exit 0 every gate written, 3 some left, 1 an error (a held standing-spend lock included)."""
@@ -18895,12 +18927,16 @@ def _approve_standing(args) -> int:
             # standing approval's to sign, whatever the gate prices. The heading alone counts (fail-closed: an emptied
             # section still refuses).
             bounced = note.has_heading(GATE_BOUNCE_SECTION)
-            approved = {_norm_gate(l) for l in note.section_text(APPROVED_GATES_SECTION).split("\n") if l.strip()}
-            # covered: (gate, annotation, detail); slug_err (the limit's, or the class's resolver error) and lock_err
-            # stop the slug with nothing written.
+            approved_text = note.section_text(APPROVED_GATES_SECTION)
+            approved = {_norm_gate(l) for l in approved_text.split("\n") if l.strip()}
+            signed_before = set(approved)   # the spend gates this pass newly writes are the rest (p56-6's riders)
+            # covered: (index, gate, annotation, detail); left: (index, gate, why); riders: (index, gate, names), the
+            # metered-key gates judged after the slug's other gates (p56-6). slug_err (the limit's, or the class's
+            # resolver error) and lock_err stop the slug with nothing written.
             covered, left, logged, slug_new, lock_err, slug_err, limit = [], [], [], Decimal(0), None, None, None
+            riders = []
             line_key = None   # the limit's own month line (_month_line_key), once the limit resolves
-            for g in gates:
+            for i, g in enumerate(gates):
                 if not bounced and gi.gate_kind(g) == "credential" and gi.has_login_phrase(g):
                     # p37-4: a declared test Login (machine-wide [defaults] test_logins); no limit, ledger, month line,
                     # Needs-you line or spend lock. Its settings-independent steps run first, so a gate no declaration
@@ -18908,7 +18944,7 @@ def _approve_standing(args) -> int:
                     # here: it takes the class path below, which needs one.
                     pre = gi.login_reading(g, None)
                     if pre["why"] != gi.NO_LOGINS_WHY:
-                        left.append((g, pre["why"]))
+                        left.append((i, g, pre["why"]))
                         continue
                     ctx = creds.get()
                     if ctx["error"]:
@@ -18916,31 +18952,50 @@ def _approve_standing(args) -> int:
                         break
                     lr = gi.login_reading(g, ctx["logins"])
                     if lr["names"] is None:
-                        left.append((g, lr["why"]))
+                        left.append((i, g, lr["why"]))
                         continue
-                    covered.append((g, gi.login_annotation(date, lr["names"], ctx["logins_source"]),
+                    covered.append((i, g, gi.login_annotation(date, lr["names"], ctx["logins_source"]),
                                     f"test Login {', '.join(lr['names'])}, {ctx['logins_source']}"))
                     continue
                 if not bounced and gi.gate_kind(g) == "credential":
                     # ADR 0063: a declared test credential, proved present in its file; it never reads the limit.
                     # The reading's class-independent steps run first (d2): a gate no class could ever sign asks
-                    # with its why and never resolves the class, so a refused rollouts.toml never errors it.
+                    # with its why and never resolves the class, so a refused rollouts.toml never errors it. p56-6:
+                    # a gate that also passes the metered-key reading's class-independent steps resolves the settings
+                    # to route, and one naming a declared metered key takes that reading, never the class one.
                     pre = gi.credential_reading(g, None)
-                    if pre["why"] != gi.NO_CLASS_WHY:
-                        left.append((g, pre["why"]))
+                    mpre = gi.metered_reading(g, None)
+                    if pre["why"] != gi.NO_CLASS_WHY and mpre["why"] != gi.NO_METERED_WHY:
+                        left.append((i, g, pre["why"]))
                         continue
                     ctx = creds.get()
                     if ctx["error"]:
                         slug_err = ctx["error"]
                         break
+                    if mpre["why"] == gi.NO_METERED_WHY and gi.metered_names(g, ctx["metered"]):
+                        # p56-6: a declared metered key, proved present in its file, rides a spend gate the standing
+                        # approval signed: judged after the slug's other gates (the riders, below).
+                        mr = gi.metered_reading(g, ctx["metered"])
+                        if mr["names"] is None:
+                            left.append((i, g, mr["why"]))
+                            continue
+                        proof = gi.metered_proof(ctx["metered"], mr["names"])
+                        if not proof["ok"]:
+                            left.append((i, g, proof["why"]))
+                            continue
+                        riders.append((i, g, mr["names"]))
+                        continue
+                    if pre["why"] != gi.NO_CLASS_WHY:
+                        left.append((i, g, pre["why"]))
+                        continue
                     cv = _credential_verdict(g, ctx, gi)
                     if not cv["covered"]:
-                        left.append((g, cv["why"]))
+                        left.append((i, g, cv["why"]))
                         continue
                     detail = (f"test credential {', '.join(cv['names'])} present in {ctx['cls']['file']}, "
                               f"{ctx['source']}")
-                    covered.append((g, gi.credential_annotation(date, cv["names"], ctx["cls"]["file"], ctx["source"]),
-                                    detail))
+                    covered.append((i, g, gi.credential_annotation(date, cv["names"], ctx["cls"]["file"],
+                                                                   ctx["source"]), detail))
                     continue
                 if limit is None:   # resolved lazily: a slug of credential gates alone never reads it (ADR 0063 d5)
                     limit, err = _standing_limit(note, rollout_note)
@@ -18950,10 +19005,10 @@ def _approve_standing(args) -> int:
                     line_key = _month_line_key(limit["source"], slug, os.path.realpath(str(rollout_path)))
                 verdict = gi.covered(g, limit["value"])
                 if bounced:
-                    left.append((g, _bounce_why(verdict, gi)))
+                    left.append((i, g, _bounce_why(verdict, gi)))
                     continue
                 if not verdict["covered"]:
-                    left.append((g, _ask_why(verdict, limit, gi)))
+                    left.append((i, g, _ask_why(verdict, limit, gi)))
                     continue
                 norm = _norm_gate(g)
                 spend_ann = gi.annotation(date, verdict["usd"], limit["value"], limit["source"])
@@ -18964,7 +19019,7 @@ def _approve_standing(args) -> int:
                 if verdict.get("widest"):   # p48-4: priced at its widest; never with capOnly (standing_exposure)
                     spend_detail += f"; widest pricing, the cap-only reading refused: {verdict['widest']}"
                 if norm in approved:
-                    covered.append((g, spend_ann, spend_detail))   # signed already, or listed twice: no month check, no log
+                    covered.append((i, g, spend_ann, spend_detail))   # signed already, or listed twice: no month check, no log
                     continue
                 # The month line (ADR 0034's 2026-10-27 amendment): this month's standing approvals on this limit's
                 # own line (p48-2), the earlier slugs and gates of this call on it included, plus this gate, within it.
@@ -18974,15 +19029,15 @@ def _approve_standing(args) -> int:
                     lock_err = e
                     break
                 if why:
-                    left.append((g, why))
+                    left.append((i, g, why))
                     continue
                 total = spent + slug_new + verdict["usd"]
                 if total > limit["value"]:
-                    left.append((g, _month_why(month, total, limit, gi)))
+                    left.append((i, g, _month_why(month, total, limit, gi)))
                     continue
                 slug_new += verdict["usd"]
                 approved.add(norm)
-                covered.append((g, spend_ann, spend_detail))
+                covered.append((i, g, spend_ann, spend_detail))
                 logged.append((g, verdict["usd"], spent + slug_new))
             if slug_err is not None:
                 errors.append(f"{slug}: {slug_err}; nothing written")
@@ -18990,6 +19045,28 @@ def _approve_standing(args) -> int:
             if lock_err is not None:
                 errors.append(f"{slug}: {lock_err}; nothing written")
                 continue
+            if riders:
+                # p56-6: a metered key signs only with a spend gate the standing approval signed on this task, earlier
+                # (a standing `## Approved gates` line) or in this pass (a spend gate it covers and newly writes),
+                # that names each key's service. A rider reads no limit and takes no ledger, month line, Needs-you
+                # line or spend lock of its own.
+                ctx = creds.get()   # resolved already: a rider is read only once the settings resolved
+                spend = gi.approved_spend_gates(approved_text)
+                signed = spend["standing"] + [g for _i, g, _a, _d in covered
+                                              if gi.gate_kind(g) == "spend" and _norm_gate(g) not in signed_before]
+                others = spend["other"] + [g for _i, g, _w in left if gi.gate_kind(g) == "spend"]
+                for i, g, names in riders:
+                    ride = gi.metered_spend(ctx["metered"], names, signed, others)
+                    if ride["why"]:
+                        left.append((i, g, ride["why"]))
+                        continue
+                    file = ctx["metered"]["file"]
+                    detail = (f"metered key {', '.join(names)} present in {file}, {ctx['metered_source']}, with its "
+                              f"spend gate: {gi.metered_spend_part(ride['gates'])}")
+                    covered.append((i, g, gi.metered_annotation(date, names, file, ctx["metered_source"],
+                                                                ride["gates"]), detail))
+            covered.sort(key=lambda c: c[0])   # the gates' declared order, whatever order they were judged in
+            left.sort(key=lambda c: c[0])
             if logged:
                 # The month line's ledger first: a failure before the task note's save over-counts (fails closed). A
                 # fresh read per slug, so a failed save's journal never replays into a later one.
@@ -19009,14 +19086,14 @@ def _approve_standing(args) -> int:
             if covered:
                 existing = [l for l in note.section_text(APPROVED_GATES_SECTION).split("\n") if l.strip()]
                 have = {_norm_gate(l) for l in existing}
-                for g, ann, _detail in covered:
+                for _i, g, ann, _detail in covered:
                     if _norm_gate(g) not in have:
                         have.add(_norm_gate(g))
                         existing.append(f"- {g} {ann}")
                 note.upsert_section(APPROVED_GATES_SECTION, "\n".join(existing))
                 stage = None
                 if left:
-                    note.upsert_section(GATE_PENDING_SECTION, bullets([g for g, _ in left]))
+                    note.upsert_section(GATE_PENDING_SECTION, bullets([g for _i, g, _w in left]))
                 else:
                     stage, route, ready_pr = _sign_route(note, slug, now)
                 note.save(dry_run=args.dry_run)
@@ -19024,11 +19101,11 @@ def _approve_standing(args) -> int:
                 _event(_note_rollout(note), "gate-signed", slug, {"standing": True, "gates": len(covered)}, args)
                 if stage == "integration":
                     _event(_note_rollout(note), "ready", slug, {"pr": ready_pr}, args)
-                for g, _ann, detail in covered:
+                for _i, g, _ann, detail in covered:
                     print(f"{slug}: gate approved under the standing approval: {g} ({detail})" + suffix)
                 if not left:
                     print(f"{slug}: every gate signed under the standing approval -> {route}" + suffix)
-            for g, why in left:
+            for _i, g, why in left:
                 print(f"ASK: {slug}: {g}: {why}")
                 asked = True
     finally:
@@ -24505,7 +24582,10 @@ def _parser():
                          "neither prices at its widest, p48-4); the "
                          "credential gates the repo's declared test-credential class covers (rollouts.toml "
                          "test_credentials, each key proved present in its file; ADR 0063); and the credential gates "
-                         "naming only a declared test Login ([defaults] test_logins, p37-4); the rest stay pending as "
+                         "naming only a declared test Login ([defaults] test_logins, p37-4); the credential gates "
+                         "naming only declared metered keys present in their file, each with a spend gate the "
+                         "standing approval signed on the task that names its service (rollouts.toml metered_keys, "
+                         "p56-6); the rest stay pending as "
                          "ASK lines: exit 0 all signed, 3 some left, 1 an error (ADR 0034)")
     ag.add_argument("--rollout", default=None,
                     help="with --standing (required there): the rollout note, whose frontmatter and Project root "

@@ -53,7 +53,13 @@
 //   § 3.5 phrase or plain ask of its own; hold_kind and approved_date; and unsigned_hold's rows: a pending gate signed
 //   by its exact text only (spend skipped, a kindless line irreversible), a left-out gate by equal text or a later
 //   same-kind bullet of his (never older, another kind's or a standing approval's), the residual that bullet names
-//   another act, every entry read, and one row per gate whose `pending` marks a gate still awaiting sign-off.
+//   another act, every entry read, and one row per gate whose `pending` marks a gate still awaiting sign-off;
+// - p56-6 (a metered API key on file signs with its spend, ADR 0063's 2026-11-26 amendment): the metered-key reading's
+//   whys in order and its own deny list ("API key", "token", "secret" and "access" pass it and still deny in the class
+//   and Login readings); the service guard; metered_names, metered_proof and approved_spend_gates; metered_spend's
+//   service match in any spelling (never `Cartesian` for `Cartesia`), one gate for two services named once, and its two
+//   whys; the annotation (brackets, the 80-character cut, stripped like any sign-off); chorus-p113-3's two gates (the
+//   Verify); and schedule § 7's metered-key Planner example coupled to the reader.
 //
 // Hermetic: python3 -I -B (no bytecode next to the module), THREAD_EVENTS_DIR in temp (reconcile-rollout.py is only
 // imported, never run), and every sweep CLI spawn under a temp HOME. It writes only under mktemp dirs; test 7 of p39-3
@@ -143,7 +149,10 @@ for req in json.loads(sys.argv[3]):
         except ValueError as e:
             out.append({"error": str(e)})
     elif op == "call":
-        out.append(getattr(gi, req["fn"])(*req["args"]))
+        try:
+            out.append(getattr(gi, req["fn"])(*req["args"]))
+        except ValueError as e:
+            out.append({"error": str(e)})
     elif op == "const":
         out.append(getattr(gi, req["name"]))
     elif op == "hold":
@@ -1811,4 +1820,136 @@ test('p56-3 the unsigned hold: the gate line round trip, no gate word of its own
   ]
   const got = py(cases.map(([, q]) => ({ op: 'hold', ...q })))
   cases.forEach(([label, , want], i) => assert.deepEqual(got[i], want, label))
+})
+
+// ---- p56-6: a metered API key on file signs with its spend (ADR 0063's 2026-11-26 amendment) --------------------------
+// chorus-p113-3's two gates, verbatim from Archive/chorus-p113-3-the-voice-says-pr.md:45-46 (the annotations stripped).
+const P113_SPEND = 'spend: sample synthesis of the candidate PR forms on the paid Cartesia and ElevenLabs engines, plus ElevenLabs Scribe speech-to-text of the samples — cap 3 USD'
+const P113_CRED = "credential: CARTESIA_API_KEY and ELEVENLABS_API_KEY, read from the environment or ~/.config/chorus/env (calibrate.py's `load_keys`) into the scratch sampler's process only; never printed, logged or written."
+const MCLS = { file: '/x/chorus.env', keys: [{ name: 'CARTESIA_API_KEY', service: 'Cartesia' }, { name: 'ELEVENLABS_API_KEY', service: 'ElevenLabs' }] }
+const NO_METERED = 'no metered keys for this repo (set metered_keys in its [repo."owner/name"] table in ~/.config/thread/rollouts.toml)'
+const BOTH = ['CARTESIA_API_KEY', 'ELEVENLABS_API_KEY']
+const mcall = (fn, ...args) => ({ op: 'call', fn, args })
+const metered = (gate, cls = MCLS) => py([mcall('metered_reading', gate, cls)])[0]
+
+test('p56-6 the metered-key reading: each why in order; its deny list; names in text order, each once', () => {
+  const cases = [
+    ['spend: x — cap US$5 total', MCLS, 'not a credential gate'],
+    ['credential: CARTESIA_API_KEY for the live voice probe', MCLS, 'deny word: live'],
+    ['credential: CARTESIA_API_KEY on the production engine', MCLS, 'deny word: production'],
+    ['credential: CARTESIA_LIVE_KEY', MCLS, 'deny word: LIVE'],
+    ...['irreversible', 'cannot be undone', 'delete production', 'wipe'].map((w) => [`credential: CARTESIA_API_KEY, then ${w} the voices`, MCLS, `deny word: ${w}`]),
+    ...['password', 'passphrase', 'private key', 'ssh', 'OAuth', '1Password', 'keychain', 'cookie'].map((w) => [`credential: CARTESIA_API_KEY and the ${w}`, MCLS, `deny word: ${w}`]),
+    ['credential: the Cartesia API key', MCLS, 'it names no env key'],
+    [P113_CRED, null, NO_METERED],
+    ['credential: CARTESIA_API_KEY and OPENAI_API_KEY', MCLS, 'OPENAI_API_KEY is not a declared metered key'],
+  ]
+  const got = py(cases.map(([gate, cls]) => mcall('metered_reading', gate, cls)))
+  cases.forEach(([gate, , why], i) => assert.deepEqual(got[i], { names: null, why }, gate))
+  assert.deepEqual(metered('- Credential: ELEVENLABS_API_KEY then CARTESIA_API_KEY, and ELEVENLABS_API_KEY again'),
+    { names: ['ELEVENLABS_API_KEY', 'CARTESIA_API_KEY'], why: '' }, 'text order, each once, a list marker stripped')
+  // control: "API key", "token", "secret" and "access" pass here, and still deny under the class and Login readings
+  const prose = ['API key', 'token', 'secret', 'access'].map((w) => `credential: CARTESIA_API_KEY, the voice ${w} for the dummy Login`)
+  const [m, c, l] = [prose.map((g) => mcall('metered_reading', g, MCLS)), prose.map((gate) => ({ op: 'credential', gate, cls: CLS })),
+    prose.map((gate) => ({ op: 'login', gate, logins: LOGINS }))].map((reqs) => py(reqs))
+  prose.forEach((g, i) => {
+    assert.deepEqual(m[i], { names: ['CARTESIA_API_KEY'], why: '' }, `metered: ${g}`)
+    assert.match(c[i].why, /^deny word: /, `class: ${g}`)
+    assert.match(l[i].why, /^deny word: /, `Login: ${g}`)
+  })
+})
+
+test('p56-6 the service guard: another listed service beside a declared key asks; its own service, in any spelling, passes', () => {
+  const cases = [
+    ['credential: CARTESIA_API_KEY and the Stripe secret key', 'Stripe is not the declared service of a key it names'],
+    ['credential: CARTESIA_API_KEY for the ElevenLabs probe', 'ElevenLabs is not the declared service of a key it names'],
+    ['credential: CARTESIA_API_KEY, then replicate the run', 'replicate is not the declared service of a key it names'],
+    ['credential: ELEVENLABS_API_KEY for the Eleven Labs probe', ''],
+    ['credential: CARTESIA_API_KEY for the cartesia probe', ''],
+    ['credential: CARTESIA_API_KEY only', ''],   // the env name itself is no service match
+  ]
+  const got = py(cases.map(([gate]) => mcall('metered_reading', gate, MCLS)))
+  cases.forEach(([gate, why], i) => assert.equal(got[i].why, why, gate))
+})
+
+test('p56-6 metered_names, metered_proof and approved_spend_gates', (t) => {
+  const d = scratch(t)
+  const f = path.join(d, 'voice.env')
+  fs.writeFileSync(f, 'CARTESIA_API_KEY=sk_car_FAKE51value\nELEVENLABS_API_KEY=\n')
+  const STAND = `- ${P113_SPEND} (approved 2026-11-20 under the standing approval: total exposure US$3, limit US$200 from file:defaults)`
+  const APPROVED = [STAND, '- spend: a hand-signed probe — cap 5 USD (approved 2026-11-20)',
+    '- spend: an asked-ahead probe — cap 9 USD (approved 2026-11-19, asked ahead at schedule)',
+    `- ${P113_CRED} (approved 2026-11-23 under the standing approval: metered key CARTESIA_API_KEY present in /x, class from file:repo, with its spend gate: x)`,
+    '- irreversible: delete the scratch repo (approved 2026-11-20)'].join('\n')
+  const [names, none, other, missing, absent, spend] = pyT([mcall('metered_names', P113_CRED, MCLS), mcall('metered_names', P113_CRED, null),
+    mcall('metered_names', 'credential: OPENAI_API_KEY and CARTESIA_API_KEY', MCLS), mcall('metered_proof', { ...MCLS, file: f }, BOTH),
+    mcall('metered_proof', { ...MCLS, file: path.join(d, 'none.env') }, BOTH), mcall('approved_spend_gates', APPROVED)])
+  assert.deepEqual([names, none, other], [BOTH, [], ['CARTESIA_API_KEY']])
+  assert.deepEqual(missing, { ok: false, why: `ELEVENLABS_API_KEY is not set in ${f}` }, 'an empty value reads as absent')
+  assert.deepEqual(absent, { ok: false, why: `${path.join(d, 'none.env')} is not a regular file` })
+  assert.ok(!JSON.stringify([missing, absent]).includes('FAKE'), 'no value in any why')
+  assert.deepEqual(spend, { standing: [P113_SPEND], other: ['spend: a hand-signed probe — cap 5 USD', 'spend: an asked-ahead probe — cap 9 USD'] },
+    'a standing spend line is standing; a bare and an asked-ahead one are other; a credential or irreversible line is neither')
+})
+
+test('p56-6 metered_spend: the service names its spend gate in any spelling; one gate for two services is named once; the two whys', () => {
+  const EL = { file: '/x', keys: [{ name: 'ELEVENLABS_API_KEY', service: 'ElevenLabs' }] }
+  const CA = { file: '/x', keys: [{ name: 'CARTESIA_API_KEY', service: 'Cartesia' }] }
+  const spell = ['Eleven Labs', 'eleven-labs', 'ELEVENLABS', 'ElevenLabs Scribe'].map((s) => `spend: ${s} speech-to-text — cap 3 USD`)
+  const got = py([...spell.map((g) => mcall('metered_spend', EL, ['ELEVENLABS_API_KEY'], [g], [])),
+    mcall('metered_spend', CA, ['CARTESIA_API_KEY'], ['spend: Cartesian synthesis — cap 3 USD'], []),
+    mcall('metered_spend', MCLS, BOTH, ['spend: Cartesia — cap 1 USD', 'spend: ElevenLabs — cap 2 USD'], []),
+    mcall('metered_spend', MCLS, BOTH, [P113_SPEND], []),
+    mcall('metered_spend', MCLS, BOTH, [], ['spend: Cartesia — cap 1 USD']),
+    mcall('metered_spend', MCLS, BOTH, [], [])])
+  spell.forEach((g, i) => assert.deepEqual(got[i], { gates: [g], why: '' }, g))
+  const UNNAMED = (s) => `no spend gate on this task names ${s} (a metered key signs only with its spend gate: name ${s} in the task's spend gate)`
+  const UNSIGNED = (s) => `the spend gate naming ${s} is not signed under the standing approval (a metered key signs only with a spend gate it signed)`
+  const [, , , , cartesian, two, one, mixed, none] = got
+  assert.deepEqual(cartesian, { gates: [], why: UNNAMED('Cartesia') }, '`Cartesian` never names `Cartesia`')
+  assert.deepEqual(two.gates, ['spend: Cartesia — cap 1 USD', 'spend: ElevenLabs — cap 2 USD'], 'two services, two gates')
+  assert.deepEqual(one, { gates: [P113_SPEND], why: '' }, "one gate naming both services is listed once (the incident's)")
+  assert.deepEqual(mixed, { gates: [], why: `${UNNAMED('ElevenLabs')}; ${UNSIGNED('Cartesia')}` }, 'unnamed first, then unsigned')
+  assert.deepEqual(none, { gates: [], why: UNNAMED('Cartesia, ElevenLabs') })
+})
+
+test("p56-6 metered_annotation: its text, the gate's parentheses as brackets, the 80-character cut, stripped like any sign-off; a `)` raises", () => {
+  const T = loadEngine(['unapprovedGates'])
+  const [ann, paren, cut, bad] = py([mcall('metered_annotation', '2026-11-26', BOTH, '~/.config/chorus/env', 'file:repo', [P113_SPEND]),
+    mcall('metered_annotation', '2026-11-26', ['CARTESIA_API_KEY'], '/x', 'file:repo', ['spend: probe (Cartesia) — cap 1 USD', 'spend: b — cap 2 USD']),
+    mcall('metered_annotation', '2026-11-26', ['CARTESIA_API_KEY'], '/x', 'file:repo', [`spend: Cartesia ${'y'.repeat(500)}`]),
+    mcall('metered_annotation', '2026-11-26', ['CARTESIA_API_KEY'], '/x/(old)', 'file:repo', ['spend: a — cap 1 USD'])])
+  assert.equal(ann, '(approved 2026-11-26 under the standing approval: metered key CARTESIA_API_KEY, ELEVENLABS_API_KEY present in ~/.config/chorus/env, class from file:repo, with its spend gate: sample synthesis of the candidate PR forms on the paid Cartesia and ElevenLabs e …)')
+  assert.ok(paren.endsWith('with its spend gate: probe [Cartesia] — cap 1 USD | b — cap 2 USD)'), paren)
+  assert.ok(cut.endsWith(`with its spend gate: Cartesia ${'y'.repeat(71)} …)`), 'cut to 80 characters plus ` …`')
+  for (const a of [ann, paren, cut]) assert.ok(a.indexOf(')') === a.length - 1, `one ')' and it is last: ${a}`)
+  assert.match(bad.error, /an annotation part holds a '\)'/, 'a ) in a part raises')
+  assert.deepEqual(py([{ op: 'strip', gate: P113_CRED, line: `${P113_CRED} ${ann}` }]), [true], 'GATE_ANNOT_RE strips it')
+  assert.deepEqual([...T.unapprovedGates([P113_CRED], [`${P113_CRED} ${ann}`])], [], 'the engine reads it signed')
+})
+
+test("p56-6 the Verify: p113-3's credential gate reads both keys and rides its one spend gate, named once", () => {
+  const [pre, cls, classPre, spend, exp] = py([mcall('metered_reading', P113_CRED, null), mcall('metered_reading', P113_CRED, MCLS),
+    { op: 'credential', gate: P113_CRED, cls: null }, mcall('metered_spend', MCLS, BOTH, [P113_SPEND], []), { op: 'standing', gate: P113_SPEND }])
+  assert.deepEqual([pre, cls], [{ names: null, why: NO_METERED }, { names: BOTH, why: '' }], 'NO_METERED_WHY with no class, both keys with it')
+  assert.equal(classPre.why, 'no test-mode, staging or sandbox word', "the class reading's why, today's ASK with no metered keys")
+  assert.deepEqual(spend, { gates: [P113_SPEND], why: '' })
+  assert.equal(exp.usd, '3', 'the spend gate prices at US$3, under the US$200 limit')
+  const [part] = py([mcall('metered_spend_part', spend.gates)])
+  assert.equal(part, 'sample synthesis of the candidate PR forms on the paid Cartesia and ElevenLabs e …', 'one gate, no ` | `')
+})
+
+test("p56-6 schedule's metered-key Planner example reads its keys (the guidance is coupled to the reader); live or another service asks", () => {
+  const schedule = fs.readFileSync(path.join(root, 'skills', 'schedule', 'SKILL.md'), 'utf8')
+  const s7 = schedule.slice(schedule.indexOf('### 7. '), schedule.indexOf('### 7.5. '))
+  const line = s7.split('\n').find((l) => l.startsWith('- Planner: word each metered-key gate'))
+  assert.ok(line, 'schedule § 7 has the metered-key Planner line')
+  const examples = [...line.matchAll(/`(credential: [^`]*<NAME>[^`]*)`/g)].map((m) => m[1])
+  assert.equal(examples.length, 1, 'one backticked example')
+  const fill = (ex) => ex.replace('<NAME>', 'CARTESIA_API_KEY').replace('<NAME>', 'ELEVENLABS_API_KEY').replace('<file>', '~/.config/chorus/env')
+  const gate = fill(examples[0])
+  assert.deepEqual(metered(gate), { names: BOTH, why: '' }, gate)
+  const [live, other] = py([gate.replace("the probe's", "the live probe's"), gate.replace("the probe's", "the Stripe probe's")]
+    .map((g) => mcall('metered_reading', g, MCLS)))
+  assert.deepEqual([live.why, other.why], ['deny word: live', 'Stripe is not the declared service of a key it names'])
 })

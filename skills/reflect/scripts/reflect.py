@@ -129,8 +129,8 @@ parallel with no note). For each:
             bare `(approved <date>)` is that date) that gated_inputs.sweep() hits in the note's brief() (its body less
             the sections the run or the schedule wrote: the gate, plan, log, answer and feedback sections, leg.py's
             `## Security check`, `## Decisions` and `## Decided for you`), so a gate the sweep could have seen was asked
-            mid-run; a credential on a note holding a recorded test-credential or test-Login Planner line is none
-            (recorded, by design: it reached Lachy only because the standing approval turned it down). [] on every
+            mid-run; a credential on a note holding a recorded test-credential, test-Login or metered-key Planner line
+            is none (recorded, by design: it reached Lachy only because the standing approval turned it down). [] on every
             other act, with no note (a signOff whose task note is not found or not read also gets a cannotShow line, so
             its [] is never read as a word-list miss), or with no such kind. It reads the note as it stands at span, never as
             it was swept: a note edited since reads its edits. A gate he declined ahead and signed mid-run reads as a
@@ -669,11 +669,11 @@ STANDING_GATE_RE = re.compile(r"\(approved \d{4}-\d\d-\d\d under the standing ap
 SIGNED_GATE_RE = re.compile(r"\(approved \d{4}-\d\d-\d\d\)\s*$")
 SIGNED_ON_RE = re.compile(r"\(approved (\d{4}-\d\d-\d\d)\)\s*$")
 # sweepMiss (p51-3): the gate kinds schedule § 3.6 and orient R3 (c) ask ahead, the recorded Planner lines that record a
-# credential instead (a declared test credential or test Login, signed or asked at the stop by design), and the
+# credential instead (a declared test credential, test Login or metered key, signed or asked at the stop by design), and the
 # sections the run or the schedule wrote, which the brief the sweep reads leaves out (`## Security check` is leg.py's
 # SECURITY_SECTION: its secret-scan rules and findings, `stripe-access-token` or `secret`, hit the credential list)
 ASKED_AHEAD_KINDS = ("credential", "irreversible")
-RECORDED_CREDENTIAL_RE = re.compile(r"^- Planner: word each test-(?:credential|Login) gate", re.M)
+RECORDED_CREDENTIAL_RE = re.compile(r"^- Planner: word each (?:test-(?:credential|Login)|metered-key) gate", re.M)
 BRIEF_DROP = ("## Decisions", "## Decided for you", "## Plan-blocked feedback", "## Review-blocked feedback",
               "## Blocker diagnosis", "## Security check")
 # A held trade (ADR 0037 d1): tune.py auto_check's two Lachy-decides reasons, and the decision task's lines for it
@@ -837,8 +837,8 @@ def sweep_miss(note, day):
     """The gate kinds Lachy signed mid-run on `day` that the sweep could have seen (p51-3): the kinds schedule § 3.6 asks
     ahead (credential, irreversible) of the note's `## Approved gates` lines whose bare `(approved <day>)` is
     approve-gates' sign-off that day, each kept when gated_inputs.sweep() hits that kind in the note's brief(). A
-    credential is no miss when the note holds a recorded test-credential or test-Login Planner line: recorded ahead,
-    it is signed or asked at the stop by design. Sorted as ASKED_AHEAD_KINDS; [] when none."""
+    credential is no miss when the note holds a recorded test-credential, test-Login or metered-key Planner line:
+    recorded ahead, it is signed or asked at the stop by design. Sorted as ASKED_AHEAD_KINDS; [] when none."""
     kinds = set()
     for line in note.section_text(REC.APPROVED_GATES_SECTION).split("\n"):
         m = SIGNED_ON_RE.search(line.strip())

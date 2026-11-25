@@ -15,7 +15,7 @@ below) are the only forms that write. No form makes a network call. This header 
 and of the writer's rules:
 
     # ~/.config/thread/rollouts.toml
-    schema = 8                   # optional, top-level, before the first table (ADR 0043): the file's schema version
+    schema = 9                   # optional, top-level, before the first table (ADR 0043): the file's schema version
 
     [defaults]                   # every rollout on this machine
     parallel_ceiling = 4
@@ -57,12 +57,16 @@ and of the writer's rules:
     [repo."Animately/optimizer"]  # schema 3 (ADR 0063): the repo's test-credential class, ONE line in its repo table
     test_credentials = { file = "~/repos/animately/optimizer/.env.local", keys = [{ name = "STRIPE_SECRET", prefix = "sk_test_" }, { name = "SUPABASE_SERVICE_ROLE_KEY", supabase_project = "geyyptxqiovujgbiecsp" }] }
 
+    [repo."owner/chorus"]         # schema 9 (p56-6): the repo's metered keys, ONE line in its repo table
+    metered_keys = { file = "~/.config/chorus/env", keys = [{ name = "CARTESIA_API_KEY", service = "Cartesia" }, { name = "ELEVENLABS_API_KEY", service = "ElevenLabs" }] }
+
 The only top-level keys are `schema`, `defaults`, `guardrails`, `notify` (retired, below) and `repo`. A repo table
 holds every rollout key but `verify_slots` and `capacity_max` (SETTING_KEYS: the four Tuning keys, KEYS, plus
 `auto_retries`, `spend_approval_usd`, `verify_slots`, `capacity_max` and `overtime_runs`; MACHINE_ONLY: `verify_slots` and
 `capacity_max`, which are machine-wide and refused under a `[repo."o/r"]` label), plus `inert_paths`,
 `test_credentials`, `weight_mem_gb`, `weight_cores` and `unreachable_paths` (REPO_ONLY: each refused under `[defaults]` with `<key> is per
-repo: set it under [repo."owner/name"]`). `[defaults]` also holds `test_logins` (DEFAULTS_ONLY: machine-wide, refused under a
+repo: set it under [repo."owner/name"]`). REPO_ONLY holds `metered_keys` too (p56-6), read only as ONE line inside its
+`[repo."o/r"]` table, as `test_credentials` is (below). `[defaults]` also holds `test_logins` (DEFAULTS_ONLY: machine-wide, refused under a
 `[repo."o/r"]` label as MACHINE_ONLY's keys are, and kept out of `settings`). Dotted keys
 (`repo."o/r".parallel_ceiling = 5`) and inline tables are read the same as table form, with two exceptions:
 `test_credentials` is read only as ONE line inside its `[repo."o/r"]` table, and `test_logins` only from a key line
@@ -100,6 +104,27 @@ changes any repo's `test_credentials`. It is not in `settings`: resolve() report
 its own top-level `test_credentials` (Output), null with no class. A schema-2 reader ignores it under a schema-3 file
 (the schema rule below), so that rollout asks every credential gate, as before. It is its own switch, independent of
 `spend_approval_usd`: a declared class signs at the built-in 0 too.
+
+`metered_keys` (p56-6, ADR 0063's 2026-11-26 amendment; schema 9, the first schema-9 key) is the repo's metered keys:
+keys whose only risk is metered spend (a paid voice API with no test mode), which a credential gate may name and still
+be signed by execute's standing approval (gated_inputs.py's metered-key reading, its part 7) when each is present in
+`file` and a spend gate the standing approval signed on the same task names each key's service. It reads no limit of
+its own: it signs only with a spend gate the standing approval signed on this task, earlier or in this pass, so with
+`spend_approval_usd` at 0 it signs only on an earlier signing. It is one inline table on ONE line inside
+`[repo."o/r"]`, as `test_credentials` is: `metered_keys = { file = "<path>", keys = [{ name = "<NAME>", service =
+"<Service>" }, …] }`, a trailing comment allowed; every other form is refused at its line with that remedy
+(`[repo."o/r"] metered_keys must be one line in that table: …`). The value (metered_problem(), the first failure wins;
+a refused value is described, never echoed) holds exactly `file` and `keys`; `file` is held to `test_credentials`'
+rules (a string starting `/` or `~/`, at most 300 characters, no control character, no `(` or `)`); `keys` is a list of
+1 to MAX_CREDENTIAL_KEYS (32) tables, each holding exactly `name` and `service`; a `name` is an upper-snake env name
+(CRED_NAME_RE) with no LIVE or PROD segment, and no name twice; a `service` is 2 to 40 of A-Z, a-z, 0-9, `.`, `-`, `_`
+and single inner spaces, starting and ending on a letter or digit (METERED_SERVICE_RE): the name a task's spend gate
+names. A name also in the same repo's `test_credentials` is refused (`… is also in test_credentials (a key is in one
+class)`). It is declared on his ruling only: his hand edit, or an agent's `declare --repo <clone> --key metered_keys`
+quoting his words (Declaring, below); tune.py refuses an edit that changes any repo's `metered_keys`. It is not in
+`settings`: resolve() reports it as its own top-level `metered_keys` (Output), null with none. A schema-8 reader ignores
+it under a schema-9 file (the schema rule below), so that rollout asks the metered-key gate, as before; a schema-8 file
+that holds it is refused with the raise remedy.
 
 `test_logins` (p37-4, ADR 0034's 2026-11-05 amendment; schema 5, the first schema-5 key) is the operator's declared
 test Logins: the Claude Logins (Lachy's dummy Login) a credential gate may name and still be signed by execute's
@@ -235,6 +260,8 @@ schema rule above):
   key whose MINIMUM is 1);
 - a MACHINE_ONLY key (`verify_slots`, `capacity_max`) in a `[repo."o/r"]` table;
 - a `test_credentials` in any form but one line in its repo table, or a value credential_problem() refuses (ADR 0063);
+- a `metered_keys` under `[defaults]`, in any form but one line in its repo table, a value metered_problem() refuses, or
+  a name also in that repo's `test_credentials` (p56-6);
 - a `test_logins` in a repo table, a value that spans lines, or a value logins_problem() refuses (p37-4);
 - a `weight_mem_gb` or `weight_cores` under `[defaults]`, or one that is not a finite number > 0 (a boolean refused; p53-3);
 - an `unreachable_paths` under `[defaults]`, one `inert_paths` would refuse, or a glob glob_class_problem() refuses (p52-1);
@@ -261,6 +288,8 @@ Output. Exit 0 and one JSON line on stdout:
      "test_credentials": {"value": {"file": "<path>", "keys": [{"name": "<NAME>", "prefix": "<p>"}
                                     | {"name": "<NAME>", "supabase_project": "<ref>"}, ...]} | null,
                           "source": "file:repo"|"built-in"},                        # built-in null: no class
+     "metered_keys": {"value": {"file": "<path>", "keys": [{"name": "<NAME>", "service": "<Service>"}, ...]} | null,
+                      "source": "file:repo"|"built-in"},                            # built-in null: none (p56-6)
      "test_logins": {"value": ["<name>", ...], "source": "file:defaults"|"built-in"},  # built-in []: none
      "weight": {"mem_gb": {"value": <num>, "source": "file:repo"|"built-in"},       # built-in 3
                 "cores": {"value": <num>, "source": "file:repo"|"built-in"}},       # built-in 2
@@ -271,7 +300,7 @@ Output. Exit 0 and one JSON line on stdout:
 
 The CLI prints resolve()'s object whole (the retired `[notify]` is never read, so no topic reaches stdout).
 `test_credentials` is printed whole: key names, prefixes, project refs and a path are no secrets (no value is ever read
-here; the standing approval reads the file itself).
+here; the standing approval reads the file itself). So is `metered_keys`: key names, services and a path.
 
 `repo` is the origin's owner/name as land.sh printed it (case kept), or null when no repo table could apply:
 no `--repo`, no file, no repo table, or no GitHub origin (no repo, no origin, another host: land.sh exit 4).
@@ -373,7 +402,7 @@ GUARDRAIL_KEYS, RETIRED, ORIGIN_TIMEOUT, SCHEMA, KEY_SCHEMA, MAX_INERT_GLOBS,
 MAX_CREDENTIAL_KEYS, MAX_TEST_LOGINS, LOGIN_NAME_RE, RESERVED_LOGIN_NAMES, glob_problem(glob),
 glob_class_problem(glob) (why a glob's `[…]` class will not compile, or None: unreachable_paths' extra check),
 credential_problem(value) (why a test_credentials value is refused, or None), logins_problem(value) (the same for
-test_logins),
+test_logins), metered_problem(value) (the same for metered_keys, p56-6), METERED_SERVICE_RE,
 near_miss(key, known), file_schema(doc), load_tables(path) (the validated tables, None for no
 file), raise_schema_lines(lines, need, current) (the top-level `schema` raise the three writers share: `lines` with the
 line raised to `need` when it is above `current`, never lowered; an existing top-level line is rewritten in place,
@@ -412,7 +441,8 @@ MACHINE_ONLY = ("verify_slots", "capacity_max")
 # `test_credentials` its test-credential class (ADR 0063), one line in its table.
 # `weight_mem_gb` and `weight_cores` (p53-3, ADR 0083 DfL 8) its estimated Weight, numbers > 0.
 # `unreachable_paths` (p52-1, ADR 0081 d1) its Unreachable surface, globs read as inert_paths' are.
-REPO_ONLY = ("inert_paths", "test_credentials", "weight_mem_gb", "weight_cores", "unreachable_paths")
+# `metered_keys` (p56-6, ADR 0063's 2026-11-26 amendment) its metered keys, one line in its table as test_credentials is.
+REPO_ONLY = ("inert_paths", "test_credentials", "weight_mem_gb", "weight_cores", "unreachable_paths", "metered_keys")
 # A task's estimated Weight (p53-3): the repo's two keys, and the built-in middle value of each (3 GB and 2 cores).
 WEIGHT_KEYS = ("weight_mem_gb", "weight_cores")
 WEIGHT_BUILT_IN = {"weight_mem_gb": 3, "weight_cores": 2}
@@ -434,6 +464,9 @@ CRED_NAME_RE = re.compile(r"[A-Z][A-Z0-9]*(?:_[A-Z0-9]+)+\Z")
 CRED_PREFIX_RE = re.compile(r"[A-Za-z0-9_]{3,40}\Z")
 SUPABASE_REF_RE = re.compile(r"[a-z]{20}\Z")
 LIVE_PROD_SEGMENT_RE = re.compile(r"(?:^|_)(?:LIVE|PROD)")
+# metered_keys (p56-6): a service is 2 to 40 of A-Z, a-z, 0-9, `.`, `-`, `_` and single inner spaces, starting and
+# ending on a letter or digit (the name a task's spend gate names).
+METERED_SERVICE_RE = re.compile(r"[A-Za-z0-9](?:[A-Za-z0-9._-]| (?! ))*[A-Za-z0-9]\Z")
 BUILT_IN = {"parallel_ceiling": 4, "max_review_rounds": 4, "max_iterations": 3, "max_plan_rounds": 3, "auto_retries": 2,
             "overtime_runs": 3, "spend_approval_usd": 0, "verify_slots": 2, "capacity_max": 6}
 # The least valid value of each rollout key: a round cap is >= 1; `auto_retries: 0` disables automatic retries;
@@ -453,7 +486,7 @@ TABLES = ("defaults", "guardrails", "notify", "repo")
 TOP_KEYS = ("schema",) + TABLES
 # The schema (ADR 0043; the header's schema rule and add-a-key recipe). SCHEMA is this reader's version; KEY_SCHEMA
 # registers every key it knows, by (scope, key), at the schema that introduced it. K10 freezes the schema-1 set.
-SCHEMA = 8
+SCHEMA = 9
 KEY_SCHEMA = {}
 KEY_SCHEMA.update({("top", k): 1 for k in TOP_KEYS})
 KEY_SCHEMA.update({("rollout", k): 1 for k in SETTING_KEYS if k not in ("capacity_max", "overtime_runs")})
@@ -467,6 +500,7 @@ KEY_SCHEMA[("rollout", "weight_mem_gb")] = 6   # p53-3 (ADR 0083 DfL 8): the fir
 KEY_SCHEMA[("rollout", "weight_cores")] = 6
 KEY_SCHEMA[("rollout", "unreachable_paths")] = 7   # p52-1 (ADR 0081 d1): the first schema-7 key
 KEY_SCHEMA[("rollout", "overtime_runs")] = 8   # p39-14 (ADR 0070 d8): the first schema-8 key
+KEY_SCHEMA[("rollout", "metered_keys")] = 9   # p56-6 (ADR 0063's 2026-11-26 amendment): the first schema-9 key
 ORIGIN_TIMEOUT = 20  # seconds for land.sh --origin-slug (one local git call); the whole group dies on expiry
 
 # land.sh's origin_slug rule, so a key can only ever equal a slug land.sh prints.
@@ -792,6 +826,63 @@ def credential_problem(value):
     return None
 
 
+def metered_problem(value):
+    """Why a `metered_keys` value is no valid set of metered keys (the header's rules, the first failure wins), or None.
+    A refused value is described, never echoed."""
+    if not isinstance(value, dict):
+        return "must be an inline table { file = \"…\", keys = [ … ] }, got %s" % _describe(value)
+    for key in value:
+        if key not in ("file", "keys"):
+            return "holds an unknown key %s (it holds exactly file and keys)" % json.dumps(key)
+    for key in ("file", "keys"):
+        if key not in value:
+            return "has no %s (it holds exactly file and keys)" % key
+    path = value["file"]
+    if not isinstance(path, str):
+        return "file must be a string, got %s" % _describe(path)
+    if not (path.startswith("/") or path.startswith("~/")):
+        return "file must be an absolute path (starting / or ~/)"
+    if len(path) > 300:
+        return "file is %d characters (at most 300)" % len(path)
+    if any(ord(c) < 32 or ord(c) == 127 for c in path):
+        return "file holds a control character"
+    if "(" in path or ")" in path:
+        return "file holds a ( or ) (the approval's annotation names it and ends at a ))"
+    keys = value["keys"]
+    if not isinstance(keys, list):
+        return "keys must be a list of 1 to %d tables, got %s" % (MAX_CREDENTIAL_KEYS, _describe(keys))
+    if not keys:
+        return "keys is empty (it lists 1 to %d keys)" % MAX_CREDENTIAL_KEYS
+    if len(keys) > MAX_CREDENTIAL_KEYS:
+        return "keys holds %d entries (at most %d)" % (len(keys), MAX_CREDENTIAL_KEYS)
+    names = set()
+    for n, entry in enumerate(keys, 1):
+        where = "keys entry %d" % n
+        if not isinstance(entry, dict):
+            return "%s must be a table { name = \"…\", service = \"…\" }, got %s" % (where, _describe(entry))
+        for key in entry:
+            if key not in ("name", "service"):
+                return "%s holds an unknown key %s (it holds exactly name and service)" % (where, json.dumps(key))
+        for key in ("name", "service"):
+            if key not in entry:
+                return "%s has no %s (it holds exactly name and service)" % (where, key)
+        name = entry["name"]
+        if not isinstance(name, str) or not CRED_NAME_RE.match(name):
+            return ("%s: name must be an upper-snake env name (A-Z, 0-9 and _, with at least one _), got %s"
+                    % (where, _describe(name) if not isinstance(name, str) else "a string of another form"))
+        if LIVE_PROD_SEGMENT_RE.search(name):
+            return "%s: name holds a LIVE or PROD segment (a live or production key is never a metered key)" % where
+        if name in names:
+            return "%s: its name is listed twice" % where
+        names.add(name)
+        service = entry["service"]
+        if not isinstance(service, str) or len(service) > 40 or not METERED_SERVICE_RE.match(service):
+            return ("%s: service must be 2 to 40 of A-Z, a-z, 0-9, ., - and _ with single inner spaces, starting and "
+                    "ending on a letter or digit, got %s"
+                    % (where, _describe(service) if not isinstance(service, str) else "a string of another form"))
+    return None
+
+
 def logins_problem(value):
     """Why a `test_logins` value is no valid list of test Logins (the header's rules, the first failure wins), or
     None."""
@@ -900,6 +991,18 @@ def _validate(text, doc, path):
                                  "keys": [{k: entry[k] for k in ("name", "prefix", "supabase_project") if k in entry}
                                           for entry in value["keys"]]}
                     continue
+                if key == "metered_keys":
+                    # p56-6: one line in its repo table, as test_credentials is, for the same line-by-line writers.
+                    if at + (key,) not in idx.one_line:
+                        refuse("%s metered_keys must be one line in that table: metered_keys = { file = \"…\", "
+                               "keys = [ { name = \"…\", service = \"…\" }, … ] } (inert-paths.py and tune.py edit "
+                               "this file line by line)" % label, at + (key,))
+                    why = metered_problem(value)
+                    if why:
+                        refuse("%s metered_keys: %s" % (label, why), at + (key,))
+                    kept[key] = {"file": value["file"],
+                                 "keys": [{"name": entry["name"], "service": entry["service"]} for entry in value["keys"]]}
+                    continue
                 if key in WEIGHT_KEYS:
                     # p53-3: the repo's estimated Weight, a finite number > 0 (a float: a scripts repo is ~0.8 GB).
                     if (isinstance(value, bool) or not isinstance(value, (int, float)) or not value > 0
@@ -926,6 +1029,13 @@ def _validate(text, doc, path):
             if isinstance(value, bool) or not isinstance(value, int) or value < MINIMUM[key]:
                 refuse("%s %s must be an integer >= %d, got %s" % (label, key, MINIMUM[key], _describe(value)), at + (key,))
             kept[key] = value
+        if "metered_keys" in kept and "test_credentials" in kept:
+            # p56-6: a key is in one class, never both.
+            test = {k["name"] for k in kept["test_credentials"]["keys"]}
+            both = next((k["name"] for k in kept["metered_keys"]["keys"] if k["name"] in test), None)
+            if both is not None:
+                refuse("%s metered_keys: %s is also in test_credentials (a key is in one class)" % (label, both),
+                       at + ("metered_keys",))
         return kept
 
     out = {"defaults": {}, "guardrails": {}, "repo": {}, "schema": schema, "ignored": ignored,
@@ -1106,6 +1216,9 @@ def resolve(repo=None, path=None):
     creds = overrides.get("test_credentials")
     creds = ({"value": {"file": creds["file"], "keys": [dict(k) for k in creds["keys"]]}, "source": "file:repo"}
              if creds is not None else {"value": None, "source": "built-in"})
+    metered = overrides.get("metered_keys")
+    metered = ({"value": {"file": metered["file"], "keys": [dict(k) for k in metered["keys"]]}, "source": "file:repo"}
+               if metered is not None else {"value": None, "source": "built-in"})
     logins = ({"value": list(tables["defaults"]["test_logins"]), "source": "file:defaults"}
               if "test_logins" in tables["defaults"] else {"value": [], "source": "built-in"})
     weight = {}
@@ -1116,7 +1229,8 @@ def resolve(repo=None, path=None):
     unreachable = ({"value": list(overrides["unreachable_paths"]), "source": "file:repo"}
                    if "unreachable_paths" in overrides else {"value": [], "source": "built-in"})
     return {"path": path, "file": read is not None, "repo": slug, "settings": settings, "guardrails": guardrails,
-            "inert_paths": inert, "test_credentials": creds, "test_logins": logins, "weight": weight,
+            "inert_paths": inert, "test_credentials": creds, "metered_keys": metered, "test_logins": logins,
+            "weight": weight,
             "unreachable_paths": unreachable,
             "schema": {"file": tables["schema"], "engine": SCHEMA}, "ignored": list(tables["ignored"]),
             "retired": list(tables["retired"])}

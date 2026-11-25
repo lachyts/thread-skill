@@ -173,6 +173,27 @@ only the Login, and any other use is a review failure. Schedule and orient
 record such a gate ahead and never ask it: the planner words it as the
 standing approval reads it.
 
+A credential gate naming only a repo's declared metered keys, keys whose only
+risk is metered spend (a paid voice API with no test mode), signs with its
+spend gate (p56-6). It is ONE line in the repo's table, each key with the
+service its spend gate names, with `schema = 9` at the top of the file:
+
+```toml
+[repo."owner/chorus"]
+metered_keys = { file = "~/.config/chorus/env", keys = [{ name = "CARTESIA_API_KEY", service = "Cartesia" }, { name = "ELEVENLABS_API_KEY", service = "ElevenLabs" }] }
+```
+
+It is declared on your ruling only, as the class is: write it by hand, or
+rule on it in words and an agent writes it with `rollout-settings.py declare
+--repo <clone> --key metered_keys`, quoting your words and their date. The
+gate is signed only when each key it names is in the file and nothing else is
+beside them (no live or production word, no other credential or listed
+service), and a spend gate on the same task names each key's service. It
+reads no limit of its own: it signs only with a spend gate the standing
+approval signed on this task, earlier or in this pass, so with
+`spend_approval_usd` at 0 it signs only on an earlier signing. Schedule and
+orient write its Planner line ahead, never asking it; a Leg never signs one.
+
 Needs-you items are listed, never pushed (ADR 0075 d2): each stays in the
 report's `Needs you:` block and in the rollout and task notes, for
 `/thread:status`, `/thread:repair` and orient-all to read when you sit down to

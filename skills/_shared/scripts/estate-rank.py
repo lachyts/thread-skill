@@ -716,8 +716,8 @@ class Ranker:
              conjunction or second Login is on any gate line, and the settings are read for nothing else;
           7. the declared test Logins (test_logins()) are non-empty, and under them every credential hit's reading
              names its Logins (`login.names`): an undeclared Login is charged.
-        A test-credential class gate (ADR 0063) is charged still: the class needs `--repo` and its keys' presence in
-        the env file, which the ranker cannot see (ADR 0063 residual (viii))."""
+        A test-credential class gate (ADR 0063) or a metered-key gate (p56-6) is charged still: each class needs
+        `--repo` and its keys' presence in the env file, which the ranker cannot see (ADR 0063 residual (viii))."""
         rel = self.tasks[slug].get("note")
         if not isinstance(rel, str) or not rel or os.path.isabs(rel) or ".." in rel.split("/"):
             return False

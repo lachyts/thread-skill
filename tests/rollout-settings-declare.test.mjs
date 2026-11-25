@@ -458,3 +458,24 @@ m.os.replace = failing`, ['declare', ...LOGINS, ...RULING])
   assert.match(r.stderr, new RegExp(`^rollout-settings: declare: rollouts\\.toml was not written \\(no replace today\\): nothing declared; ${log[0].id} voided by ${log[1].id}\\n$`))
   verbRefused(home, ['undo', '--id', log[0].id, ...RULING], /was voided/, { was, logged: 2 })
 })
+
+// p56-6: the after-landing declaration of Chorus's two voice keys, its exact command shape (`--key metered_keys`, the
+// class as JSON, his words of 23 Nov and their source), against a temp config and a fixture clone.
+test('D10 the metered-key declaration: ONE line in the repo table, schema raised to 9, one log line, read back by resolve', (t) => {
+  const home = tmpHome(t)
+  const clone = gitRepo(home, 'chorus', 'https://github.com/o/chorus.git')
+  writeSettings(home, ['schema = 8', '', '[defaults]', 'spend_approval_usd = 200', '', '[repo."o/chorus"]', 'parallel_ceiling = 3'])
+  const VALUE = '{"file": "~/.config/chorus/env", "keys": [{"name": "CARTESIA_API_KEY", "service": "Cartesia"}, {"name": "ELEVENLABS_API_KEY", "service": "ElevenLabs"}]}'
+  const out = wrote(home, ['declare', '--repo', clone, '--key', 'metered_keys', '--value', VALUE, '--words', "I shouldn't be asked about this.",
+    '--said', '2026-11-23', '--source', '[[chorus-p113-3-the-voice-says-pr]]'])
+  const log = readLog(home)
+  assert.equal(log.length, 1, 'one log line')
+  const e = log[0]
+  assert.equal(body(home), ['schema = 9', '', '[defaults]', 'spend_approval_usd = 200', '', '[repo."o/chorus"]', 'parallel_ceiling = 3', e.line].join('\n') + '\n',
+    'ONE line after the table\'s last key, the schema raised in the same edit')
+  assert.ok(e.line.startsWith('metered_keys = { file = "~/.config/chorus/env", keys = [{ name = "CARTESIA_API_KEY", service = "Cartesia" }, ' +
+    '{ name = "ELEVENLABS_API_KEY", service = "ElevenLabs" }] }  # declared '), e.line)
+  assert.deepEqual([e.table, e.key, e.schema, e.said, e.source], ['repo."o/chorus"', 'metered_keys', { from: 8, to: 9 }, '2026-11-23', '[[chorus-p113-3-the-voice-says-pr]]'])
+  assert.match(out, /^declared \[repo\."o\/chorus"\] metered_keys = /)
+  assert.deepEqual(resolves(home, ['--repo', clone]).metered_keys, { value: JSON.parse(VALUE), source: 'file:repo' })
+})

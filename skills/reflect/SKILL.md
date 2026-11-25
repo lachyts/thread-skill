@@ -469,9 +469,10 @@ For each rollout, read its `friction` items, of ten kinds (`ask`, `set-aside`, `
   could have seen and nobody asked ahead: a miss of schedule § 3.6 or `${CLAUDE_PLUGIN_ROOT}/skills/orient/reshuffle.md`
   § R3 (Grill the unclear), item (c), counted in span.json's `gateMisses` and traced there, never to the word lists. A
   signOff on a credential or irreversible gate with `sweepMiss` empty is read in this order. A credential on a note
-  holding a recorded `- Planner: word each test-credential gate` or `- Planner: word each test-Login gate` line was
-  recorded ahead on purpose and reached Lachy mid-run only because the standing approval turned it down: trace it to
-  that refusal (execute § 3.7, *Test credentials* or *A declared test Login*), never to the word lists. A sign-off
+  holding a recorded `- Planner: word each test-credential gate`, `- Planner: word each test-Login gate` or
+  `- Planner: word each metered-key gate` line was recorded ahead on purpose and reached Lachy mid-run only because the
+  standing approval turned it down: trace it to that refusal (execute § 3.7, *Test credentials*, *A declared test
+  Login* or *Metered keys*), never to the word lists. A sign-off
   whose task note span could not read is named in `cannotShow` (its `sweepMiss` cannot be read): report it, never
   trace it. Only otherwise is it a gate its note never named: trace it to the sweep's word lists
   (`${CLAUDE_PLUGIN_ROOT}/skills/_shared/scripts/gated_inputs.py`'s header, part 1). span reads each ask from the

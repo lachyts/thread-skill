@@ -1630,8 +1630,8 @@ through time, from attention to merged PRs. Terms only — no implementation.
   in `## Approved gates` with `(approved <date> under the standing approval:
   total exposure …)`, the task's ceiling, never a target; irreversible gates
   never pass under it (ADR 0034), and a credential gate only as a declared
-  Test credential (ADR 0063) or Test Login (p37-4), nor does any gate on a
-  plan the plan judge bounced (ADR 0038).
+  Test credential (ADR 0063), Test Login (p37-4) or Metered key (p56-6), nor
+  does any gate on a plan the plan judge bounced (ADR 0038).
   _Avoid_: spend envelope, auto-approve limit.
 - **Test credential** — a test-mode, staging or sandbox key a repo declares in
   its test-credential class: the Rollout settings key `test_credentials`, one
@@ -1659,6 +1659,20 @@ through time, from attention to merged PRs. Terms only — no implementation.
   only (a Ruled declaration, or his hand edit). Schedule
   and orient record such a gate, never ask it ahead, on a serial chain too.
   _Avoid_: dummy account, test account.
+- **Metered key** — an API key whose only risk is metered spend (a paid voice
+  API with no test mode, such as Cartesia's or ElevenLabs'), which a repo
+  declares in the Rollout settings key `metered_keys`: one line in its
+  `[repo."owner/name"]` table of `~/.config/thread/rollouts.toml` (schema 9),
+  each key with the service its spend gate names. A credential Gated input
+  that names only such keys, each present in the declared file, with no live,
+  production or irreversible word and no other credential or listed service
+  beside them, signs under the Standing approval with the spend gate that
+  names its service (p56-6, ADR 0063's 2026-11-26 amendment). It reads no
+  limit of its own: it signs only with a spend gate the Standing approval
+  signed on that task. It is declared on his ruling only (a Ruled
+  declaration, or his hand edit). Schedule and orient record such a
+  credential, never ask it ahead; a Leg never signs one.
+  _Avoid_: paid key, spend key.
 - **Ruled declaration** — a declaration in the Rollout settings file that
   Lachy has ruled on in his own words, written there by an agent ("Agents make
   any ruled edit", ADR 0063's 2026-11-24 amendment). The agent quotes his
