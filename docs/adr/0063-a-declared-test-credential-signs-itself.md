@@ -226,11 +226,11 @@ keys every day, so the class could never sign them. His ruling, on 2026-11-23: *
 metered spend. A repo declares them in one line of its `[repo."owner/name"]` table, `metered_keys = { file = "<path>",
 keys = [{ name = "<NAME>", service = "<Service>" }, …] }` (schema 9), each key with the service its spend gate names.
 `approve-gates --standing` signs a credential gate when every env name in it is a declared metered key, each present in
-the declared file; no live or production word, irreversible word or other kind of credential (password, private key,
-SSH, OAuth, keychain, cookie) is in it, while "API key", "token" and "secret" stay deny words for the other two classes
-only; no other listed service is named beside the keys; and a spend gate the standing approval signed on the same task,
-earlier or in the same pass, names each key's service. It reads no limit of its own: it signs only with a spend gate
-the standing approval signed on this task, earlier or in this pass, so with `spend_approval_usd` at 0 it signs only on
+the declared file; no live or production word, irreversible word or other kind of credential (password, passphrase,
+private key, SSH, OAuth, 1Password, keychain, cookie) is in it, while "API key", "token" and "secret" stay deny words
+for the other two classes only; no other listed service is named beside the keys; and a spend gate the standing
+approval signed on the same task, earlier or in the same pass, names each key's service. It reads no limit of its
+own: it signs only with a spend gate the standing approval signed on this task, earlier or in this pass, so with `spend_approval_usd` at 0 it signs only on
 an earlier signing. Its annotation names the keys, the file and the spend gate it rode on. Schedule § 3.6 and orient's
 reshuffle R3 (c) record such a credential ahead, with a metered-key Planner line and, when the note holds none, the
 spend Planner line. It is declared on his ruling only, by the 2026-11-24 amendment: Chorus's two voice keys are an
@@ -264,14 +264,16 @@ b. **The spend Planner line is written with the metered-key one** when the note 
 c. **A service is declared per key**, never derived from the env name: the rule needs the service a spend gate must
    name, and a declared word is one he ruled on.
 d. **The service match ignores case and inner spaces or hyphens** (`Eleven Labs` names `ElevenLabs`; `Cartesian` never
-   names `Cartesia`).
+   names `Cartesia`). The service guard reads a listed name by the same match, so `OpenAI API` is a declared
+   `OpenAI`'s own name in the credential gate as in the spend gate.
 e. **Eight deny nouns, and the service guard.** A key of another kind, or another listed service's key beside the
    declared ones, asks; the guard reads any case, so a gate holding the verb "replicate" asks too.
 f. **A spend gate signed by hand does not carry the key**: the note's rule is "a spend gate the standing approval
    signed", and the ASK says so.
 g. **No `env_bootstrap` check** (residual c): Chorus reads its env file in place.
-h. **Routing reads the settings** for a credential gate with an env token, no metered deny word and no mode word, so
-   under a refused file its slug exits 1, as every other reader of that file does.
+h. **Routing reads the settings** for a credential gate with an env token and no metered deny word, to tell a declared
+   metered key from any other. Decision 2 stands: under a refused file a gate the class reading refuses still asks
+   with that reading's why.
 i. **No limit of its own.** Turning the standing approval off stops a metered key only where no earlier standing
    signing carries it; re-reading the limit for a rider would ask the incident's own state whenever the limit moved
    after the spend was signed.

@@ -475,9 +475,10 @@ a reading needs it (part 1), with no git and no bytecode.
           [repo."owner/name"] table in ~/.config/thread/rollouts.toml)").
        5. Every env token is a declared name ("<TOKEN> is not a declared metered key").
        6. The service guard: every SERVICES name in the text (matched as the sweep spells it, whole word, its inner
-          whitespace free, in any case), in text order, is the declared service of a key the gate names, compared
-          lower-cased with spaces, tabs and hyphens removed ("<Service> is not the declared service of a key it names",
-          the name as the gate spells it). So another service's key never rides along.
+          whitespace free, in any case), in text order, holds the declared service of a key the gate names, matched
+          as metered_spend matches it (_service_re: a whole word inside the name, ignoring case and inner spaces or
+          hyphens, so `OpenAI API` is a declared `OpenAI`'s own name) ("<Service> is not the declared service of a
+          key it names", the name as the gate spells it). So another service's key never rides along.
      names are the env tokens in text order, each once. A residual, as part 4's (i): a service off SERVICES, or a
      second credential named in plain prose with no env token or deny word, is not seen.
    - `metered_names(gate, cls)`: the gate's env tokens that are declared metered keys, in text order, each once ([]
@@ -2040,10 +2041,10 @@ def metered_reading(gate, cls):
             return _cred_none(f"{t} is not a declared metered key")
         if t not in names:
             names.append(t)
-    services = {_service_key(declared[n]) for n in names}
+    own = [_service_re(declared[n]) for n in names]   # metered_spend's match, so the two readings agree
     named = sorted((m.start(), m.group(0)) for _s, regex in SERVICE_RES for m in regex.finditer(text))
     for _at, spelled in named:
-        if _service_key(spelled) not in services:
+        if not any(regex.search(spelled) for regex in own):
             spelled = re.sub(r"\s+", " ", spelled)
             return _cred_none(f"{spelled} is not the declared service of a key it names")
     return {"names": names, "why": ""}

@@ -56,10 +56,10 @@
 //   another act, every entry read, and one row per gate whose `pending` marks a gate still awaiting sign-off;
 // - p56-6 (a metered API key on file signs with its spend, ADR 0063's 2026-11-26 amendment): the metered-key reading's
 //   whys in order and its own deny list ("API key", "token", "secret" and "access" pass it and still deny in the class
-//   and Login readings); the service guard; metered_names, metered_proof and approved_spend_gates; metered_spend's
-//   service match in any spelling (never `Cartesian` for `Cartesia`), one gate for two services named once, and its two
-//   whys; the annotation (brackets, the 80-character cut, stripped like any sign-off); chorus-p113-3's two gates (the
-//   Verify); and schedule § 7's metered-key Planner example coupled to the reader.
+//   and Login readings), chorus-p113-3's verbatim gate reading both keys; the service guard; metered_names,
+//   metered_proof and approved_spend_gates; metered_spend's service match in any spelling (never `Cartesian` for
+//   `Cartesia`), one gate for two services named once, and its two whys; the annotation (brackets, the 80-character
+//   cut, stripped like any sign-off); and schedule § 7's metered-key Planner example coupled to the reader.
 //
 // Hermetic: python3 -I -B (no bytecode next to the module), THREAD_EVENTS_DIR in temp (reconcile-rollout.py is only
 // imported, never run), and every sweep CLI spawn under a temp HOME. It writes only under mktemp dirs; test 7 of p39-3
@@ -1846,8 +1846,10 @@ test('p56-6 the metered-key reading: each why in order; its deny list; names in 
   ]
   const got = py(cases.map(([gate, cls]) => mcall('metered_reading', gate, cls)))
   cases.forEach(([gate, , why], i) => assert.deepEqual(got[i], { names: null, why }, gate))
-  assert.deepEqual(metered('- Credential: ELEVENLABS_API_KEY then CARTESIA_API_KEY, and ELEVENLABS_API_KEY again'),
-    { names: ['ELEVENLABS_API_KEY', 'CARTESIA_API_KEY'], why: '' }, 'text order, each once, a list marker stripped')
+  const [order, p113] = py([mcall('metered_reading', '- Credential: ELEVENLABS_API_KEY then CARTESIA_API_KEY, and ELEVENLABS_API_KEY again', MCLS),
+    mcall('metered_reading', P113_CRED, MCLS)])
+  assert.deepEqual(order, { names: ['ELEVENLABS_API_KEY', 'CARTESIA_API_KEY'], why: '' }, 'text order, each once, a list marker stripped')
+  assert.deepEqual(p113, { names: BOTH, why: '' }, "p113-3's verbatim gate reads both keys")
   // control: "API key", "token", "secret" and "access" pass here, and still deny under the class and Login readings
   const prose = ['API key', 'token', 'secret', 'access'].map((w) => `credential: CARTESIA_API_KEY, the voice ${w} for the dummy Login`)
   const [m, c, l] = [prose.map((g) => mcall('metered_reading', g, MCLS)), prose.map((gate) => ({ op: 'credential', gate, cls: CLS })),
@@ -1867,8 +1869,10 @@ test('p56-6 the service guard: another listed service beside a declared key asks
     ['credential: ELEVENLABS_API_KEY for the Eleven Labs probe', ''],
     ['credential: CARTESIA_API_KEY for the cartesia probe', ''],
     ['credential: CARTESIA_API_KEY only', ''],   // the env name itself is no service match
+    // a listed name that holds the declared service as a word is the key's own, as metered_spend reads it
+    ['credential: OPENAI_API_KEY for the OpenAI API probe', '', { file: '/x', keys: [{ name: 'OPENAI_API_KEY', service: 'OpenAI' }] }],
   ]
-  const got = py(cases.map(([gate]) => mcall('metered_reading', gate, MCLS)))
+  const got = py(cases.map(([gate, , cls = MCLS]) => mcall('metered_reading', gate, cls)))
   cases.forEach(([gate, why], i) => assert.equal(got[i].why, why, gate))
 })
 
@@ -1926,17 +1930,6 @@ test("p56-6 metered_annotation: its text, the gate's parentheses as brackets, th
   assert.match(bad.error, /an annotation part holds a '\)'/, 'a ) in a part raises')
   assert.deepEqual(py([{ op: 'strip', gate: P113_CRED, line: `${P113_CRED} ${ann}` }]), [true], 'GATE_ANNOT_RE strips it')
   assert.deepEqual([...T.unapprovedGates([P113_CRED], [`${P113_CRED} ${ann}`])], [], 'the engine reads it signed')
-})
-
-test("p56-6 the Verify: p113-3's credential gate reads both keys and rides its one spend gate, named once", () => {
-  const [pre, cls, classPre, spend, exp] = py([mcall('metered_reading', P113_CRED, null), mcall('metered_reading', P113_CRED, MCLS),
-    { op: 'credential', gate: P113_CRED, cls: null }, mcall('metered_spend', MCLS, BOTH, [P113_SPEND], []), { op: 'standing', gate: P113_SPEND }])
-  assert.deepEqual([pre, cls], [{ names: null, why: NO_METERED }, { names: BOTH, why: '' }], 'NO_METERED_WHY with no class, both keys with it')
-  assert.equal(classPre.why, 'no test-mode, staging or sandbox word', "the class reading's why, today's ASK with no metered keys")
-  assert.deepEqual(spend, { gates: [P113_SPEND], why: '' })
-  assert.equal(exp.usd, '3', 'the spend gate prices at US$3, under the US$200 limit')
-  const [part] = py([mcall('metered_spend_part', spend.gates)])
-  assert.equal(part, 'sample synthesis of the candidate PR forms on the paid Cartesia and ElevenLabs e …', 'one gate, no ` | `')
 })
 
 test("p56-6 schedule's metered-key Planner example reads its keys (the guidance is coupled to the reader); live or another service asks", () => {

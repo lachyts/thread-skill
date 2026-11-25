@@ -758,6 +758,7 @@ has "$out" "ERROR: a: rollout settings refused: " "S10e: … the ERROR names the
 has "$out" "test_credentials must be one line in that table" "S10e: … and its remedy"
 # A gate no class could ever sign asks at the reading's class-independent steps and never resolves the class (ADR 0063
 # d2): under the same refused file S3's deny-word gate asks (exit 3), and beside it a task stamp still signs its spend.
+# (The metered reading refuses that gate too, at `1Password`, so it reads no settings at all: row e runs the routing.)
 mkt c gate-pending; gate c "$CRED"
 before=$(cat "$D/c.md")
 HH="$HSUB" sa c
@@ -770,6 +771,15 @@ ok "$rc" 3 "S10e: a task stamp under the refused class form: the spend gate sign
 ok "$(section d '## Approved gates')" "- $PROBE (approved $DATE under the standing approval: total exposure US\$9, limit US\$50 from task)" "S10e: … the probe signed from the task stamp"
 ok "$(section d '## Gated inputs (awaiting sign-off)')" "- $CRED" "S10e: … the credential still pending"
 has "$out" "ASK: d: $CRED: deny word: API key" "S10e: … at its deny word"
+# p56-6: a gate the class refuses for want of a mode word passes the metered reading's class-independent steps, so the
+# refused file is read to route it. It still asks with the class's why, never exit 1, and the stamped spend gate signs.
+KEYCRED='credential: OPENAI_API_KEY for the probe'
+mkt e gate-pending 'spend_approval_usd: 50'; gate e "$KEYCRED" "$PROBE"
+HH="$HSUB" sa e
+ok "$rc" 3 "S10e: an env-key gate with no mode word under the refused class form: the spend gate signs, it asks (exit 3)"
+ok "$(section e '## Approved gates')" "- $PROBE (approved $DATE under the standing approval: total exposure US\$9, limit US\$50 from task)" "S10e: … the probe signed from the task stamp"
+has "$out" "ASK: e: $KEYCRED: no test-mode, staging or sandbox word" "S10e: … at the class reading's why"
+hasnt "$out" "rollout settings refused" "S10e: … and the refused file never turns its ASK into exit 1"
 
 # S10f: beside a spend gate (HCS: limit 200): one save signs both, and only the spend gate logs a Needs-you line; an
 # irreversible gate still asks
@@ -1180,7 +1190,8 @@ HH="$HM" sa a
 ok "$rc" 3 "S13e: on a serial note the voice-key gate asks: exit 3"
 ok "$(echo "$out" | grep '^ASK:')" "ASK: a: $CR13: $NOMODE" "S13e: … a Leg resolves no repo table, so today's ASK"
 
-# S13f: a refused rollouts.toml (metered_keys under schema 8) is exit 1 for the slug, nothing written
+# S13f: a refused rollouts.toml (metered_keys under schema 8) is exit 1 for the slug, nothing written (its spend gate
+# reads the limit; the voice-key gate alone would ask, as S10e's row e does)
 s13 s13f
 HMR="$TMP/home-metered-refused"; mkdir -p "$HMR/.config/thread"
 printf 'schema = 8\n\n[repo."o/chorus"]\n%s\n' "$METERED" > "$HMR/.config/thread/rollouts.toml"

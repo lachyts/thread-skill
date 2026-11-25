@@ -1146,7 +1146,8 @@ Subcommands:
               irreversible or bounced gate). A credential gate on a note the plan judge never bounced (ADR 0063)
               is covered iff gated_inputs.credential_reading() reads it as the repo's declared test credential
               (its class-independent steps first, with no class: any why but NO_CLASS_WHY is the gate's ASK, and
-              the class is never resolved for it; then rollouts.toml's `test_credentials`, read through
+              a refused rollouts.toml never turns it into exit 1, though the settings may be read to route it to
+              the metered-key path, below; then rollouts.toml's `test_credentials`, read through
               _resolved_settings once per call: a refused file is exit 1 for each slug that needs it, nothing
               written; no Project root, as on every serial note,
               or no repo table is no class, so it asks), the rollout's `env_bootstrap` copies the declared file
@@ -1173,7 +1174,9 @@ Subcommands:
               that names a declared metered key (p56-6, ADR 0063's 2026-11-26 amendment: gated_inputs.py's module
               docstring, 7) takes the metered-key reading instead, never the class one: the settings are resolved
               only when the class reading with no class gives NO_CLASS_WHY or the metered reading with no class
-              gives NO_METERED_WHY (any other pair of whys is the gate's ASK with the class reading's why, today's),
+              gives NO_METERED_WHY (any other pair of whys is the gate's ASK with the class reading's why, today's);
+              a refused file is exit 1 only for a gate whose class reading gave NO_CLASS_WHY, and any other gate
+              asks with the class reading's why, as it did before the routing (ADR 0063 d2);
               and a gate whose env tokens include one of rollouts.toml's `metered_keys` (gated_inputs.metered_names)
               is covered iff gated_inputs.metered_reading() reads every env token as a declared metered key with no
               deny word and no other service, metered_proof() finds each in the declared file, and, judged after
@@ -18810,7 +18813,8 @@ class _CredentialContext:
     no class gives NO_CLASS_WHY, metered_reading with no class NO_METERED_WHY, login_reading with no Logins
     NO_LOGINS_WHY) asks for it. get() -> {error, cls, source, metered, metered_source, logins, logins_source, boot,
     boot_err}: error is `rollout settings refused: <the resolver's words>` (exit 1 for each slug that needs it, nothing
-    written for it); otherwise cls is rollouts.toml's `test_credentials` value (None with no class: no Project root,
+    written for it; a gate read only to route it to the metered-key path, its class reading refused, asks with that
+    reading's why instead: ADR 0063 d2); otherwise cls is rollouts.toml's `test_credentials` value (None with no class: no Project root,
     as on every serial note, no repo table, or no GitHub origin), metered its `metered_keys` value (None with none, the
     same way) and metered_source its source, logins its `[defaults] test_logins` value ([] with none; machine-wide, so
     a serial note reads it too) and logins_source its source, and boot the rollout's `env_bootstrap` (_command_value),
@@ -18960,9 +18964,10 @@ def _approve_standing(args) -> int:
                 if not bounced and gi.gate_kind(g) == "credential":
                     # ADR 0063: a declared test credential, proved present in its file; it never reads the limit.
                     # The reading's class-independent steps run first (d2): a gate no class could ever sign asks
-                    # with its why and never resolves the class, so a refused rollouts.toml never errors it. p56-6:
-                    # a gate that also passes the metered-key reading's class-independent steps resolves the settings
-                    # to route, and one naming a declared metered key takes that reading, never the class one.
+                    # with its why, so a refused rollouts.toml never errors it. p56-6: a gate that passes the
+                    # metered-key reading's class-independent steps resolves the settings to route, and one naming a
+                    # declared metered key takes that reading, never the class one. A refused file errors only a gate
+                    # the class reading could still sign (NO_CLASS_WHY); any other asks with the class reading's why.
                     pre = gi.credential_reading(g, None)
                     mpre = gi.metered_reading(g, None)
                     if pre["why"] != gi.NO_CLASS_WHY and mpre["why"] != gi.NO_METERED_WHY:
@@ -18970,6 +18975,9 @@ def _approve_standing(args) -> int:
                         continue
                     ctx = creds.get()
                     if ctx["error"]:
+                        if pre["why"] != gi.NO_CLASS_WHY:   # ADR 0063 d2: class-refused, so its ASK, never exit 1
+                            left.append((i, g, pre["why"]))
+                            continue
                         slug_err = ctx["error"]
                         break
                     if mpre["why"] == gi.NO_METERED_WHY and gi.metered_names(g, ctx["metered"]):
