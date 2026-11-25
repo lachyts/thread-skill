@@ -2368,8 +2368,8 @@ test('D17c. preflight holds a task whose dependency outside the candidates nobod
 // 16 Nov Animately live publish); dep depends on it. swept and tok are graded a kind their notes hit (a live publish, a
 // `token`); key is a One call graded credential on a clean note; both is graded credential and irreversible on a clean
 // note; spend is graded spend alone; plain has no gate; og is Orient, graded irreversible, and behind, graded
-// irreversible on a clean note, depends on og. A signed gate is an `## Approved gates` bullet, which the sweep hits by
-// its kind word.
+// irreversible on a clean note, depends on og. A signed gate is an `## Approved gates` bullet of its own kind (its
+// leading `<kind>:`); the section's words are swept for no kind.
 test('D25. preflight --ask-gates: a gate the grade names and the sweep misses is asked in the round; signed, its task queues; unsigned, it is left out with its line', () => {
   const VG = path.join(S, 'vg')
   const GT = path.join(VG, 'Work', 'Tasks')
@@ -2478,6 +2478,20 @@ test('D25. preflight --ask-gates: a gate the grade names and the sweep misses is
     both: signed('credential', 'the account owner signs in') + `- irreversible: republish the site (approved ${TODAY}, asked ahead at schedule)\n` }))
   assert.ok(whole.queue.includes('both'))
   assert.ok(!gateAsks(whole).some(([s]) => s === 'both'))
+  // A bullet signs its own kind alone: its free words clear no other kind, whatever they hit (`Vercel` and `Supabase`
+  // are credential hits, `publish the site live` and `to production` irreversible ones). key is graded credential alone.
+  const answered = [['key', 'Which way?', 'left']]
+  for (const [name, slug, bullet, open, swept, more, answers] of [
+    ['irr-names-service', 'both', signed('irreversible', 'deploy the new hero to production on Vercel'), 'credential', ['irreversible'], [], []],
+    ['cred-names-publish', 'both', signed('credential', 'sign in to Webflow as the owner to publish the site live'), 'irreversible',
+      ['credential'], [], []],
+    ['other-kind-alone', 'key', signed('irreversible', 'drop the old table in Supabase'), 'credential', undefined, ['--decided', 'key'], answered],
+  ]) {
+    const x = flagged(more, recordedIn(`d25-${name}`, VG, scanFile, answers, { [slug]: bullet }))
+    const r = row(x, slug)
+    assert.deepEqual([r.in, r.why, r.gates, r.swept], [false, 'unsigned', [open], swept], name)
+    assert.deepEqual(gateAsks(x).filter(([s]) => s === slug), [[slug, open]], name)
+  }
 
   // (g) A note gone since the scan: fail closed, unasked. A task that leaves whatever he answers is never read.
   const gone = keep('vg-gone-scan.json', JSON.stringify({ ...JSON.parse(scanRun.stdout), vault: path.join(S, 'vg-gone') }))

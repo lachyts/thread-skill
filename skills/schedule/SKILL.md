@@ -446,19 +446,26 @@ nothing written for it. Lachy's "stop" ends the round, and the rest stay undecid
   `${CLAUDE_PLUGIN_ROOT}/skills/_shared/asking.md` § 6's Ungraded row.
 
 **A gate the grade names (ADR 0034, p56-2).** With `--ask-gates`, `preflight` reads the note of each candidate that is
-in or still to be decided through the gate sweep (`gated_inputs.py`'s `sweep`). A `credential` or `irreversible` kind
-its grade names (the rank row's `gates`) that the sweep reads no hit for is open: the task leaves as `unsigned` with
+in or still to be decided through the gate sweep (`gated_inputs.py`'s `sweep`), its `## Approved gates` section apart
+from the rest. A `credential` or `irreversible` kind its grade names (the rank row's `gates`) is open when the sweep
+reads no hit for it outside that section and no bullet there is of that kind: the task leaves as `unsigned` with
 its Dependent closure, a Ready task included, and one `gate` question per task and open kind joins the round. A
 sign-off is his authorisation, so the question carries no recommendation (ADR 0008). Spend is never read here
-(Chorus ADR 0108 d4), and a kind the sweep does hit is § 3.6's (its `tasks[]` row lists it under `swept`).
-- Before each gate question, print one line naming the act the grade means, read from the task note:
-  `[[<slug>]] <kind>: <the act>`. The grade carries the kind and its `why`, never the act. That line is shown with the
-  question, and is what the bullet records when he gives no Note (ADR 0008: no sign-off is put unseen). A line that
+(Chorus ADR 0108 d4), and a kind the sweep does hit, or a bullet of its own signs, is § 3.6's (its `tasks[]` row
+lists it under `swept`).
+- Before each gate question, print one line naming the act the grade means: `[[<slug>]] <kind>: <the act>`. The line
+  is the session's, worded from the task note and the grade's `why` (where the grader names the act it means,
+  `${CLAUDE_PLUGIN_ROOT}/skills/_shared/readiness-grade.md`'s `gates`); the grade holds no field for it. That line
+  is shown with the question, and is the act the bullet records (ADR 0008: no sign-off is put unseen). A line that
   can name no act says so, and then only his own words can sign.
 - `Sign it off now`, or typed words that sign the named act: at once, before the final call, append
-  `- <kind>: <his words> (approved <YYYY-MM-DD>, asked ahead at schedule)` to the task's `## Approved gates` section
-  (created at the note's end when absent), his words his Note or his typed words, else the line above. The bullet's
-  kind word is the hit that lets the task in at the final call, and § 3.6 then stamps the task.
+  `- <kind>: <the act> (approved <YYYY-MM-DD>, asked ahead at schedule)` to the task's `## Approved gates` section
+  (created at the note's end when absent). `<the act>` is always the act as the line above named it, the one he saw,
+  with his Note after it when he gives one (`<the act>; <his Note>`): a Note is usually a condition ("only once
+  staging is checked"), so it rides with the act and never replaces it, since the planner restates the bullet and
+  must match the act. Typed words that name the act themselves may stand alone. The bullet signs its own kind alone
+  (its leading `<kind>:`), which is what lets the task in at the final call: a hit of another kind among its words
+  signs nothing, and that kind keeps its own question. § 3.6 then stamps the task.
 - `Leave it out`: nothing is written, and the task stays `unsigned`.
 - Any other typed answer, "there is no such act here" included, writes nothing: the task stays `unsigned`, and its
   line in step 8 carries his words. The session never writes an `## Approved gates` bullet he did not sign.
@@ -707,7 +714,7 @@ A task with an undismissed hit gets **`plan_approval: required`** stamped in ste
 **Ask ahead (ADR 0034), credential and irreversible only.** In the confirm batch, for each `queued` task with an undismissed credential (not a test credential or test Login recorded below) or irreversible hit (Owner *yours*: a sign-off is his, ADR 0008; each in the Framing of `${CLAUDE_PLUGIN_ROOT}/skills/_shared/asking.md`):
 - **Credential or irreversible:** sign it now, or leave it. A sign-off becomes a `## Approved gates` bullet, `- <kind>: <his words> (approved <date>, asked ahead at schedule)`, which the engine's planner restates verbatim, so a matching declaration never stops the task.
 
-**Signed ahead, or named by the grade (p56-2).** A hit inside an `## Approved gates` bullet is a gate already signed, at orient, at an earlier schedule or in § 1.5's round: it is never put again, and its task is stamped `plan_approval: required` and listed as signed ahead. On a run whose Pre-flight passed `--ask-gates`, a credential or irreversible hit of a kind its task's row in the final `preflight`'s `tasks[]` lists under `swept` is never dismissed for naming nothing: the grade says the task needs that sign-off, and the hit is why § 1.5 did not put it. It keeps this step's handling: put in the confirm batch where this step puts its hits, with one line naming the act when the hit's own words do not, and stamped and listed where this step puts none (the Backlog orient, and S4 under orient § 7). A hit inside a recorded test-credential or test-Login Planner line is still dismissed by that name, and a declared test credential or test Login is still recorded. A kind only the grade names, with no hit, is § 1.5's. Where the Pre-flight passed no `--ask-gates` (an orient-all fork, the chain), no `swept` is read.
+**Signed ahead, or named by the grade (p56-2).** A hit inside an `## Approved gates` bullet of the hit's own kind (the bullet's leading `<kind>:`) is a gate already signed, at orient, at an earlier schedule or in § 1.5's round: it is never put again, and its task is stamped `plan_approval: required` and listed as signed ahead. A hit of another kind inside a bullet signs nothing and keeps its handling: a service an `irreversible:` bullet names is still a credential hit, dismissed, recorded or put as it would be in the note's own words, and listed as signed ahead only when a bullet of its own kind signs that same act. On a run whose Pre-flight passed `--ask-gates`, a credential or irreversible hit of a kind its task's row in the final `preflight`'s `tasks[]` lists under `swept` is never dismissed for naming nothing: the grade says the task needs that sign-off, and that hit, or a bullet of its kind, is why § 1.5 did not put it. It keeps this step's handling: put in the confirm batch where this step puts its hits, with one line naming the act when the hit's own words do not, and stamped and listed where this step puts none (the Backlog orient, and S4 under orient § 7). A hit inside a recorded test-credential or test-Login Planner line is still dismissed by that name, and a declared test credential or test Login is still recorded. A kind only the grade names, with no hit, is § 1.5's. Where the Pre-flight passed no `--ask-gates` (an orient-all fork, the chain), no `swept` is read.
 
 **A declared test credential is recorded, never asked** (ADR 0063). When step 2.8 resolved a test-credential class for this repo, a credential hit whose `at` context names only test-mode, staging or sandbox use of keys the class declares (their names, their prefixes or their Supabase project, or their service in test mode, e.g. "Stripe test keys") is recorded, never put to him: the task gets `plan_approval: required` and step 7's test-credential Planner line under `## Decisions (recorded <YYYY-MM-DD>)`, so its planner words the gate as the standing approval reads it. Execute's standing approval signs it at the stop when its keys are in the class's file, or asks then, naming the missing key. Asking it ahead would skip that presence check, which is how p8-1 failed. A hit inside the recorded test-credential Planner line is dismissed and listed as `swept, dismissed: [[task]] <word> (the recorded test-credential Planner line)`. A task that already holds that line is recorded, never asked. A hit naming live or production use, a key the class does not declare, or no mode keeps the ask-ahead above. On § Serial path every class credential keeps the ask-ahead: a Leg resolves no class.
 
@@ -780,7 +787,7 @@ Then turn each member into a **tombstone** — don't delete it (backlinks to it 
 
 The rollout then references only the combined note, as an ordinary `cross-cutting` task — so `/thread:execute` and its engine need to know nothing about merging.
 
-**After the Pre-flight.** A combined note folds only tasks still in the candidate set (§ 1.5's `queue[]`). It copies each member's `## Decisions (asked ahead <date>)` bullets into its own section of that heading, and each member's `## Decided for you (<date>)` bullets into its own section of that heading (its preamble once), each prefixed `[[<member>]]:`, so the decisions § 1.5 recorded and the calls it ruled reach the one note the engine reads. It is not graded again.
+**After the Pre-flight.** A combined note folds only tasks still in the candidate set (§ 1.5's `queue[]`). It copies each member's `## Decisions (asked ahead <date>)` bullets into its own section of that heading, and each member's `## Decided for you (<date>)` bullets into its own section of that heading (its preamble once), each prefixed `[[<member>]]:`, so the decisions § 1.5 recorded and the calls it ruled reach the one note the engine reads. It also copies each member's `## Approved gates` bullets into its own `## Approved gates` section, verbatim and with no prefix, so a sign-off he gave ahead (§ 1.5's round, an orient or an earlier schedule) never stops the combined task mid-run: the engine matches a declared gate against a bullet's whole text, and a bullet's kind is its leading `<kind>:`, so a `[[<member>]]:` prefix would unsign it. It is not graded again.
 
 **List the result.** Step 8's Decided for you lists each merge applied (members → combined note, plus the affinity signal that fired) and — just as important — the same-file pairs you deliberately *kept apart* and the guard that fired for each. This is where a misread gets caught: a wrong merge is undone by hand (each member's `status: merged` and `merged_into:` reverted, the combined note dropped), and the tombstones keep it trivially reversible.
 

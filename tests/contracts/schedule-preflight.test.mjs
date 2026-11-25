@@ -48,8 +48,9 @@
 //       (no recommendation, the act shown with the question, a typed answer that signs nothing writes nothing, spend
 //       never read, an extra's skipped); **The final call.** and step 8 name `unsigned`; the orient-all form and Under
 //       the chain item 4 pass no `--ask-gates`, so it is first seen mid-run there; § 3.6's **Signed ahead, or named by
-//       the grade** stamps a signed task and never dismisses a `swept` hit; S3.5 and orient §§ 6 and 7 name the
-//       sign-offs and the `unsigned` leavers; ADR 0034's dated line and readiness-grade.md's `gates` say so.
+//       the grade** stamps a signed task, lets a bullet sign its own kind alone and never dismisses a `swept` hit; S3.5
+//       and orient §§ 6 and 7 name the sign-offs and the `unsigned` leavers; ADR 0034's dated line and
+//       readiness-grade.md's `gates` say so.
 // One pure function, check(files), returns the failing rules; every control mutates one place and fails exactly its
 // rule. Reads files only.
 import { test } from 'node:test'
@@ -270,7 +271,8 @@ function check(files) {
     need('p14', name, text, ['passes no `--ask-gates`', 'first seen mid-run'])
   }
   const signedAhead = C(sec(sch, /^### 3\.6\. /).split(/\n\s*\n/).find((p) => p.startsWith('**Signed ahead, or named by the grade')) ?? '')
-  need('p14', "§ 3.6's **Signed ahead, or named by the grade**", signedAhead, ['A hit inside an `## Approved gates` bullet is a gate already signed',
+  need('p14', "§ 3.6's **Signed ahead, or named by the grade**", signedAhead, ["A hit inside an `## Approved gates` bullet of the hit's own kind",
+    'is a gate already signed', 'A hit of another kind inside a bullet signs nothing and keeps its handling',
     'its task is stamped `plan_approval: required` and listed as signed ahead', 'lists under `swept` is never dismissed for naming nothing'])
   const SIGN_OFFS = 'decisions and the sign-offs its grades name, never a confirm'
   const o6 = C(sec(files[ORIENT], /^### 6\. /))
@@ -413,6 +415,8 @@ test('control p14: a gate the grade names left unasked, signed by a typed answer
   only(swap(FILES, SCHEDULE, "an extra's is skipped too, so it leaves unsigned the same way", "an extra's is put too", PF), ['p14'], 'extra put')
   only(swap(FILES, SCHEDULE, "signed ahead in the Pre-flight's round: irreversible: republish the site", 'queued', /^### 8\. /), ['p14'],
     'step 8 signed ahead')
+  only(swap(FILES, SCHEDULE, 'A hit of another kind inside a bullet signs nothing and keeps its handling',
+    'A hit of another kind inside a bullet is signed with it', /^### 3\.6\. /), ['p14'], 'cross-kind bullet')
 })
 
 test('control p12: a new flag on the prior\'s carry, eleven commands, or the defer after the carry fails p12 alone', () => {

@@ -14,7 +14,8 @@ its rules: orient's SKILL.md and `reshuffle.md` point here, one paragraph per se
 B8 → B9. `--look` runs B2's steps 1–4 only, then stops at B10. The default orient path is unchanged by any of it.
 
 **Write surface.** Task notes through `backlog-orient.py`'s verbs and orient § 4's `next-action.py mend`, the
-`estate-dispatch.py record` answers, the forks' own schedule writes, the record note
+`estate-dispatch.py record` answers, B9's signed-gate bullet under a task's `## Approved gates` (**A gate signed**,
+written by hand as schedule § 1.5 writes it: no script verb writes it), the forks' own schedule writes, the record note
 (`Work/Projects/<Folder>/Backlog orients/<D> <Area> Backlog orient.md`), the trigger file through `trigger --write`
 only, and the start stamp through `stamp-start --backlog`. A merge, an unbundle and a phase retire write by reshuffle
 R5.4. Never git or gh of its own.
@@ -121,7 +122,8 @@ R1 and R2 under `--backlog`. The item set is `sweep`'s rows, never a walk of the
   under the same answers.
 - **A fork returns** schedule's summary verbatim and each note's path; its misfits; Pre-flight's `out[]` with each
   why, and its `asks[]` and `index[]` verbatim, with, for each `gate` row of its `index[]`, one line naming the act its
-  grade means, read from the task note (`[[<slug>]] <kind>: <the act>`, schedule § 1.5); its § 3.5 drops, each with
+  grade means, worded from the task note and the grade's `why` (`[[<slug>]] <kind>: <the act>`, schedule § 1.5); its
+  § 3.5 drops, each with
   its matched words; its S3.7 `signIns` and
   S2's `leftOut` rows, each with its line; its Decided for you block; its stop line, or its `joined [[<X>]]` line at a
   join; and **touched**, every task note it wrote.
@@ -282,8 +284,12 @@ cluster by cluster. Each question holds only its tasks.
   with no `wait` line and no `## Answered, waiting` row, so it never holds back the re-stamp. The next Backlog orient
   that batches it puts the question again, as every standalone schedule run does for a gate nobody has cleared.
 - **A gate signed** (`Sign it off now`, or typed words that sign the act its fork's line names) →
-  `- <kind>: <his words> (approved <D>, asked ahead at schedule)` is appended to the task's `## Approved gates` section
-  (created at the note's end when absent), his words his Note or his typed words, else the fork's line. The task is
+  `- <kind>: <the act> (approved <D>, asked ahead at schedule)` is appended to the task's `## Approved gates` section
+  (created at the note's end when absent). `<the act>` is always the act as the fork's line named it, the one he saw,
+  with his Note after it when he gives one (`<the act>; <his Note>`): a Note is usually a condition, so it rides with
+  the act and never replaces it. Typed words that name the act themselves may stand alone. The bullet signs its own
+  kind alone (its leading `<kind>:`): a hit of another kind among its words signs nothing, and that kind keeps its
+  own question (schedule §§ 1.5 and 3.6). The task is
   decided once every gate question of its is signed and every other question of its is decided; it then joins the
   post-question round, whose own `preflight` reads the bullet and whose § 3.6 stamps the task.
 - **A gate left** (`Leave it out`, any other typed answer, or no answer) → nothing is written to the task. Any other

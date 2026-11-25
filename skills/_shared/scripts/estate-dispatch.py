@@ -73,7 +73,7 @@ constants that way): estate-rank.py (ER: Ranker's index, the gradeable rule; slu
 REVIEW_MINUTES), and through ER.load_siblings resolve-target.py's next-action.py (NA: Vault, Note, status_of,
 OPEN_STATUSES, links_in, tags_of) and estate-scan.py (ES: first_link, link_live and in_flight, vault-grammar.md
 § In flight stated once, and still_to_start, its one exception); `preflight` loads ER alone, for slug_key, and with
-`--ask-gates` gated_inputs.py (GI: sweep and body_of, stdlib only, so `preflight` still needs no PyYAML);
+`--ask-gates` gated_inputs.py (GI: sweep, body_of and gate_kind, stdlib only, so `preflight` still needs no PyYAML);
 reconcile-rollout.py (RR: Note, GATE_PENDING_SECTION, GATE_BOUNCE_SECTION,
 PROJECT_ROOT_RE, _shape and _start_unattended, the start stamp's reader; _dep_status and _fold_unit, the dependency
 rule a rollout row waits on); and, for `sessions` and `rank-stamp` only, leg.py (LEG:
@@ -414,8 +414,11 @@ preflight --rank R --scan S --tasks SLUG[,SLUG]... [--kept SLUG]... [--decided S
   0034), next, each candidate whose why is still `ready`, `decided` or `undecided`, in --tasks order, has its gates
   read (gates_of): a `credential` or `irreversible` kind its rank row's `gates` names (ASK_GATE_KINDS; a `gates` that
   is not a list names none, and a task naming none has no note read; `spend` is never read, Chorus ADR 0108 d4) is
-  swept when gated_inputs.py's one-argument sweep of the note's body hits that kind anywhere (an `## Approved gates`
-  bullet's kind word included, so a signed gate is swept), else open. One still in with an open kind leaves as
+  swept when gated_inputs.py's one-argument sweep hits that kind in the note's body outside its `## Approved gates`
+  section, or when a line of that section is a gate of that kind (its leading `<kind>:`, GI.gate_kind: a signed
+  gate), else open. The section (APPROVED_GATES_SECTION, the first such heading outside a fence, to the next `## `)
+  is read apart from the rest: a bullet signs its own kind alone, and its free words are swept for no kind, so an
+  `irreversible:` bullet that names a service never clears `credential`. One still in with an open kind leaves as
   `unsigned`, its reason UNSIGNED_GATE naming the open kinds, or UNSIGNED_NOTE, every named kind open, when the note
   cannot be read (fail closed); an `undecided` one keeps its why. Kept, Orient, waiting, unreadable, ungraded and
   unrecorded candidates, and every one already out as `dependency`, are never read. Then a candidate still in leaves,
@@ -433,7 +436,8 @@ preflight --rank R --scan S --tasks SLUG[,SLUG]... [--kept SLUG]... [--decided S
   decisions and the sign-offs his grades name are asked: the rank's decisions[] hold only his (ADR 0054). Options are
   built as rounds builds them (label_for, the recommendation first and marked, framing()'s descriptions); HEADERS
   gives each header. An ungraded answer is never recorded (schedule § 1.5), and a gate answer goes through no
-  `record`: schedule § 1.5 writes a signed gate's `## Approved gates` bullet, which the final call's sweep then hits.
+  `record`: schedule § 1.5 writes a signed gate's `## Approved gates` bullet, which the final call then reads as
+  signing its kind.
   Output: {schema, today, counts {candidates, graded, ready, oneCall, grill, orient, ungraded, kept, decided, in, out}
   (graded, the grades and ungraded over the candidates not kept), tasks[] {slug, grade, decided, in, why, via?,
   reason?, gates?, swept?}, queue[] (the slugs in, in --tasks order), out[] {slug, grade, why, via?, reason?, gates?,
@@ -441,8 +445,9 @@ preflight --rank R --scan S --tasks SLUG[,SLUG]... [--kept SLUG]... [--decided S
   slug, note, decision {question, options[], recommendation, why?, fork?} (an ungraded one's synthesised from
   UNGRADED_QUESTION; a `gate` row has none), gate? (a `gate` row's kind), labels[], texts[], recommended (texts[0];
   null for a `gate` row), k?, n?, fork?}, warnings[]}. gates (the kinds still open) is on an `unsigned` row alone, and
-  swept (the named kinds the sweep hit) on a tasks[] row whose list is not empty; both only with --ask-gates. It
-  still writes nothing, and counts is unchanged.
+  swept (the named kinds not open: hit outside the section, or signed by a bullet of their own) on a tasks[] row whose
+  list is not empty; both only with --ask-gates. It still writes nothing, and counts' keys are unchanged (its `in` and
+  `out` move with the tasks the flag leaves out).
 """
 import argparse
 import datetime
@@ -507,18 +512,22 @@ UNRECORDED_ANSWER = "no recorded answer to: {question}"
 UNRECORDED_RULING = "no `orient ruling:` line for its fork: {fork}"
 UNRECORDED_NOTE = "its note cannot be read"
 # `preflight --ask-gates` (p56-2, ADR 0034): a `credential` or `irreversible` kind a task's grade names (its rank row's
-# `gates`) that gated_inputs.py's sweep reads no hit of in its note is open. The task leaves as `unsigned` (UNSIGNED_GATE,
+# `gates`) is open when gated_inputs.py's sweep reads no hit of it in the note outside `## Approved gates` and no line
+# of that section is a gate of that kind. The task leaves as `unsigned` (UNSIGNED_GATE,
 # its kinds "an irreversible", "a credential" or "a credential and an irreversible"; UNSIGNED_NOTE when the note cannot
 # be read), and each open kind is one sign-off question, with no recommendation (ADR 0008). Spend is never read here
-# (Chorus ADR 0108 d4). A signed gate is an `## Approved gates` bullet, which the sweep hits by its kind word.
+# (Chorus ADR 0108 d4). A signed gate is an `## Approved gates` bullet: it signs its own kind (its leading `<kind>:`)
+# and no other, whatever its words hit. APPROVED_GATES_SECTION is reconcile-rollout.py's heading of that name, copied:
+# `preflight` loads no reconcile-rollout.py.
 GATED_INPUTS_PY = os.path.join(HERE, "gated_inputs.py")
 ASK_GATE_KINDS = ("credential", "irreversible")
+APPROVED_GATES_SECTION = "## Approved gates"
 GATE_OPTIONS = ("Sign it off now", "Leave it out")
 GATE_QUESTION = ("its grade names {a} {kind} sign-off its note never words{says}. The act is named above: sign it off "
                  "now, or leave this task out of this rollout?")
 GATE_SAYS = " (the grade says: {why})"  # the rank row's `why`, the grader's reason, never the act being signed
-GATE_DESCRIPTIONS = ("Signs exactly the act named above: the sign-off is written into the task note now, in your words "
-                     "when you give them, and the task queues",
+GATE_DESCRIPTIONS = ("Signs exactly the act named above: the sign-off is written into the task note now, the act with "
+                     "your Note beside it when you give one, and the task queues",
                      "Leaves this task out of this rollout, with every task that depends on it; nothing is written, and "
                      "the next schedule puts the sign-off again")
 UNSIGNED_GATE = "its grade names {kinds} sign-off its note never words, and none is signed"
@@ -2693,11 +2702,14 @@ class Preflight:
 
     def gates_of(self, k):
         """(open, swept, reason) for a candidate under `--ask-gates` (p56-2): named is each ASK_GATE_KINDS kind its rank
-        row's `gates` holds (a `gates` that is not a list names none, and with none the note is never read); swept the
-        named kinds GI.sweep(GI.body_of(<note>)) hits, the one-argument sweep, which reads no settings file; open the
-        named kinds it does not. A hit anywhere in the body counts, an `## Approved gates` bullet's kind word included,
-        so a signed gate is swept. The note is read as unrecorded() reads it; one that cannot be read is open on every
-        named kind, its reason UNSIGNED_NOTE (fail closed), else the reason is UNSIGNED_GATE's."""
+        row's `gates` holds (a `gates` that is not a list names none, and with none the note is never read). The body
+        (GI.body_of) is read in two parts: its `## Approved gates` section (section_span: the first such heading outside
+        a fence, to the next `## `) and the rest. swept is each named kind GI.sweep(<the rest>) hits, the one-argument
+        sweep, which reads no settings file, or a line of the section signs (GI.gate_kind(<line>) is that kind: its
+        leading `<kind>:`); open the named kinds neither holds. A bullet signs its own kind alone: the section's words
+        are swept for no kind, so one kind's signed bullet never clears another's gate. The note is read as
+        unrecorded() reads it; one that cannot be read is open on every named kind, its reason UNSIGNED_NOTE (fail
+        closed), else the reason is UNSIGNED_GATE's."""
         gates = self.rows[k].get("gates")
         named = [g for g in ASK_GATE_KINDS if isinstance(gates, list) and g in gates]
         if not named:
@@ -2708,8 +2720,13 @@ class Preflight:
                 text = f.read()
         except (OSError, TypeError, ValueError):  # TypeError: no vault or no note; ValueError: not UTF-8
             return named, [], UNSIGNED_NOTE
-        hits = self.GI.sweep(self.GI.body_of(text))
-        swept = [g for g in named if hits.get(g)]
+        lines = self.GI.body_of(text).split("\n")
+        span, signed = section_span(lines, 0, APPROVED_GATES_SECTION), set()
+        if span:
+            signed = {self.GI.gate_kind(ln) for ln in lines[span[0] + 1:span[1]]}
+            lines = lines[:span[0]] + lines[span[1]:]
+        hits = self.GI.sweep("\n".join(lines))
+        swept = [g for g in named if hits.get(g) or g in signed]
         opened = [g for g in named if g not in swept]
         kinds = " and ".join("%s %s" % (article(g), g) for g in opened)
         return opened, swept, UNSIGNED_GATE.format(kinds=kinds) if opened else None
