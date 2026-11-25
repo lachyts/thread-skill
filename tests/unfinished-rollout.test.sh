@@ -3532,8 +3532,45 @@ has "$(skpara '**S3.7. ' '**S4. ')" "gets one line under its task note's \`$LO\`
   "NY9: … schedule S3.7 writes LEFT_OUT_SECTION ($LO), one \`- <YYYY-MM-DD> <its leftOut line>\` line per row left out"
 has "$(skpara '**S4. ' '**S5. ')" "writes the \`$LO\` line (S3.7) of each row its \`leftOut\` names" \
   "NY9: … and a later S4 re-run writes it for each row it leaves out"
-has "$(skpara '**S6. ' '**S7. ')" "its \`$LO\` section, when an earlier run (S3.7 or S4) wrote one, is removed" \
+has "$(skpara '**S6. ' '**S7. ')" "its \`$LO\` section, when S2.5, S3.7 or S4 wrote one, on this run or an earlier one, is removed" \
   "NY9: … and S6 removes it from each member it stamps"
+# NY9 (p56-3): a row left out for an unsigned gate is listed by the first state that holds: its own hold (the approve
+# act, the line built from the gates still unsigned), a dependant's row's hold, then a signed gate line's steer act.
+GI="$root/skills/_shared/scripts/gated_inputs.py"
+SC="$root/skills/_shared/scripts/serial-chains.py"
+NG='irreversible: publish the page live'
+NK='credential: the Stripe live keys'
+nfr() { printf '; /thread:schedule --tasks %s asks you to approve it, and chains it once approved' "$1"; }
+# lo <file> <section> <lines> — append a section to a task note
+lo() { printf '\n%s\n\n%s\n' "$2" "$3" >> "$T/$1"; }
+scen ny9g
+mkt u1.md - open "$DEMO"; lo u1.md '## Left out at schedule' "- 2026-11-20 u1: unsigned gate: $NG$(nfr u1)"
+mkt u2.md - open "$DEMO"; lo u2.md '## Left out at schedule' "- 2026-11-20 u2: unsigned gate: $NG$(nfr u2)"
+lo u2.md '## Gated inputs (awaiting sign-off)' "- $NG"
+lo u2.md '## Approved gates' '- irreversible: delete the old branch (approved 2026-11-21, asked ahead at orient)'
+DEP="d1: depends on [[u1]], left out: approve [[u1]]'s unsigned gate (/thread:schedule --tasks u1 asks), then /thread:orient --steer"
+mkt d1.md - open "$DEMO"; lo d1.md '## Left out at schedule' "- 2026-11-20 $DEP"
+mkt u3.md - open "$DEMO"
+lo u3.md '## Left out at schedule' "- 2026-11-20 u3: unsigned gate: $NG$(nfr u3); also needs mcp__x__*, which did not read signed in from its launch cc-a from /f: sign in to x, then /thread:orient --steer"
+lo u3.md '## Approved gates' "- $NG (approved 2026-11-21, asked ahead at schedule)"
+mkt u4.md - open "$DEMO"
+lo u4.md '## Left out at schedule' "- 2026-11-18 u4: unsigned gate: $NK$(nfr u4)
+- 2026-11-20 u4: needs mcp__x__*, which did not read signed in: sign in to x, then /thread:orient --steer"
+ny
+ok "$(rows)" "irreversible|left-out|None|d1|2026-11-20 $DEP|approve [[u1]]'s gate: /thread:schedule --tasks u1 asks it; then /thread:orient --steer
+irreversible|left-out|None|u1|u1: unsigned gate: $NG$(nfr u1)|approve the gate: /thread:schedule --tasks u1 asks it
+irreversible|left-out|None|u2|u2: unsigned gate: $NG$(nfr u2)|approve the gate: /thread:schedule --tasks u2 asks it
+sign-in|left-out|None|u3|2026-11-20 u3: unsigned gate: $NG$(nfr u3); also needs mcp__x__*, which did not read signed in from its launch cc-a from /f: sign in to x, then /thread:orient --steer|sign in, then /thread:orient --steer
+credential|left-out|None|u4|u4: unsigned gate: $NK$(nfr u4)|approve the gate: /thread:schedule --tasks u4 asks it" \
+  "NY9: a held row reads the approve act with its gate line, by its own hold (a pending bullet's too), a dependant by its row's; a signed gate line with a sign-in clause reads the sign-in act; a gate entry under a later sign-in entry still lists the gate"
+lo u1.md '## Approved gates' "- $NG (approved 2026-11-21, asked ahead at schedule)"
+ny
+ok "$(rows | grep -E '^[^|]*\|[^|]*\|[^|]*\|(d1|u1)\|')" "hands-on|left-out|None|d1|2026-11-20 $DEP|/thread:orient --steer
+hands-on|left-out|None|u1|2026-11-20 u1: unsigned gate: $NG$(nfr u1)|/thread:orient --steer" \
+  "NY9: … once the row's bullet is written, its dependant and the signed row read the steer act alone"
+ok "$(sed -n 's/^LEFT_OUT_SECTION = "\([^"]*\)".*/\1/p' "$SC")" "$LO" "NY9: … serial-chains.py's LEFT_OUT_SECTION is this script's"
+GT=$(sed -n 's/^GATE_TOKEN = "\([^"]*\)".*/\1/p' "$GI")
+has "$(skpara '**S4. ' '**S5. ')" "\`<slug>: $GT: <gate>" "NY9: … and schedule S4 names the gate line gated_inputs.py's GATE_TOKEN ($GT) marks"
 
 # NY10: an archived rollout, or a done one, is never read, whatever its tasks still hold.
 scen ny10

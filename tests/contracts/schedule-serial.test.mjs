@@ -1,6 +1,6 @@
 // Schedule writes serial rollouts (ADR 0040, p24-2): the prose and templates around serial-chains.py and the
 // serial check (their behaviour is pinned by tests/serial-chains.test.sh and tests/unfinished-rollout.test.sh S1-S12).
-// Eleven rules, one pure function, check(files), over { relPath: text }:
+// Twelve rules, one pure function, check(files), over { relPath: text }:
 //   t1  the templates: the parallel template says `shape: parallel`; the serial one says `shape: serial`,
 //       `protocol_version: 5`, `incomplete: true` and `surfaces:` + `{{SURFACES}}`, holds none of the parallel
 //       engine's keys (the completion verifier's three commented lines aside, ADR 0055, which it must hold), and its
@@ -45,7 +45,16 @@
 //       is in `--tasks`; S4 reads its chain-level values from the last S2 JSON and asks nothing again; S7's Sign-ins line;
 //       Scope; orient § 7; orient-all § 6's **Sign-ins first** before batch 1 and answer 15's flags; the Backlog
 //       orient's item 23, B5 and B9 (its list over signed-out pairs alone); and legs.md § Preflight names itself the
-//       backstop.
+//       backstop;
+//   t12 an unsigned gate holds its row (p56-3, ADR 0034): S2's `--unsigned` flag and its carry while its member is in
+//       `--tasks`; S2.5 between S2 and S3 (every row of the first S2 JSON's `leftOut` but one already recorded, the
+//       sign-off on a standalone run only with the gate's cite and no recommendation, its bullet written at once and
+//       verbatim, a `pending: true` row's bullet removed by hand, only that one, an emptied section with it, a removal
+//       signing nothing); S4's paragraph worded by act, its sign-offs written at once, spend never held, a test Login
+//       recorded, no chain when every row leaves, nothing asked under the parents; S3.7, S6, S7 and § Scope naming
+//       S2.5's writes; § 3.6's record sentence worded by act; legs.md's declaration in a bullet's words; the Serial
+//       regression bullet; ADR 0034's dated line; and the callers (Backlog item 23 and § B9, orient-all answer 15,
+//       orient § 7, repair's gate bullet).
 // Each rule has a mutation control that must fail with exactly that rule. Phrase checks run on collapsed text.
 // __pycache__, .DS_Store and any file holding a NUL byte are skipped. Reads files only.
 import { test } from 'node:test'
@@ -67,6 +76,7 @@ const REPAIR = 'skills/repair/SKILL.md'
 const ORIENT_ALL = 'skills/orient-all/SKILL.md'
 const BACKLOG = 'skills/orient/backlog.md'
 const LEGS = 'skills/execute/legs.md'
+const ADR34 = 'docs/adr/0034-a-gate-never-holds-an-unattended-rollout.md'
 const INTERIM = 'no serial writer yet'
 
 const SKILL_TESTS = /^skills\/[^/]+\/tests\//
@@ -89,7 +99,7 @@ function readTree() {
     }
   }
   for (const d of ['skills', 'hooks']) walk(d)
-  for (const f of ['README.md', CONTEXT, ADR40]) add(f)
+  for (const f of ['README.md', CONTEXT, ADR40, ADR34]) add(f)
   return files
 }
 
@@ -286,6 +296,52 @@ function check(files) {
   need('t11', `${LEGS} § Preflight`, C(section(files[LEGS], /^## Preflight$/)), ['backstop', 'S3.7', '`required_mcp`', 'Chain copy',
     'Login', '`cx-*`'])
 
+  // ---- t12: an unsigned gate holds its row (p56-3, ADR 0034) ----
+  need('t12', 'S2', s2, ['[--unsigned <slug>=<gate>]…', 'and each earlier `--unsigned` whose member is still in `--tasks`'])
+  const iS2 = serialPath.indexOf('**S2. Plan.**')
+  const iS25 = serialPath.indexOf('**S2.5. Held rows.**')
+  const iS3 = serialPath.indexOf('**S3. Live chains.**')
+  if (iS2 < 0 || iS25 < 0 || iS3 < 0 || !(iS2 < iS25 && iS25 < iS3)) flag('t12', `S2.5 is not between S2 and S3 (${iS2}, ${iS25}, ${iS3})`)
+  need('t12', 'S2.5', para(serialPath, '**S2.5. Held rows.**'), ['reads the first S2 JSON, before any flag is passed',
+    'of every row that `leftOut` names, dependants included, except a direct row whose every `unsigned` row reads `from: left-out`',
+    'On a standalone run only', 'Owner *yours*', '_shared/asking.md', 'no recommendation', 'at once, before the S2 re-run',
+    '`- <gate>[; <his Note>] (approved <YYYY-MM-DD>, asked ahead at schedule)`', '`<gate>` verbatim from the JSON',
+    'reads `pending: true`, whatever its `from`', '`approve-gates` refuses a note that is not `gate-pending`',
+    'Only that bullet goes, a pending spend bullet stays', 'an emptied `## Gated inputs (awaiting sign-off)` section is removed',
+    'signs nothing', 'What S2.5 wrote stays when a later step stops the run', 'it puts no question'])
+  need('t12', "S4's unsigned-gate paragraph", para(serialPath, '**An unsigned gate holds its row'), ['credential or irreversible',
+    'unless a bullet of its own kind signs that same act', 'never waits for S6', 'is written at once',
+    'before any re-run and whether its row stays or leaves', 'no declared test Login', "`--unsigned '<slug>=<kind>: <the act>'`",
+    '`<slug>: unsigned gate: <gate>…`', 'no chain is written', 'Spend is never left out',
+    'Where nothing is asked (orient § 7, orient-all § 6, the Backlog orient), every such hit goes as `--unsigned`'])
+  need('t12', "S3.7's leave-out paragraph", para(serialPath, 'Two kinds of pair go as'), [
+    'a direct row whose every `unsigned` row reads `from: left-out` gets no new line', 'keeps a § 3.6 sign-off, whose bullet S4 wrote at once',
+    'and what S2.5 wrote on his answers'])
+  need('t12', 'S6', s6, ['when S2.5, S3.7 or S4 wrote one, on this run or an earlier one', 'written by S4 at once'])
+  need('t12', 'S7', para(serialPath, '**S7. Summary.**'), ["S2.5's answers with his words",
+    'each sign-off S2.5 or S4 wrote on a row that stayed out', 'any § 3.5 answer or named spend limit dropped unstamped'])
+  need('t12', `${SCHEDULE} § Scope`, scope, ['S2.5 (p56-3)', 'before any note is written',
+    'S4 writes each sign-off of its batch into `## Approved gates` at once'])
+  const record = sentences(section(schedule, /^### 3\.6\. /)).find((x) => x.includes('`## Left out at schedule` gate line')) ?? ''
+  need('t12', "§ 3.6's record sentence", record, ['is listed as signed ahead only when a bullet of its own kind signs that same act',
+    'else it is an unsigned hit like any other'])
+  if (record.includes('would have left it out')) flag('t12', "§ 3.6's record sentence infers a signing from the plan")
+  need('t12', `${LEGS} **Gates, before any write.**`, para(files[LEGS], '**Gates, before any write.**'), [
+    "a gate one of its bullets already signs is declared in that bullet's words"])
+  need('t12', 'Serial regression', C(section(schedule, /^### Serial regression/) ?? ''), [
+    '- A one-task cluster with an unsigned irreversible gate writes no chain', 'a second schedule run writes none either',
+    'once the gate is signed in `## Approved gates`, the chain is written (p56-3)'])
+  need('t12', 'ADR 0034', C(files[ADR34] ?? ''), ['(Amended 2026-11-25 by p56-3:', 'Spend is never held',
+    'The wait notifies nobody (ADR 0075)'])
+  need('t12', `${BACKLOG} item 23`, C(slice(section(files[BACKLOG], /^## B6\. /), /^23\. /, null)), ['S2.5 and S4 put no question either'])
+  need('t12', `${BACKLOG} § B9`, C(section(files[BACKLOG], /^## B9\. /)), [
+    'its own S2 leaves out again a row its record still holds for an unsigned gate'])
+  need('t12', `${ORIENT_ALL} answer 15`, C(slice(section(files[ORIENT_ALL], /^### 6\. /) ?? '', /^ {3}15\. /, /^ {3}16\. /)), [
+    'S2.5 and S4 put no question either'])
+  need('t12', `${ORIENT} § 7`, C(section(files[ORIENT], /^### 7\./)), ["Schedule's S2.5 and S4 put no question here",
+    'schedule leaves the row out of the chain with its line instead'])
+  need('t12', `${REPAIR} gate bullet`, C(files[REPAIR]), ['schedule chains it again only once that gate is signed'])
+
   return { fails: [...fails].sort(), details }
 }
 
@@ -297,7 +353,7 @@ test('schedule writes serial rollouts: templates, the Serial path, § 0, execute
 })
 
 test('the scan reads every file the rules need', () => {
-  for (const f of [SCHEDULE, TEMPLATE, SERIAL, EXECUTE, ORIENT, GRAMMAR, CONTEXT, STATUS, REPAIR, ORIENT_ALL, BACKLOG, LEGS, 'README.md']) {
+  for (const f of [SCHEDULE, TEMPLATE, SERIAL, EXECUTE, ORIENT, GRAMMAR, CONTEXT, STATUS, REPAIR, ORIENT_ALL, BACKLOG, LEGS, ADR34, 'README.md']) {
     assert.ok(f in real, `${f} is not scanned`)
   }
 })
@@ -556,4 +612,48 @@ test('control: an S3.7 that reads any Connected line as signed in fails t11', ()
 
 test('control: a Backlog B9 whose list holds a pair whose check could not run fails t11', () => {
   only(swap(BACKLOG, 'a pair whose check could not run is in neither', 'a pair whose check could not run is in both'), ['t11'], 'B9 cannot run')
+})
+
+// t12 (p56-3): each control cuts one place and fails t12 alone.
+const cut = (rel, from, to) => {   // the span from `from` up to and through `to`, removed
+  const i = real[rel].indexOf(from)
+  const j = real[rel].indexOf(to, i)
+  assert.ok(i >= 0 && j > i, `control setup: ${from.slice(0, 60)} … ${to.slice(0, 40)} not in ${rel}`)
+  return { [rel]: real[rel].slice(0, i) + real[rel].slice(j + to.length) }
+}
+
+test('control: an S4 rule read by kind, not by act, fails t12', () => {
+  only(swap(SCHEDULE, 'unless a bullet of its own kind signs that same act; a bullet of the kind that signs another act signs\nnothing here',
+    'unless a bullet of its own kind is in `## Approved gates`'), ['t12'], 'by kind')
+})
+
+test("control: an S4 whose sign-off waits for S6 fails t12", () => {
+  only(cut(SCHEDULE, 'On this path a sign-off never waits for S6', 'whether its row stays or leaves. '), ['t12'], 'at once')
+})
+
+test("control: a § Scope without S2.5's and S4's writes fails t12", () => {
+  only(cut(SCHEDULE, " S2's `serial-chains.py` also reads each member's", 'into `## Approved gates` at once.'), ['t12'], 'scope')
+})
+
+test("control: a § 3.6 record sentence that reads a gate signed since fails t12", () => {
+  only(swap(SCHEDULE, "is the record's: it is listed as signed ahead only when a bullet of its own kind signs that same act, else it is an unsigned hit like any other.",
+    'is a gate signed since (`plan` would have left it out otherwise), listed as signed ahead.'), ['t12'], 'signed since')
+})
+
+test("control: a legs.md that never declares a gate in its bullet's words fails t12", () => {
+  only(cut(LEGS, " Read `## Approved gates` first: a gate one of its bullets", 'and is a new gate.'), ['t12'], 'legs')
+})
+
+test('control: an S2.5 moved after S3 fails t12', () => {
+  const text = real[SCHEDULE]
+  const i = text.indexOf('**S2.5. Held rows.**')
+  const j = text.indexOf('**S3. Live chains.**')
+  const k = text.indexOf('**S3.5. Pre-flight.**')
+  assert.ok(i >= 0 && j > i && k > j, 'control setup: S2.5, S3 and S3.5 in order')
+  only({ [SCHEDULE]: text.slice(0, i) + text.slice(j, k) + text.slice(i, j) + text.slice(k) }, ['t12'], 'S2.5 moved')
+})
+
+test('control: a Backlog B9 that never leaves a gate row out again fails t12', () => {
+  only(swap(BACKLOG, 'and its own S2 leaves out again a row its record\n  still holds for an unsigned gate, with its dependants (p56-3); a row',
+    'and a row'), ['t12'], 'B9 gate')
 })

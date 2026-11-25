@@ -418,13 +418,52 @@ a reading needs it (part 1), with no git and no bytecode.
    schedule § 3.6 and orient reshuffle R3 (c) record ahead a credential hit whose reading names only declared Logins.
    A record ahead is only a hint, never a grant: the stop re-reads the plan's declared gate in full and asks then.
 
+6. The unsigned hold (p56-3, ADR 0034's 2026-11-25 amendment): a serial row that a credential or irreversible gate
+   holds out of every chain until he signs it. serial-chains.py plan leaves such a row out (its header's Unsigned gates
+   paragraph) and unfinished-rollout.py needs-you lists it; both read it here, the one copy. Spend is never held: it is
+   recorded, never asked (Chorus ADR 0108 d4), and the Leg's `approve-gates --standing` reads it at its claim.
+   - HOLD_KINDS ("credential", "irreversible"): the kinds no standing approval signs ahead.
+   - `hold_kind(gate)`: gate_kind(gate) when it reads `spend`, `credential` or `irreversible`, else `irreversible`
+     (fail closed, as needs-you already reads a pending gate).
+   - The `## Left out at schedule` line forms, built and read here only, `<gate>` the gate as written (`<kind>: <act>`,
+     execute § 3.7's grammar). The direct line (gate_line): `<slug>: unsigned gate: <gate>[ | <gate>]…;
+     /thread:schedule --tasks <slug> asks you to approve it, and chains it once approved`, which serial-chains.py may
+     follow with a sign-in's `; also needs …` clause. A dependant's remedy (gate_remedy): `approve [[<row>]]'s unsigned
+     gate (/thread:schedule --tasks <row> asks)`, which holds no kind word, so it puts no sweep hit into a note that has
+     no gate. GATE_TOKEN (`unsigned gate`) marks a line of either form. The direct line's fixed frame and the whole
+     dependant line give no sweep hit, no schedule § 3.5 phrase and no plain-ask phrase (pinned in
+     tests/gated-inputs.test.mjs): a direct line's only hits are its gate's own words.
+   - `read_gate_line(entry)` -> {date, gates, clause} for a direct line (a list marker and a leading `YYYY-MM-DD`
+     allowed, date None without one; clause the text after the frame's `; `, or None), else None.
+     `dependant_row(entry)`: the `<row>` a dependant's remedy names, else None. A gate holding ` | ` or the frame's
+     own words reads back cut short: equal-text signing then fails, and the date rule still signs it.
+   - `approved_date(line)`: the `YYYY-MM-DD` after `(approved ` in the line's closing annotation, else None.
+   - `unsigned_hold(pending_text, approved_text, left_out_text, norm)` -> [{kind, gate, from, pending}], `norm` the
+     gate normaliser (reconcile-rollout.py's _norm_gate: the claim's compare). The approved lines are every non-empty
+     line of `## Approved gates`, as leg.py claim and approve-gates read them.
+       Left-out gates (`from: left-out`): every gate of every direct-form entry of `## Left out at schedule` (each list
+       item with its continuation lines), each entry by its own date, never only the latest; a sign-in or dependant
+       entry hides nothing and holds nothing. A gate is signed when an approved line equals it by norm, or when an
+       approved line of the same hold_kind carries an approved_date on or after the entry's date and is not a standing
+       approval's (`under the standing approval` in its annotation: an agent's signing, no sign-off of his). An entry
+       or a bullet with no readable date signs by equal text only. The accepted residual: a bullet carries no link to
+       its act, so a later bullet of his of the same kind that names another act reads the entry signed; schedule S4's
+       by-act check is the guard for that case.
+       Pending gates (`from: set-aside`): every non-empty line of `## Gated inputs (awaiting sign-off)`, its list
+       marker stripped. One holds unless an approved line equals it by norm (exact, as the claim compares): the date
+       rule never signs a pending gate.
+       A `spend` gate is skipped wherever it is read. Rows are deduped by norm(gate), the first kept: the left-out rows
+       in entry order, then the pending rows. `pending` is true on any row whose gate is also an unsigned pending gate,
+       so schedule S2.5's sign-off removes that bullet, whatever the row's `from`.
+
 Importable (reconcile-rollout.py loads it with importlib, beside rollout-settings.py): sweep, hits, body_of, SPEND,
 OLD_SPEND, CREDENTIAL, IRREVERSIBLE, OLD_CREDENTIAL, OLD_IRREVERSIBLE, IRREVERSIBLE_WORDS, CREDENTIAL_THINGS,
 IRREVERSIBLE_THINGS, SERVICES, UNIT_NOUNS, PERIOD_ADVERBS, RATE_UNITS, RATE_RE, CAP_ONLY_LEFTOVER_RES,
 PER_UNIT_OUTSIDE_RE, exposure, standing_exposure, widest_exposure, CEILING_USD, UNCAPPED, covered, annotation,
 format_usd, gate_kind, credential_reading, read_env, env_proof, bootstrap_refreshes, credential_covered,
 credential_annotation, MAX_ENV_BYTES, DENY_NOUNS, has_login_phrase, login_reading, login_annotation, NO_LOGINS_WHY,
-APPROVED_SUFFIX_RE, declared_logins.
+APPROVED_SUFFIX_RE, declared_logins, HOLD_KINDS, GATE_TOKEN, hold_kind, gate_line, gate_remedy, read_gate_line,
+dependant_row, approved_date, unsigned_hold.
 """
 import base64
 import binascii
@@ -1777,6 +1816,121 @@ def login_annotation(date, names, source):
     if text.count(")") != 1:
         raise ValueError(f"an annotation part holds a ')': {date!r}, {names!r}, {source!r}")
     return text
+
+
+# ---- the unsigned hold (p56-3, ADR 0034's 2026-11-25 amendment) ---------------------------------------------------
+
+HOLD_KINDS = ("credential", "irreversible")    # the kinds no standing approval signs ahead; spend is never one
+GATE_TOKEN = "unsigned gate"                   # marks a `## Left out at schedule` gate line of either form
+GATE_FRAME = "; /thread:schedule --tasks {slug} asks you to approve it, and chains it once approved"
+STANDING_MARK = "under the standing approval"  # annotation() and its kin: an agent's signing, never his sign-off
+_ENTRY_RE = re.compile(r"^\s*(?:[-*+]|\d+[.)])\s+")
+_ENTRY_DATE_RE = re.compile(r"(\d{4}-\d{2}-\d{2})\s+")
+_APPROVED_DATE_RE = re.compile(r"\(approved (\d{4}-\d{2}-\d{2})(?![0-9])[^)]*\)\s*$", re.I)
+_GATE_LINE_RE = re.compile(r"(?P<slug>[^\s:]+): " + re.escape(GATE_TOKEN) + r": (?P<gates>.*?)"
+                           + re.escape(GATE_FRAME).replace(re.escape("{slug}"), r"(?P=slug)") + r"(?:; (?P<clause>.*))?\Z",
+                           re.S)
+_DEPENDANT_RE = re.compile(r"\bleft out: approve \[\[(?P<row>[^\]]+)\]\]'s " + re.escape(GATE_TOKEN) + r" \(")
+
+
+def hold_kind(gate):
+    """The gate's kind as the hold reads it (module docstring, 6): spend, credential or irreversible; any other kind,
+    or none, reads irreversible (fail closed)."""
+    kind = gate_kind(gate)
+    return kind if kind in ("spend",) + HOLD_KINDS else "irreversible"
+
+
+def gate_line(slug, gates):
+    """The direct `## Left out at schedule` line of a row its unsigned gates hold (module docstring, 6)."""
+    return f"{slug}: {GATE_TOKEN}: {' | '.join(gates)}" + GATE_FRAME.format(slug=slug)
+
+
+def gate_remedy(row):
+    """A dependant's remedy for a row its unsigned gates hold: no kind word, so it puts no sweep hit in its note."""
+    return f"approve [[{row}]]'s {GATE_TOKEN} (/thread:schedule --tasks {row} asks)"
+
+
+def _entry_parts(entry):
+    """(date | None, the line): an entry with its list marker and a leading `YYYY-MM-DD` stripped."""
+    s = _ENTRY_RE.sub("", str(entry or "").strip(), count=1)
+    m = _ENTRY_DATE_RE.match(s)
+    return (m.group(1), s[m.end():]) if m else (None, s)
+
+
+def read_gate_line(entry):
+    """{date, gates, clause} for a direct gate line (module docstring, 6), else None."""
+    date, line = _entry_parts(entry)
+    m = _GATE_LINE_RE.match(line)
+    if m is None:
+        return None
+    return {"date": date, "gates": [g.strip() for g in m.group("gates").split(" | ") if g.strip()],
+            "clause": m.group("clause")}
+
+
+def dependant_row(entry):
+    """The row a dependant's gate remedy names (module docstring, 6), else None; a direct line is no dependant's."""
+    _date, line = _entry_parts(entry)
+    if _GATE_LINE_RE.match(line):
+        return None
+    m = _DEPENDANT_RE.search(line)
+    return m.group("row") if m else None
+
+
+def approved_date(line):
+    """The `YYYY-MM-DD` after `(approved ` in the line's closing annotation, else None."""
+    m = _APPROVED_DATE_RE.search(str(line or "").rstrip())
+    return m.group(1) if m else None
+
+
+def _standing(line):
+    m = APPROVED_SUFFIX_RE.search(str(line or ""))
+    return bool(m) and STANDING_MARK in m.group(0).lower()
+
+
+def _entries(text):
+    """A section's list entries, each with its continuation lines joined by one space (needs-you's log_entries)."""
+    out = []
+    for line in str(text or "").split("\n"):
+        if _ENTRY_RE.match(line) or not out:
+            out.append(line.strip())
+        elif line.strip():
+            out[-1] = f"{out[-1]} {line.strip()}".strip()
+    return [e for e in out if e]
+
+
+def unsigned_hold(pending_text, approved_text, left_out_text, norm):
+    """[{kind, gate, from, pending}]: the gates that still hold a task's row (module docstring, 6), read from its
+    `## Gated inputs (awaiting sign-off)`, `## Approved gates` and `## Left out at schedule` texts; `norm` normalises a
+    gate as the claim compares it."""
+    approved = [line.strip() for line in str(approved_text or "").split("\n") if line.strip()]
+    exact = {norm(line) for line in approved}
+    dated = [(hold_kind(line), approved_date(line)) for line in approved if not _standing(line)]
+    pending = []
+    for line in str(pending_text or "").split("\n"):
+        gate = re.sub(r"^[-*]\s+", "", line.strip())
+        if gate and hold_kind(gate) != "spend" and norm(gate) not in exact:
+            pending.append(gate)
+    still = {norm(g) for g in pending}
+    rows, seen = [], set()
+
+    def add(gate, src):
+        key = norm(gate)
+        if key not in seen:
+            seen.add(key)
+            rows.append({"kind": hold_kind(gate), "gate": gate, "from": src, "pending": key in still})
+
+    for entry in _entries(left_out_text):
+        read = read_gate_line(entry)
+        for gate in (read or {}).get("gates", []):
+            kind = hold_kind(gate)
+            if kind == "spend" or norm(gate) in exact:
+                continue
+            if read["date"] and any(k == kind and d is not None and d >= read["date"] for k, d in dated):
+                continue
+            add(gate, "left-out")
+    for gate in pending:
+        add(gate, "set-aside")
+    return rows
 
 
 # ---- CLI --------------------------------------------------------------------------------------------------------

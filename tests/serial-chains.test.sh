@@ -54,6 +54,13 @@
 #        session-lane member is never left out, but carries the closure to a member depending on it (directly or
 #        through another lane member); a key that matches nothing WARNs; a refused alias (no folder) never matches a
 #        folder key, and exits 3 with no traceback
+#   P12  an unsigned gate holds its row (p56-3, ADR 0034; gated_inputs.py's unsigned_hold): `--unsigned <slug>=<gate>`
+#        leaves a one-task cluster out with its `unsigned gate` line and writes no chain, unfinished-rollout.py
+#        needs-you lists that line, and a second run with no flag leaves it out again from the note's own record until
+#        a bullet signs it (an older same-kind bullet does not); a dependant leaves with a line holding no kind word, an
+#        independent row stays chained, a lane row carries the closure; a deferred note's pending bullet holds (spend
+#        never), its `pending` mark surviving its record line until the bullet goes; two gates on a row, and a row both
+#        signed out and unsigned on one line; the exit 2 cases, the carry of a flag whose member left, the lane WARN
 #   P6   exit 2, a malformed, folder-less alias-less or cx-* --signed-out included
 # Temp vaults, temp git repos with literal origin URLs (only `git rev-parse` and `git remote get-url` read them).
 # No vault, no network. bash 3.2-compatible (macOS).
@@ -1063,6 +1070,113 @@ plan --tasks sw11 --signed-out "mcp__nowhere__*@cc-gone:$TMP/gone"
 ok "$rc|$out" "3|" "P11: a refused alias (no launch folder) never matches a folder key: the run exits 3 on its refusal"
 has "$err" "REFUSE: sw11: launch folder $TMP/gone for cc-gone is missing" "P11: … naming it"
 hasnt "$err" "Traceback" "P11: … with no traceback"
+
+# ── P12: an unsigned gate holds its row (p56-3, ADR 0034) ─────────────────────────────────────────────
+scen p12
+mkp PG
+GT='irreversible: publish the page live'
+KT='credential: the Stripe live keys'
+FR() { printf '; /thread:schedule --tasks %s asks you to approve it, and chains it once approved' "$1"; }
+L1="g1: unsigned gate: $GT$(FR g1)"
+# mkg <slug> <left-out lines> <approved lines> <pending lines> [frontmatter...] — a task note with those sections ('' none)
+mkg() {
+  local s="$1" lo="$2" ap="$3" pe="$4"; shift 4
+  mkt "$s" "$@"
+  [ -z "$lo" ] || printf '\n## Left out at schedule\n\n%s\n' "$lo" >> "$T/$s.md"
+  [ -z "$pe" ] || printf '\n## Gated inputs (awaiting sign-off)\n\n%s\n' "$pe" >> "$T/$s.md"
+  [ -z "$ap" ] || printf '\n## Approved gates\n\n%s\n' "$ap" >> "$T/$s.md"
+}
+uns() { j "[x.get(\"unsigned\") for x in d[\"leftOut\"] if x[\"slug\"] == \"$1\"][0]"; }   # uns <slug>: its leftOut row's unsigned
+mkg g1 '' '' '' 'surfaces: ["ext:g1"]'
+plan --tasks g1 --unsigned "g1=$GT"
+ok "$rc|$(j "$chains")|$(j "$left")|$(why g1)" "0|[]|[\"g1\"]|$L1" \
+   "P12: (a) a one-task cluster with an unsigned irreversible gate writes no chain, its row left out with the gate line"
+ok "$(uns g1)" '[{"from":"flag","gate":"irreversible: publish the page live","kind":"irreversible","pending":false}]' \
+   "P12: … its unsigned row names the gate, read from the flag"
+# (b) S2.5 writes that line; needs-you lists it, and a second run with no flag leaves the row out from the record.
+mkg g1 "- 2026-11-20 $L1" '' '' 'surfaces: ["ext:g1"]'
+HOME="$S" python3 "$UR" needs-you --tasks-dir "$T" --now 2026-11-25T09:00:00Z > "$S.ny" 2> "$S.nyerr"
+ok "$(python3 -c 'import json,sys; d=json.load(open(sys.argv[1])); print("\n".join("|".join(str(i[k]) for k in ("kind","source","rollout","task","text","act")) for i in d["items"]))' "$S.ny")" \
+   "irreversible|left-out|None|g1|$L1|approve the gate: /thread:schedule --tasks g1 asks it" \
+   "P12: (b) unfinished-rollout.py needs-you lists the row with its gate line and the approve act"
+plan --tasks g1
+ok "$rc|$(j "$chains")|$(j "$left")|$(why g1)|$(j '[r["from"] for r in d["leftOut"][0]["unsigned"]]')" "0|[]|[\"g1\"]|$L1|[\"left-out\"]" \
+   "P12: … a second run with no flag writes no chain either: the note's own record holds the row"
+# (c) signed: the same gate in ## Approved gates, or a same-kind bullet dated on or after the entry; an older one is none.
+for c in "$GT (approved 2026-11-21, asked ahead at schedule)|0|[[\"g1\"]]|[]|signed in its own words, the chain is written" \
+         "irreversible: delete the old branch (approved 2026-11-19, asked ahead at orient)|0|[]|[\"g1\"]|an irreversible bullet in other words dated before the entry leaves it out" \
+         "irreversible: delete the old branch (approved 2026-11-20, asked ahead at orient)|0|[[\"g1\"]]|[]|one dated on the entry's date chains it"; do
+  IFS='|' read -r b want_rc want_chains want_left label <<< "$c"
+  mkg g1 "- 2026-11-20 $L1" "- $b" '' 'surfaces: ["ext:g1"]'
+  plan --tasks g1
+  ok "$rc|$(j "$chains")|$(j "$left")" "$want_rc|$want_chains|$want_left" "P12: (c) $label"
+done
+# (d) a dependant leaves with its via line, holding no kind word and no unsigned field; an independent row stays chained.
+mkg gd1 '' '' '' 'projects: ["[[PG]]"]' 'surfaces: ["ext:gd1"]'
+mkg gd2 '' '' '' 'projects: ["[[PG]]"]' 'surfaces: ["ext:gd2"]' 'depends-on: ["[[gd1]]"]'
+mkg gd3 '' '' '' 'projects: ["[[PG]]"]' 'surfaces: ["ext:gd3"]'
+plan --tasks gd1,gd2,gd3 --unsigned "gd1=$GT"
+ok "$rc|$(j "$chains")|$(j "$left")|$(uns gd2)" '0|[["gd3"]]|["gd1","gd2"]|null' \
+   "P12: (d) a dependant leaves with its row, with no unsigned field; an independent row of the project stays chained"
+ok "$(why gd2)" "gd2: depends on [[gd1]], left out: approve [[gd1]]'s unsigned gate (/thread:schedule --tasks gd1 asks), then /thread:orient --steer" \
+   "P12: … its line names the row and the approve remedy, no kind word"
+mkg gd4 '' '' '' 'projects: ["[[PG]]"]' 'launch: cc-ts' 'surfaces: ["ext:gd4"]' 'depends-on: ["[[gd1]]"]'
+mkg gd5 '' '' '' 'projects: ["[[PG]]"]' 'surfaces: ["ext:gd5"]' 'depends-on: ["[[gd4]]"]'
+plan --tasks gd5,gd4,gd1 --unsigned "gd1=$GT"
+ok "$rc|$(j "$lane")|$(j "$left")|$(why gd5)" "0|[\"gd4\"]|[\"gd5\",\"gd1\"]|gd5: depends on [[gd4]], a session-lane row waiting on [[gd1]], left out: approve [[gd1]]'s unsigned gate (/thread:schedule --tasks gd1 asks), then /thread:orient --steer" \
+   "P12: … a member depending on a lane row that waits on the held row leaves too"
+# (e) a deferred note's pending section holds (spend never); its pending mark survives its record line until it goes.
+PS='- spend: the probe — cap US$5'
+mkg ge1 '' '' "- $GT" 'surfaces: ["ext:ge1"]'
+mkg ge2 '' '' "$PS" 'surfaces: ["ext:ge2"]'
+plan --tasks ge1,ge2
+ok "$rc|$(j "$chains")|$(j "$left")|$(uns ge1)|$(why ge1)" "0|[[\"ge2\"]]|[\"ge1\"]|[{\"from\":\"set-aside\",\"gate\":\"$GT\",\"kind\":\"irreversible\",\"pending\":true}]|ge1: unsigned gate: $GT$(FR ge1)" \
+   "P12: (e) a pending irreversible bullet holds its row; a pending spend bullet alone is chained"
+LE="- 2026-11-20 ge1: unsigned gate: $GT$(FR ge1)"
+mkg ge1 "$LE" '' "- $GT" 'surfaces: ["ext:ge1"]'
+plan --tasks ge1
+ok "$(j '[(r["from"], r["pending"]) for r in d["leftOut"][0]["unsigned"]]')" '[["left-out",true]]' \
+   "P12: … its line written, the next run reads one row from the record, still pending"
+mkg ge1 "$LE" "- $GT; he said go (approved 2026-11-21, asked ahead at schedule)" "- $GT" 'surfaces: ["ext:ge1"]'
+plan --tasks ge1
+ok "$(j "$left")|$(j '[(r["from"], r["pending"]) for r in d["leftOut"][0]["unsigned"]]')" '["ge1"]|[["set-aside",true]]' \
+   "P12: … signed with a Note, the pending bullet left in place: still out, held by that bullet"
+mkg ge1 "$LE" "- $GT; he said go (approved 2026-11-21, asked ahead at schedule)" "$PS" 'surfaces: ["ext:ge1"]'
+plan --tasks ge1
+ok "$rc|$(j "$chains")|$(j "$left")" '0|[["ge1"]]|[]' "P12: … the pending bullet removed, the spend bullet kept: chained"
+# (f) two gates on one row, one signed; a row both signed out and unsigned gets one line, its dependant both remedies.
+plan --tasks g1 --unsigned "g1=$GT" --unsigned "g1=$KT"
+ok "$(why g1)|$(j '[r["kind"] for r in d["leftOut"][0]["unsigned"]]')" "g1: unsigned gate: $GT | $KT$(FR g1)|[\"irreversible\",\"credential\"]" \
+   "P12: (f) two gates on one row are both named on its line"
+mkg gf1 "- 2026-11-20 gf1: unsigned gate: $GT | $KT$(FR gf1)" "- $GT (approved 2026-11-21, asked ahead at schedule)" '' 'surfaces: ["ext:gf1"]'
+plan --tasks gf1
+ok "$(j "$left")|$(uns gf1)" "[\"gf1\"]|[{\"from\":\"left-out\",\"gate\":\"$KT\",\"kind\":\"credential\",\"pending\":false}]" \
+   "P12: … one signed, only the other holds"
+LAUNCH="$NEED" mkg gf2 '' '' '' 'launch: cc-a-seo' 'surfaces: ["ext:gf2"]'
+mkg gf3 '' '' '' 'launch: cc-a-seo' 'surfaces: ["ext:gf3"]' 'depends-on: ["[[gf2]]"]'
+plan --tasks gf2,gf3 --unsigned "gf2=$GT" --signed-out 'mcp__nowhere__*@cc-a-seo'
+ok "$rc|$(j "$left")|$(why gf2)" "0|[\"gf2\",\"gf3\"]|gf2: unsigned gate: $GT$(FR gf2); also needs mcp__nowhere__*, which did not read signed in from its launch cc-a-seo from $W/aw/launchers/seo: sign in to nowhere, then /thread:orient --steer" \
+   "P12: … a row both unsigned and signed out gets one line, the gate first"
+ok "$(why gf3)" "gf3: depends on [[gf2]], left out: approve [[gf2]]'s unsigned gate (/thread:schedule --tasks gf2 asks) and sign in to nowhere, then /thread:orient --steer" \
+   "P12: … its dependant's remedy names both"
+# (g) exit 2, the carry of a flag whose member left, and the lane WARN.
+u2() {  # u2 <label> <plan args...>
+  local label="$1"; shift
+  python3 "$SC" plan --vault "$V" --launch-folders "$LF" "$@" > "$S.out" 2> "$S.err"; rc=$?
+  ok "$rc|$(cat "$S.out")|$(wc -l < "$S.err" | tr -d ' ')" "2||1" "P12: (g) $label exits 2, no stdout, one stderr line"
+}
+u2 "an --unsigned with no =" --tasks g1 --unsigned g1
+u2 "a spend --unsigned" --tasks g1 --unsigned 'g1=spend: the probe — cap US$5'
+has "$(cat "$S.err")" "spend is never held" "P12: … naming spend"
+u2 "an --unsigned with no act" --tasks g1 --unsigned 'g1=irreversible:  '
+u2 "an --unsigned with no kind" --tasks g1 --unsigned 'g1=publish the page'
+u2 "an --unsigned for a member dropped from --tasks" --tasks gd3 --unsigned "gd1=$GT"
+has "$(cat "$S.err")" "serial-chains: --unsigned gd1=$GT: gd1 is not one of --tasks" "P12: … in --surface's and --dep's words"
+plan --tasks gd3
+ok "$rc|$(j "$chains")" '0|[["gd3"]]' "P12: … and the same run without it exits 0"
+plan --tasks gd4,gd1 --unsigned "gd4=$GT"
+ok "$rc|$(j "$lane")|$(j "$left")" '0|["gd4"]|[]' "P12: an --unsigned session-lane member is never left out"
+has "$(j 'd["warns"]')" "WARN: --unsigned gd4=$GT: gd4 is a session-lane member, never left out" "P12: … and WARNs"
 
 # ── P6: exit 2────────────────────────────────────────────────────────────────────────────────────────
 scen p6
