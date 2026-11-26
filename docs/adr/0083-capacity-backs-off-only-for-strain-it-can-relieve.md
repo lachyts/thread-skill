@@ -27,8 +27,9 @@ need beyond what its chain holds is 0 in both parts is never held by the weight;
 weighted view (the Mac can run over the budget by a later chain's 3 GB session until its turn); a Leg counted for its
 session alone holds 0 in the weighted share; and an idle Leg session weighs the built-in, never its last claim
 (parallel throughput is kept, and a heavy chain's next claim waits for its reserved turn and a drain). The Waiting
-list's room (`unfinished-rollout.py`) still counts C until the filed follow-up
-`thread-skill-followup-the-waiting-lists-room-reads-the-budget`. d4's reading and tuning, and DfL 13's, built by p53-5:
+list's room (`unfinished-rollout.py waiting`) reads the budget since p57-6: capacity_max as its count, its room also
+held to the budget less the Weights running (a place at the built-in each, one always on an empty Mac), and `next` the
+first unheld chain whose next Leg's Weight fits; `cap.n` stays C. d4's reading and tuning, and DfL 13's, built by p53-5:
 the weekly Reflection's score reads the budget (`budget`: the Mac-wide cap's held time split by idle-slots' `bound`, the
 part held longest named `short`, and the Slots the budget admitted) and binds budget-bound when the budget's bounds held
 at least as long as C or the Trickle did; it reads each kind's measured Weight beside the repo's estimate (`weights`).
