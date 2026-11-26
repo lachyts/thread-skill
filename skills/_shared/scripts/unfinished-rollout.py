@@ -551,6 +551,14 @@ naive one reads local) is the clock for the Capacity, Away and lease reads; defa
   it would leave the room 0 until a repair; no lease file, or an unreadable one, still counts. A closing Leg counts
   until LEG_LEASE_LAPSE (90 min) after its `closed:` stamp (close deletes its lease; an unparseable stamp counts), so
   one that died inside /thread:close frees the room, though its chain stays off the list until repair lists it.
+  While the budget admits (p57-6, ADR 0083 d4; reconcile-rollout.py's _budget_on: a fresh reading in force carrying a
+  well-typed `budget`) the room reads what a Leg's claim is admitted by: the count is capacity_max (_count_cap, its
+  `max`) less `running`, and the room also holds the budget less the Weights running (_weights_of over the same
+  counts: each parallel task at its rollout's latest slot-taken Weight, each Leg session's chain at its claims times its
+  Leg lease's `weight`, a session alone at the built-in), so it is at most as many places as that leaves at
+  WEIGHT_BUILT_IN each (a begun Leg's session weighs the built-in), and at least 1 on a Mac with nothing running while
+  the count has a place (one task always fits, DfL 11). `cap` still reports C as `n`. No budget, or a stale, unreadable
+  or missing reading: the room above, exactly.
 - Leads (p55-5, ADR 0085 d5; CONTEXT.md **Lead hand-over**): a parallel rollout whose lead handed over waits for a
   fresh lead, never a Leg, so it is its own list, `leads`, never a `waiting` row (the Stage starts every `waiting` row
   as a Leg). Listed: each root parallel note neither done, dropped nor superseded with `paused:`, `paused_for:
@@ -566,7 +574,10 @@ stdout is one JSON line, keys in this order: {"room": n, "running": n, "cap": {"
 "prompt", "harness", "since"}]}; `room`, `running`, `waiting` and `next` read no lead row; cwd, title, prompt and harness are
 restart_of's (the Leg's launch folder, inside its Chain copy in a copy chain), but a Complete Leg's harness, which
 restart_of leaves null (anyLaunch: begin takes any), reads `claude`, so every entry names one the Stage can start.
-`next` is the first unheld chain, or null when room is 0 or every chain is held. `WARN:` lines (serial_notes', the
+`next` is the first unheld chain, or null when room is 0 or every chain is held; while the budget admits, the first
+unheld chain whose next Leg fits the budget less the Weights running (first_leg_fits: per part the larger of its row's
+Weight, leg.py's leg_weight, and the built-in its session holds; the built-in for a Complete Leg), or the first unheld
+chain at all on a Mac with nothing running. `WARN:` lines (serial_notes', the
 re-check's) go to stderr, each once.
 Exit 0, or 2 (no stdout, one `unfinished-rollout:` line): a missing tasks dir, a --now that is no ISO time, or
 reconcile-rollout.py, serial-chains.py or leg.py unloadable.
@@ -698,6 +709,9 @@ RR_NAMES = ("Note", "_scan", "_queue_state", "_counts", "_project_root", "_wikil
             "_capacity_state", "_cap_in_force", "_away_state", "_running_by_rollout", "_Leases", "_surface_wait_read",
             "_surface_wait_write", "_surface_wait_drop", "_surface_wait_path", "_surface_wait_live",
             "LEG_LEASE_LAPSE",   # leg_session's closing-Leg clock (P44-4), read through LEG.rr
+            # the Waiting list's room while the budget admits (p57-6)
+            "_budget_on", "_weights_of", "_room_sum", "_room_sub", "_room_add", "_room_fits", "WEIGHT_BUILT_IN",
+            "WEIGHT_ZERO", "WEIGHT_PARTS",
             # needs-you's readers (p48-1)
             "_gated", "_standing_limit", "_ask_why", "_bounce_why", "_month_why", "_StandingLedger", "_norm_gate",
             "_month_line_key",   # each limit's own month line (p48-2)
@@ -715,7 +729,7 @@ SC_NAMES = ("parse_token", "fmt_token", "overlaps", "overlap_pairs", "read_surfa
 GI_NAMES = ("sweep", "body_of", "SPEND", "CREDENTIAL", "IRREVERSIBLE")
 RUN_RECORD_NAMES = ("record_path",)
 LEG_NAMES = ("Chain", "chain_read", "hold_of", "write_set", "write_rows", "Refuse", "order_key", "first_by", "restart_of",
-             "leg_outcome", "leg_session_of", "waiting_listed", "open_leg_lapsed")
+             "leg_outcome", "leg_session_of", "waiting_listed", "open_leg_lapsed", "leg_weight")
 CLOSED = {"done", "dropped"}
 PICKUP_CAP = 5
 UNLANDED = ("queued", "running", "awaiting-integration", "integrating", "set-aside")  # `branches`: not yet merged
@@ -2735,6 +2749,29 @@ def now_of(args):
     return now if now.tzinfo else now.astimezone()
 
 
+def budget_room(rr, count_room, free_w, empty) -> int:
+    """The Waiting list's room while the budget admits (p57-6, ADR 0083 d4): of `count_room` places (capacity_max less
+    `running`), as many as `free_w` (the budget less the Weights running) holds at WEIGHT_BUILT_IN each, the least any
+    Leg holds once begun (its session weighs the built-in in every view), compared as _room_fits compares; never below
+    0. On an `empty` Mac (nothing running) at least 1 while the count has a place: one task always fits (DfL 11)."""
+    room, used = 0, dict(rr.WEIGHT_ZERO)
+    while room < count_room and rr._room_fits(used, rr.WEIGHT_BUILT_IN, free_w):
+        used, room = rr._room_add(used, rr.WEIGHT_BUILT_IN), room + 1
+    return max(room, 1) if empty and count_room > 0 else room
+
+
+def first_leg_fits(rr, ctx, chain, restart, free_w, now) -> bool:
+    """Whether a listed chain's next Leg fits `free_w` (the budget less the Weights running) by the Weight its first
+    claim holds (p57-6), as leg.py's capacity_gate admits it once its session is counted: per part the larger of its
+    row's Weight (leg.py's leg_weight, its past peaks read at `now`, the verb's clock: chain_read_of's ctx carries
+    none) and WEIGHT_BUILT_IN (its session's), the built-in alone for a Leg that works no row (a Complete Leg's)."""
+    leg = load_leg(rr)
+    row = next((x for x in chain.rows if x.slug == restart["task"]), None) if restart["task"] else None
+    w = leg.leg_weight(SimpleNamespace(**vars(ctx), now=now), row, chain) if row is not None else rr.WEIGHT_BUILT_IN
+    need = {p: max(w[p], rr.WEIGHT_BUILT_IN[p]) for p in rr.WEIGHT_PARTS}
+    return rr._room_fits(rr.WEIGHT_ZERO, need, free_w)
+
+
 def cmd_waiting(args, rr) -> int:
     """`waiting` (ADR 0076 d3): the Waiting list and its room, one JSON line (the module docstring)."""
     tasks_dir = Path(os.path.expanduser(args.tasks_dir))
@@ -2761,10 +2798,18 @@ def cmd_waiting(args, rr) -> int:
     cap = rr._cap_in_force(rr._away_state(now), capacity)
     by = "capacity" if cap.get("by") == "capacity" else "away cap" if cap["away"] else "trickle"
     leases = rr._Leases(now)
-    tasks = sum(rr._running_by_rollout(tasks_dir, rr._note_index(tasks_dir), leases=leases).values())
-    legs = sum(1 for _path, ctx, chain, read in chains if leg_session(load_leg(rr), ctx, chain, read, leases))
-    running = tasks + legs
-    room = max(0, cap["n"] - running)
+    index = rr._note_index(tasks_dir)
+    tasks = rr._running_by_rollout(tasks_dir, index, leases=leases)
+    legs = [path.stem for path, ctx, chain, read in chains if leg_session(load_leg(rr), ctx, chain, read, leases)]
+    running = sum(tasks.values()) + len(legs)
+    budget = rr._budget_on(capacity)
+    free_w = None
+    if budget is None:
+        room = max(0, cap["n"] - running)
+    else:   # p57-6: the count is capacity_max (_count_cap's, _cap_in_force's `max`), and the Weights must fit too
+        held_w = rr._room_sum(rr._weights_of(tasks_dir, index, {**tasks, **dict.fromkeys(legs, 1)}, leases).values())
+        free_w = rr._room_sub(budget, held_w)
+        room = budget_room(rr, cap.get("max", cap["n"]) - running, free_w, running == 0)
 
     serials = serial_notes(rr, notes, tasks_dir, warns, set(), warned)   # the hold reads only: what may hold a chain
     parallels = parallel_roots(rr, notes, tasks_dir, vault, set(), warns, warned)
@@ -2781,13 +2826,17 @@ def cmd_waiting(args, rr) -> int:
         held = serial_resume_hits(rr, ctx.slug, hold, toks, [], notes, tasks_dir, git, vault, set(), warns, warned,
                                   serials, parallels) if toks else {}
         listed.append((order_key(rr, ctx.slug, hold["began"], hold["rank"], hold["captured"]), ctx.slug,
-                       min(held, key=str.lower) if held else None, restart))
+                       min(held, key=str.lower) if held else None, restart, ctx, chain))
     listed.sort(key=lambda x: x[0])
     # A Complete Leg's restart carries no harness (it works no row, so begin takes any): the Stage starts it on claude.
     waiting = [{"slug": slug, "rank": k, "held_by": held_by, "cwd": r["cwd"], "title": r["title"],
                 "prompt": r["prompt"], "harness": r["harness"] or "claude"}
-               for k, (_key, slug, held_by, r) in enumerate(listed, 1)]
-    nxt = next((w["slug"] for w in waiting if w["held_by"] is None), None) if room > 0 else None
+               for k, (_key, slug, held_by, r, _ctx, _chain) in enumerate(listed, 1)]
+    # While the budget admits, next also fits its next Leg's Weight (p57-6), but on a Mac with nothing running.
+    fits = (lambda ctx, chain, r: True) if free_w is None or running == 0 else \
+        (lambda ctx, chain, r: first_leg_fits(rr, ctx, chain, r, free_w, now))
+    nxt = next((slug for _key, slug, held_by, r, ctx, chain in listed if held_by is None and fits(ctx, chain, r)),
+               None) if room > 0 else None
     leads = lead_rows(rr, notes, warns)
     for w in dict.fromkeys(warns):
         print(w, file=sys.stderr)

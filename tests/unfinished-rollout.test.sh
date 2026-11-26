@@ -76,10 +76,10 @@
 #           a later chain held so is no free chain to yield to (T19e); a bare `repo:<toplevel>` cell on a stuck chain's
 #           set-aside row stands only an in-place peer, never another copied chain's begin, by the earlier-ward or the
 #           later-ward yield, while a bare path in no checkout still does (T19f, T19g, ADR 0075 d4)
-#   WL1-WL15 `waiting`, the Waiting list (ADR 0076); WL9 an open Leg's lapsed lease frees its place and lists its
+#   WL1-WL16 `waiting`, the Waiting list (ADR 0076); WL9 an open Leg's lapsed lease frees its place and lists its
 #           chain with the take-over prompt (P36-15); WL11 a parallel rollout in a surface wait (P41-3); WL12 what it
 #           reads after a begin wait (P41-3): a successor of a started hand-over still off the list, its place counted;
-#           WL15 LEG_LEASE_LAPSE checked at load (RR_NAMES)
+#           WL15 LEG_LEASE_LAPSE checked at load (RR_NAMES); WL16 the room and next read the budget (p57-6)
 #   LH4     a Lead hand-over (p55-5, ADR 0085 d5): the state line `handing over since`, its Project root kept (the
 #           `leads` row and the needs-you item are skills/execute/tests/reconcile-rollout-hand-over-leads.test.sh's)
 #   NY1-NY12 `needs-you` (p48-1): every open needs-you item as one list: each gate kind verbatim, a spend gate the
@@ -3165,6 +3165,38 @@ HOME="$S/home" THREAD_MACHINE_TIMES='{}' python3 "$P15/skills/_shared/scripts/un
 ok "$rc|$(cat "$S.out")" "2|" "WL15: a reconcile-rollout.py without LEG_LEASE_LAPSE exits 2 at load, no stdout"
 has "$(cat "$S.err")" "LEG_LEASE_LAPSE" "WL15: … its cannot-load line naming the constant"
 rm -rf "$P15"
+# WL16 (p57-6, ADR 0083 d4): while the budget admits, the room's count is capacity_max (the built-in 6) and the room is
+# held to the budget less the Weights running (two open Legs' sessions, 3 GB and 2 cores each); next skips a chain whose
+# next Leg's Weight does not fit (wh: its row's kind w8 measured 8 GB from three past peaks of project Other), and a Mac
+# with nothing running always fits one. No budget is today's room: C (2) less 2 running.
+tscen wl16
+mkdir -p "$T/Archive/Rollouts" "$S/events"
+printf -- '---\ntags: [task, rollout]\nstatus: done\nprotocol_version: 5\n%s\n---\n' "$OTHER" > "$T/Archive/Rollouts/old-ro.md"
+for i in 1 2 3; do
+  printf -- '---\ntags: [task]\nstatus: done\nscope: w8\nrollout: "[[old-ro]]"\n---\n' > "$T/Archive/w8-past$i.md"
+  printf '{"ts": "2026-11-07T12:00:00.000Z", "rollout": "old-ro", "task": "w8-past%s", "kind": "slot-freed", "outcome": "ready", "peak": {"mem_gb": 8, "cores": 2}}\n' "$i" >> "$S/events/old-ro.jsonl"
+done
+LOG=$(lg $D29 open) mkchain la "$OTHER" a1~open~'`vault:Work/Projects/LA`'
+LOG=$(lg $D29 open) mkchain lb "$OTHER" b1~open~'`vault:Work/Projects/LB`'
+LOG=- mkchain wh "$OTHER$UN"$'\n'"$(rk 1)" h1~open~'`vault:Work/Projects/H`'~'scope: w8'
+LOG=- mkchain wq "$OTHER$UN"$'\n'"$(rk 2)" q1~open~'`vault:Work/Projects/Q`'
+# capb <budget json> — a fresh Capacity of 2 carrying that budget
+capb() { mkdir -p "$S/home/.config/thread"; printf '{"capacity": 2, "written_at": "%s", "budget": %s}\n' "$WNOW" "$1" > "$S/home/.config/thread/capacity.json"; }
+capf 2
+THREAD_EVENTS_DIR="$S/events" wl
+ok "$(wj '[d["room"], d["running"], d["next"], [w["slug"] for w in d["waiting"]]]')" "[0, 2, None, ['wh', 'wq']]" \
+  "WL16: no budget: C 2 less 2 running leaves no room, as before"
+capb '{"mem_gb": 12, "cores": 8}'
+THREAD_EVENTS_DIR="$S/events" wl
+ok "$(wj '[d["room"], d["running"], d["cap"], d["next"]]')" "[2, 2, {'n': 2, 'by': 'capacity', 'why': None}, 'wq']" \
+  "WL16: a 12 GB budget less two sessions' 6 holds two built-in places past C, and next passes over wh's 8 GB for wq"
+ok "$(wj 'list(d)')" "['room', 'running', 'cap', 'waiting', 'next', 'leads']" "WL16: … the JSON's keys, in order"
+capb '{"mem_gb": 8, "cores": 8}'
+THREAD_EVENTS_DIR="$S/events" wl
+ok "$(wj '[d["room"], d["next"]]')" "[0, None]" "WL16: an 8 GB budget leaves 2 GB, under one session's 3: no room"
+fmset la.md status dropped; fmset lb.md status dropped; capb '{"mem_gb": 2, "cores": 1}'
+THREAD_EVENTS_DIR="$S/events" wl
+ok "$(wj '[d["room"], d["running"], d["next"]]')" "[1, 0, 'wh']" "WL16: with nothing running one always fits: wh, whatever its Weight"
 
 # ── J1-J10: this project's running rollout is joined in place (ADR 0078 d6) ────────────────────────────
 # jn [args...] -> $out, $err, $rc — reconcile-rollout.py join at a fixed --now, whose date is the rows' `joined <date>`
