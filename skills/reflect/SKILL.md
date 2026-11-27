@@ -1109,7 +1109,7 @@ keeps the task open.
   write that one line without his pick, which is his alone (step 6). An exit-2 `--pick` refusal wrote nothing: it allows one corrected `--pick` or falls back to
   `--record-only` (step 7), and never ends the Reflection without a line.
 - By hand, don't pick for Lachy or treat a proposal's `agreeing` count as a pick; the weekly reading lands a knob only
-  through `tune.py --auto` (ADR 0037 d5), never a rule.
+  through `tune.py --auto`, and a Fable ceiling only through `tune.py --ceilings` (ADR 0037 d5), never a rule.
 - Don't write a decision task for Watches to confirm alone: they wait for a rule proposal, and a task a held trade
   alone writes lists none.
 - Don't re-run step 10 after a write: a new span is a new Reflection.
