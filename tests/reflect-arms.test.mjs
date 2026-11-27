@@ -278,7 +278,7 @@ test('the hold order: agreement first (a thin week skipped, anything else ends t
 
 // p46-10: each role's revertGuard is CEILING_RISKS' measured lines, per direction, and nothing else: tune.py
 // --ceiling-revert reverts a landing only on it.
-test('revertGuard: only the role\'s own measured tokens per merge in the move\'s direction, with both arms at MIN_LANDED token tasks; never a rollout breach or the fail-closed line', (t) => {
+test('revertGuard: only the role\'s own measured tokens per merge in the move\'s direction, with both arms at MIN_LANDED token tasks; never a rollout breach or the fail-closed line; span\'s ceilings reverts a closed landing on it, one item per role', (t) => {
   const h = setup(t)
   const guard = (a) => a.block.roles['master-review'].revertGuard
   const partial = (w) => ({ ...w, records: { rw: w.records.rw.map(([ms, n, d]) => [ms, n, d.task === 'f3' && d.kind === 'role-call' ? { ...d, tokensPartial: true } : d]) } })
@@ -296,6 +296,25 @@ test('revertGuard: only the role\'s own measured tokens per merge in the move\'s
   assert.equal(thin.block.roles['master-review'].fable.tokenTasks, 2)
   assert.deepEqual(guard(thin), { widening: [], narrowing: [] }, 'fewer than MIN_LANDED token tasks on an arm: no guard')
   assert.ok(!('revertGuard' in over.line.roles['master-review']), 'line() never writes it')
+  // span's `ceilings` reverts on it (step 14 runs --ceiling-revert once per revert item): a closed Reflection's auto line
+  // that moved two roles, both still at their to, each with a widening guard, is one item per role, from and to swapped;
+  // a role that is also ready is held behind its revert
+  const widening = guard(over).widening
+  const landing = { id: 't-c1', auto: true, reflection: R(1), applied: ['master-review', 'builder'].map((role) =>
+    ({ role, from: 50, to: 60, rule: 'win', evidence: 'e', kid: '0123abcd', agreed: 3 })) }
+  const roles = { 'master-review': { from: 60, to: 70, ready: true, signal: 'win', kid: '0123abcd', agreement: 3, revertGuard: { widening, narrowing: [] } },
+    builder: { from: 60, revertGuard: { widening: ['builder guard'], narrowing: [] } } }
+  const r = spawnSync('python3', ['-B', '-c', ['import importlib.util, json, sys',
+    'spec = importlib.util.spec_from_file_location("m", sys.argv[1]); m = importlib.util.module_from_spec(spec); spec.loader.exec_module(m)',
+    'a = json.load(sys.stdin)', 'assert m.RR.emit(None, "ceiling", fields=a["line"], strict=True)',
+    's = object.__new__(m.Span); s.ceiling_now = a["now"]',
+    'print(json.dumps(s.ceilings({"roles": a["roles"]}, m.read_ceilings(), a["reflections"], a["rid"])))'].join('\n'), REFLECT],
+  { encoding: 'utf8', cwd: h.home, env: env(h), input: JSON.stringify({ line: landing, roles, now: ceil({ 'master-review': 60, builder: 60 }),
+    reflections: [{ kind: 'reflection', id: R(1) }], rid: 'r-20261109T130000Z-aaaaaa' }) })
+  assert.equal(r.status, 0, r.stderr)
+  assert.deepEqual(JSON.parse(r.stdout), { now: { 'master-review': 60, builder: 60, investigator: null, lead: null }, land: [],
+    revert: [{ tuning: 't-c1', role: 'master-review', from: 60, to: 50, breached: widening }, { tuning: 't-c1', role: 'builder', from: 60, to: 50, breached: ['builder guard'] }],
+    held: [{ role: 'master-review', reason: 'a revert of master-review comes first this Reflection' }] })
 })
 
 test('plans: the split at the first Fable planner call off the Fable rung; each side counts its tasks, planned or not, and leaves out only the other model\'s; per100 for the week and to date', (t) => {
