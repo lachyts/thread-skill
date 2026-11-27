@@ -1634,6 +1634,7 @@ def _percent(v):
 CEILING_APPLIED_KEYS = ("role", "from", "to", "rule", "evidence")
 CEILING_APPLIED_OPTIONAL = ("kid", "agreed")
 CEILING_AGREE = 3   # the arms Agreement rule's landing count (ADR 0037 d5)
+CEILING_STEP = 10   # a Fable ceiling's one move in points: arms.py's STEP and tune.py's ceiling verbs read it here
 
 
 def _ceiling_applied(v):

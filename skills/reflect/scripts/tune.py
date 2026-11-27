@@ -86,8 +86,8 @@ in rollouts.toml's `[defaults]` (fable_ceiling_master_review, _builder, _investi
 `[share]` for a role the file does not set; the ceiling now is ceilings_now(), rollout-settings.py's fable_ceilings()
 over resolve(repo=None, path=--config)'s `fable_ceiling` and ladder.py's load() (a refused ladder or rollouts.toml is
 exit 2, or 3 with no tomllib). A move is one `ceiling` line in tunings.jsonl (run_record.py's catalogue entry), never a
-`tuning` line, so no knob reader counts it; load_ceilings() reads them back. Every move is one STEP (arms.py's, 10
-points) between 0 and 100. The three verbs:
+`tuning` line, so no knob reader counts it; load_ceilings() reads them back. Every move is one STEP (run_record.py's
+CEILING_STEP, 10 points, which arms.py reads too) between 0 and 100. The three verbs:
 - --ceilings --span <span.json> --reflection <id> (the weekly reading's step 14) refuses a span whose `reflection` is
   not --reflection's and a closed Reflection (exit 2, as --auto does). For every role of the span's `arms.roles` (in
   SHARE_ROLES order) with `ready: true`, ceiling_auto_check() runs these checks in order, the first that fails the
@@ -285,8 +285,7 @@ RR = _load("thread_run_record", os.path.join(SHARED, "run_record.py"))
 RS = _load("thread_rollout_settings", os.path.join(SHARED, "rollout-settings.py"))
 # score.py (python >= 3.8 too): RULE_EFFECTS for --revert, load_tunings() and agreeing() for --auto and --revert
 SCORE = _load("thread_score", os.path.join(HERE, "score.py"))
-# arms.py: STEP, a Fable ceiling's one move (p46-10)
-ARMS = _load("thread_arms", os.path.join(HERE, "arms.py"))
+STEP = RR.CEILING_STEP  # a Fable ceiling's one move (p46-10): run_record.py's, which arms.py's STEP reads too
 CLOSES = RR.CLOSES  # completion | supersede: the close that wrote a line (run_record.py's Close rule)
 AGREE = 3  # ADR 0037 d5: a knob lands once three Reflections agree (run_record.py's Agreement rule)
 LOAD_HELD = "machine load tops the Time-lost ledger"  # check (6)'s reason (reflect.py's span lists these as its holds)
@@ -667,8 +666,8 @@ def ceiling_auto_check(role, r, now, lines, rid):
         return False, "a move to 0 turns the arm off: Lachy decides (a caution)"
     if not 0 <= to <= 100:
         return False, "to %d is outside 0..100" % to
-    if abs(to - frm) != ARMS.STEP:
-        return False, "a move of %d points is no step of %d" % (abs(to - frm), ARMS.STEP)
+    if abs(to - frm) != STEP:
+        return False, "a move of %d points is no step of %d" % (abs(to - frm), STEP)
     for d in lines:
         if d["_voided"] or d.get("auto") is not True or d.get("reflection") != rid:
             continue
@@ -1130,15 +1129,12 @@ def _apply(scores, applied, names, repo, config, before, dry_run, auto=None, tas
     return 0
 
 
-EMPTY_TABLES = {"defaults": {}, "guardrails": {}, "repo": {}, "schema": 1, "ignored": [], "retired": []}
-
-
 def _ceiling_validate(config, tmp, picks):
     """A ceiling edit's validation (the module docstring's Fable ceilings): load_tables() of the temp file must read as
     the config's with exactly each picked `[defaults]` key at its `to`, every other table, key and repo identical and
     `schema` only raised. Whether the schema rose; a Stop(2) otherwise."""
     try:
-        before = RS.load_tables(config) or EMPTY_TABLES
+        before = RS.load_tables(config) or dict(RS._NO_TABLES)
         after = RS.load_tables(tmp)
     except RS.SettingsError as e:
         raise Stop("the edit does not validate (%s): nothing written" % e, 2)
@@ -1326,8 +1322,8 @@ def ceiling_yes(role, frm, to, kid, task, config, dry_run, tasks_dir=None):
     now, written as one line that is not auto, carrying decisionTask."""
     if role not in RR.SHARE_ROLES:
         raise Stop("--role %s is no drawn role (%s)" % (role, ", ".join(RR.SHARE_ROLES)), 2)
-    if not (0 <= frm <= 100 and 0 <= to <= 100) or abs(to - frm) != ARMS.STEP:
-        raise Stop("a Fable ceiling moves one step of %d points between 0 and 100, not %d -> %d" % (ARMS.STEP, frm, to), 2)
+    if not (0 <= frm <= 100 and 0 <= to <= 100) or abs(to - frm) != STEP:
+        raise Stop("a Fable ceiling moves one step of %d points between 0 and 100, not %d -> %d" % (STEP, frm, to), 2)
     signal = next((x for x in RR.ARMS_SIGNALS if RR.arms_key(role, x) == kid), None)
     if signal is None:
         raise Stop("--kid %s is no ceiling id of %s (arms_key(role, signal) for a signal in %s)" % (

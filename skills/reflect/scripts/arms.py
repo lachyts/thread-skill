@@ -89,8 +89,8 @@ signal, direction, from, to, kid, agreement, agreedWith (the agreeing Reflection
 breached (the Guardrails read below), revertGuard ({widening, narrowing}: CEILING_RISKS' lines, below, each [] unless
 measured; computed for every role) and rollouts (the read rollouts whose rows fed an arm, sorted).
 
-Verdict, on ADR 0037's two headlines alone (declared heuristics: MIN_LANDED 3 per arm, STEP 10 points, AGREE 3 as in ADR
-0037 d5), compared exactly (as fractions, never the rounded rates):
+Verdict, on ADR 0037's two headlines alone (declared heuristics: MIN_LANDED 3 per arm, STEP 10 points (run_record's
+CEILING_STEP), AGREE 3 as in ADR 0037 d5), compared exactly (as fractions, never the rounded rates):
 - thin: either arm has fewer than MIN_LANDED landed, or a null Hands-off rate;
 - win: Fable's Hands-off rate at least Opus's and its escapesPerLanded at most Opus's, one of the two strictly better;
 - loss: the mirror of a win;
@@ -208,7 +208,7 @@ FIRST_REVIEWER = "first-reviewer"   # a doubled master review's first reviewer (
 FABLE_KINDS = RR.ARMS_FABLE_KINDS
 CALL_KINDS = FABLE_KINDS + ("firstReviewer",)   # fableCalls' and fellBack.byKind's counted kinds, in order
 MIN_LANDED = 3                  # a declared heuristic: landed tasks per arm before a verdict reads
-STEP = 10                       # a ceiling moves this many points per agreed move
+STEP = RR.CEILING_STEP          # a ceiling moves this many points per agreed move (10; tune.py reads the same)
 AGREE = 3                       # ADR 0037 d5: three Reflections agree
 TOKENS_BOUND = "tokens_per_merge_pct"
 TOKENS_BOUND_BUILT_IN = 25      # score.py's GUARDRAILS_BUILT_IN value, read when bounds carries none
