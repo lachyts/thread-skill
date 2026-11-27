@@ -1,6 +1,7 @@
 // skills/reflect/scripts/arms.py — the weekly reading's arms (p46-4, ADR 0079 d9): each drawn role's Opus and Fable
 // arms side by side, the plans' before and after, the Fable calls by kind, and the Fable ceiling a role's share moves
-// by once three Reflections agree (ADR 0037 d5). Every rule lives in arms.py's docstring; this pins the behaviour.
+// by once three Reflections agree (ADR 0037 d5; p46-10: tune.py lands it, and revertGuard names its declared risk).
+// Every rule lives in arms.py's docstring; this pins the behaviour.
 //
 // Most cases call arms.reading() through one python harness (JSON in, JSON out, dict-backed stamps), so none waits on
 // score.py. decide, close and moot run reflect.py on a hand-written span.json whose `arms` block is the harness's own
@@ -79,6 +80,8 @@ function build(task, d, { arm = 'opus', builder = arm, tokens = 1000, v = 'appro
     merged(W(d, '03:00'), task)]
 }
 const stampOf = (arm, builder = arm) => ({ 'master-review': arm, builder })
+// The resolved Fable ceilings span passes arms.reading() (the seed rule's fable_ceilings()): {role: {percent, ...}}.
+const ceil = (pct) => Object.fromEntries(Object.entries(pct).map(([r, p]) => [r, { percent: p, share: p / 100, source: 'rollouts' }]))
 
 // arms.reading() over `a` (records, stamps, leads, handsOff, escapes, ...), with its holds_row() and line(); a list of
 // inputs reads each in one spawn.
@@ -89,7 +92,7 @@ const HARNESS = ['import importlib.util, json, sys',
   '    stamps, leads = a.get("stamps") or {}, a.get("leads") or {}',
   '    block = m.reading(recs, a["since"], a["until"], read=a.get("read") or sorted(recs), arm_stamp=lambda t: stamps.get(t),',
   '        lead_stamp=lambda r: leads.get(r), hands_off=a.get("handsOff") or {}, escapes=a.get("escapes") or [],',
-  '        breaches=[tuple(x) for x in a.get("breaches") or []], share=a.get("share"), share_error=a.get("shareError"),',
+  '        breaches=[tuple(x) for x in a.get("breaches") or []], ceiling=a.get("ceiling"), ceiling_error=a.get("ceilingError"),',
   '        bounds=a.get("bounds") or {"tokens_per_merge_pct": 25}, bounds_error=None, earlier=a.get("earlier") or [],',
   '        canon=lambda v: v.lower() if isinstance(v, str) else "", built_in=a.get("builtIn") or ["opus-high", "opus-xhigh"])',
   '    return {"block": block, "holds": m.holds_row(block), "line": m.line(block, a.get("rid", "r-20261109T130000Z-aaaaaa"), a["sinceZ"], a["untilZ"])}',
@@ -203,7 +206,7 @@ test('exclusions: fellBack leaves one role, fableRung every role; tokensPartial 
 })
 
 // One week where `fableArm` wins (or loses, or trades) on the master review: three tasks per arm, the builder in no arm.
-function week({ loss = false, trade = false, fableTokens = 1000 } = {}) {
+function week({ loss = false, trade = false, fableTokens = 1000, from = 50 } = {}) {
   const fa = loss ? 'opus' : 'fable'
   const ob = loss ? 'fable' : 'opus'
   const records = { rw: rec('rw', [...['o1', 'o2', 'o3'].flatMap((x, i) => build(x, 3 + i, { arm: ob, builder: 'none', tokens: ob === 'fable' ? fableTokens : 1000 })),
@@ -211,12 +214,14 @@ function week({ loss = false, trade = false, fableTokens = 1000 } = {}) {
   const stamps = Object.fromEntries([...['o1', 'o2', 'o3'].map((x) => [x, stampOf(ob, 'none')]), ...['f1', 'f2', 'f3'].map((x) => [x, stampOf(fa, 'none')])])
   // the o-tasks carry one act; on a trade the f-tasks carry two Escapes
   const escapes = trade ? ['f1', 'f2'].map((x) => ({ kind: 'escape', rollout: 'rw', task: x, source: 'fixes', at: '2026-11-07', inWindow: true })) : []
-  return { records, stamps, escapes, handsOff: handsOff({ rw: ['o1', 'o2', 'o3', 'f1', 'f2', 'f3'] }, { o2: [{ kind: 'answer' }] }), share: { 'master-review': 0.5 } }
+  return { records, stamps, escapes, handsOff: handsOff({ rw: ['o1', 'o2', 'o3', 'f1', 'f2', 'f3'] }, { o2: [{ kind: 'answer' }] }), ceiling: ceil({ 'master-review': from }) }
 }
 const earlierLine = (rid, verdict, signal, from = 50, role = 'master-review') => ({ kind: 'arms', reflection: rid, roles: { [role]: { verdict, ...(signal ? { signal } : {}), from } } })
 const R = (n) => `r-2026102${n}T000000Z-00000${n}`
 
-test('the hold order: agreement first (a thin week skipped, anything else ends the walk), then a trade, a Guardrail, a caution, else ready', (t) => {
+const READY_HELD = 'agreed by 3 Reflections (ADR 0037 d5): tune.py --ceilings lands it at step 14'
+
+test('the hold order: agreement first (a thin week skipped, anything else ends the walk), then a trade, a Guardrail, a caution, a move to 0, else ready', (t) => {
   const h = setup(t)
   const win = (o = {}) => ({ ...week(), ...o })
   const W2 = [earlierLine(R(1), 'win', 'win'), earlierLine(R(2), 'win', 'win')]
@@ -224,8 +229,8 @@ test('the hold order: agreement first (a thin week skipped, anything else ends t
   const OVER = 'tokens per merge: fable 6000.0 over opus 2000.0 by more than 25 %'
   const cases = [
     ['one winning week', win(), { held: 'agreement 1 of 3', item: null, agreement: 1 }],
-    ['three agreeing weeks', win({ earlier: W2 }), { held: 'agreed by 3 Reflections (ADR 0037 d5); no writer lands a Fable ceiling until [[thread-skill-p46-10-an-agreed-fable-ceiling-lands-on-its-own]]: Lachy decides', item: 'ceiling', agreement: 3, ready: true, to: 60, agreedWith: [R(2), R(1)] }],
-    ['a thin week between is skipped', win({ earlier: [W2[0], earlierLine(R(3), 'thin'), W2[1]] }), { agreement: 3, item: 'ceiling' }],
+    ['three agreeing weeks', win({ earlier: W2 }), { held: READY_HELD, item: null, agreement: 3, ready: true, to: 60, agreedWith: [R(2), R(1)] }],
+    ['a thin week between is skipped', win({ earlier: [W2[0], earlierLine(R(3), 'thin'), W2[1]] }), { agreement: 3, ready: true, item: null }],
     ['an even week ends the walk', win({ earlier: [W2[0], earlierLine(R(3), 'even'), W2[1]] }), { agreement: 2, item: null }],
     ['the opposite signal ends it', win({ earlier: [W2[0], earlierLine(R(3), 'loss', 'loss'), W2[1]] }), { agreement: 2, item: null }],
     ['a trade week ends it', win({ earlier: [W2[0], earlierLine(R(3), 'trade', 'trade-handsOff'), W2[1]] }), { agreement: 2, item: null }],
@@ -242,9 +247,13 @@ test('the hold order: agreement first (a thin week skipped, anything else ends t
       { held: 'a trade (gains handsOffRate, costs quality): Lachy decides', caution: '', item: 'ceiling', to: 60, direction: 1 }],
     ['a trade with Fable\'s tokens over the bound names the breach as its caution', { ...week({ trade: true, fableTokens: 3000 }), earlier: TRADES },
       { held: 'a trade (gains handsOffRate, costs quality): Lachy decides', caution: `risks ${OVER}`, breached: [OVER], item: 'ceiling' }],
-    ['no [share] for the role', win({ share: { builder: 0.5 } }), { from: null, held: 'no Fable ceiling for master-review (ladder.toml [share])', item: null }],
-    ['a refused ladder', win({ share: null, shareError: 'unknown key' }), { from: null, item: null }],
-    ['at the edge', win({ share: { 'master-review': 1 }, earlier: W2 }), { from: 100, held: 'at the edge: a Fable ceiling of 100% cannot move up', item: null }],
+    ['no ceiling for the role', win({ ceiling: ceil({ builder: 50 }) }),
+      { from: null, held: 'no Fable ceiling for master-review (rollouts.toml fable_ceiling_master_review, else ladder.toml\'s [share])', item: null }],
+    ['a refused ladder', win({ ceiling: null, ceilingError: 'ladder.toml is refused: unknown key' }), { from: null, item: null }],
+    ['at the edge', win({ ceiling: ceil({ 'master-review': 100 }), earlier: W2 }), { from: 100, held: 'at the edge: a Fable ceiling of 100% cannot move up', item: null }],
+    ['an agreed narrowing to 0 is a caution: 0 is set by hand', { ...week({ loss: true, from: 10 }),
+      earlier: [earlierLine(R(1), 'loss', 'loss', 10), earlierLine(R(2), 'loss', 'loss', 10)] },
+    { held: 'a caution: Lachy decides', caution: 'turns the master-review arm off (0 is set by hand)', item: 'ceiling', to: 0, ready: false }],
   ]
   const out = reading(h, cases.map((c) => c[1]))
   cases.forEach(([what, _a, want], i) => {
@@ -252,8 +261,8 @@ test('the hold order: agreement first (a thin week skipped, anything else ends t
     assert.deepEqual(pick(got, Object.keys(want)), want, what)
   })
   assert.equal(out[1].block.roles['master-review'].kid, out[2].block.roles['master-review'].kid)
-  assert.ok(out[15].block.flags.includes('arms: the ladder is refused (unknown key): no Fable ceiling is read'))
-  assert.ok(!out[14].block.flags.some((f) => f.includes('ladder')), 'a share with no role is no flag')
+  assert.ok(out[15].block.flags.includes('arms: no Fable ceiling is read (ladder.toml is refused: unknown key)'))
+  assert.ok(!out[14].block.flags.some((f) => f.includes('ceiling')), 'a ceiling with no role is no flag')
   assert.equal(out[0].block.roles.lead.verdict, 'thin', 'the lead, in no arm, is thin')
   // the over-bound trade's decision-task line prints its caution and both arms' tokens per merge
   const r = spawnSync('python3', ['-B', '-c', ['import importlib.util, json, sys',
@@ -264,8 +273,48 @@ test('the hold order: agreement first (a thin week skipped, anything else ends t
   assert.deepEqual(JSON.parse(r.stdout), [`- ceiling ${out[13].block.roles['master-review'].kid} at 50: Fable ceiling master-review 50% -> 60% ` +
     `(trade-handsOff); a trade (gains handsOffRate, costs quality): Lachy decides; caution risks ${OVER}; evidence opus 3 landed, ` +
     'Hands-off 0.6667, 0 Escape(s), tokens per merge 2000; fable 3 landed, Hands-off 1, 2 Escape(s), tokens per merge 6000; ' +
-    `agreed with ${R(2)}, ${R(1)}; rollouts [[rw]]; a yes: the deciding session sets ~/.config/thread/ladder.toml [share] master-review = 0.6 ` +
-    'and runs ladder.py'])
+    `agreed with ${R(2)}, ${R(1)}; rollouts [[rw]]; a yes runs tune.py --ceiling-yes (SKILL.md § Deciding the decision task)`])
+})
+
+// p46-10: each role's revertGuard is CEILING_RISKS' measured lines, per direction, and nothing else: tune.py
+// --ceiling-revert reverts a landing only on it.
+test('revertGuard: only the role\'s own measured tokens per merge in the move\'s direction, with both arms at MIN_LANDED token tasks; never a rollout breach or the fail-closed line; span\'s ceilings reverts a closed landing on it, one item per role', (t) => {
+  const h = setup(t)
+  const guard = (a) => a.block.roles['master-review'].revertGuard
+  const partial = (w) => ({ ...w, records: { rw: w.records.rw.map(([ms, n, d]) => [ms, n, d.task === 'f3' && d.kind === 'role-call' ? { ...d, tokensPartial: true } : d]) } })
+  const [over, under, breach, unknown, thin] = reading(h, [
+    week({ fableTokens: 3000 }), week({ fableTokens: 300 }), { ...week(), breaches: [['rz', 'conflictRate']] },
+    { ...week(), records: { rw: week().records.rw.filter(([, , d]) => !(d.kind === 'role-call' && d.task.startsWith('f'))) } },
+    partial(week({ fableTokens: 3000 })),
+  ])
+  assert.deepEqual(guard(over), { widening: ['tokens per merge: fable 6000.0 over opus 2000.0 by more than 25 %'], narrowing: [] })
+  assert.deepEqual(guard(under), { widening: [], narrowing: ['tokens per merge: opus 2000.0 over fable 600.0 by more than 25 %'] })
+  assert.deepEqual(guard(breach), { widening: [], narrowing: [] }, 'a rollout\'s conflict breach alone never reverts')
+  assert.ok(breach.block.roles['master-review'].breached.includes('[[rz]] conflictRate'), 'control: it still holds a new widening')
+  assert.deepEqual(guard(unknown), { widening: [], narrowing: [] }, 'tokens per merge unknown: no guard')
+  assert.ok(unknown.block.roles['master-review'].breached.includes('tokens per merge unknown on an arm: a widening fails closed'), 'control: still held')
+  assert.equal(thin.block.roles['master-review'].fable.tokenTasks, 2)
+  assert.deepEqual(guard(thin), { widening: [], narrowing: [] }, 'fewer than MIN_LANDED token tasks on an arm: no guard')
+  assert.ok(!('revertGuard' in over.line.roles['master-review']), 'line() never writes it')
+  // span's `ceilings` reverts on it (step 14 runs --ceiling-revert once per revert item): a closed Reflection's auto line
+  // that moved two roles, both still at their to, each with a widening guard, is one item per role, from and to swapped;
+  // a role that is also ready is held behind its revert
+  const widening = guard(over).widening
+  const landing = { id: 't-c1', auto: true, reflection: R(1), applied: ['master-review', 'builder'].map((role) =>
+    ({ role, from: 50, to: 60, rule: 'win', evidence: 'e', kid: '0123abcd', agreed: 3 })) }
+  const roles = { 'master-review': { from: 60, to: 70, ready: true, signal: 'win', kid: '0123abcd', agreement: 3, revertGuard: { widening, narrowing: [] } },
+    builder: { from: 60, revertGuard: { widening: ['builder guard'], narrowing: [] } } }
+  const r = spawnSync('python3', ['-B', '-c', ['import importlib.util, json, sys',
+    'spec = importlib.util.spec_from_file_location("m", sys.argv[1]); m = importlib.util.module_from_spec(spec); spec.loader.exec_module(m)',
+    'a = json.load(sys.stdin)', 'assert m.RR.emit(None, "ceiling", fields=a["line"], strict=True)',
+    's = object.__new__(m.Span); s.ceiling_now = a["now"]',
+    'print(json.dumps(s.ceilings({"roles": a["roles"]}, m.read_ceilings(), a["reflections"], a["rid"])))'].join('\n'), REFLECT],
+  { encoding: 'utf8', cwd: h.home, env: env(h), input: JSON.stringify({ line: landing, roles, now: ceil({ 'master-review': 60, builder: 60 }),
+    reflections: [{ kind: 'reflection', id: R(1) }], rid: 'r-20261109T130000Z-aaaaaa' }) })
+  assert.equal(r.status, 0, r.stderr)
+  assert.deepEqual(JSON.parse(r.stdout), { now: { 'master-review': 60, builder: 60, investigator: null, lead: null }, land: [],
+    revert: [{ tuning: 't-c1', role: 'master-review', from: 60, to: 50, breached: widening }, { tuning: 't-c1', role: 'builder', from: 60, to: 50, breached: ['builder guard'] }],
+    held: [{ role: 'master-review', reason: 'a revert of master-review comes first this Reflection' }] })
 })
 
 test('plans: the split at the first Fable planner call off the Fable rung; each side counts its tasks, planned or not, and leaves out only the other model\'s; per100 for the week and to date', (t) => {
@@ -383,7 +432,7 @@ test('window_flags holds each arms row to the window: a planted call flags arms.
 
 // ---- decide, close and moot on a Fable ceiling ---------------------------------------------------------------------------
 
-const ARMS_LEAD = 'Fable ceilings for Lachy (ADR 0079 d9: three Reflections agreed on a move, a trade or a caution; no writer lands a ceiling until [[thread-skill-p46-10-an-agreed-fable-ceiling-lands-on-its-own]], so the session deciding this task applies a yes: it sets ladder.toml [share] <role> to the item\'s to, then runs ladder.py; a no is recorded when this task is done):'
+const ARMS_LEAD = 'Fable ceilings for Lachy (ADR 0079 d9: a trade or a caution on a role\'s Fable ceiling is his call; an agreed move lands by itself at the weekly reading\'s step 14; a yes runs tune.py --ceiling-yes, a no is recorded when this task is done):'
 const RID = (n) => `r-2026111${n}T000000Z-00000${n}`
 function armsSpan(h, rid, block, until = UNTIL) {
   const p = path.join(h.out, `span-${rid}.json`)
@@ -413,7 +462,7 @@ test('a ceiling on the decision task: decide lists it under its own lead, close 
   const item = `- ceiling ${kid} at 50: Fable ceiling master-review 50% -> 60% (trade-handsOff); a trade (gains handsOffRate, costs quality): Lachy decides; ` +
     `evidence opus 3 landed, Hands-off 0.6667, 0 Escape(s), tokens per merge 2000; fable 3 landed, Hands-off 1, 2 Escape(s), tokens per merge 2000; ` +
     `agreed with ${R(2)}, ${R(1)}; rollouts [[rw]]; ` +
-    'a yes: the deciding session sets ~/.config/thread/ladder.toml [share] master-review = 0.6 and runs ladder.py'
+    'a yes runs tune.py --ceiling-yes (SKILL.md § Deciding the decision task)'
   assert.ok(fs.readFileSync(p, 'utf8').endsWith(`## Reflection ${RID(1)}\n\n${ARMS_LEAD}\n${item}\n`), fs.readFileSync(p, 'utf8'))
   assert.match(ok(h, ['close', '--span', sp1, '--tasks-dir', h.tasks]).stdout, /; arms written\n$/)
   const lines1 = rlines(h)
@@ -431,7 +480,7 @@ test('a ceiling on the decision task: decide lists it under its own lead, close 
   assert.doesNotMatch(ok(h, ['close', '--span', sp2, '--tasks-dir', h.tasks]).stdout, /arms written/)
   assert.equal(rlines(h).filter((l) => l.kind === 'arms' && l.reflection === RID(2)).length, 1, 'a re-run writes no second arms line')
   // a yes that cannot apply: moot, under the item's own section
-  assert.equal(ok(h, ['moot', '--task', slug, '--trade', kid, '--from', '50', '--why', 'ladder.toml read 0.6 already', '--tasks-dir', h.tasks,
+  assert.equal(ok(h, ['moot', '--task', slug, '--trade', kid, '--from', '50', '--why', 'tune.py: stale from: the ceiling is 60 now', '--tasks-dir', h.tasks,
     '--now', '2026-11-18T09:00+11:00']).stdout, `moot ceiling ${kid} at 50 in [[${slug}]] (## Reflection ${RID(1)})\n`)
   // a week whose block holds no row writes no arms line
   ok(h, ['close', '--span', armsSpan(h, RID(3), allNone.block, '2026-11-23T13:00:00.000Z'), '--tasks-dir', h.tasks])
@@ -439,13 +488,23 @@ test('a ceiling on the decision task: decide lists it under its own lead, close 
   assert.deepEqual([sha(ladder), sha(path.join(h.ev, 'tunings.jsonl'))], before, 'nothing here writes ladder.toml or tunings.jsonl')
 })
 
+test('decide lists no ready ceiling: an agreed move lands at step 14, never on the decision task', (t) => {
+  const h = setup(t)
+  const [ready] = reading(h, [{ ...week(), earlier: [earlierLine(R(1), 'win', 'win'), earlierLine(R(2), 'win', 'win')] }])
+  assert.equal(ready.block.roles['master-review'].ready, true)
+  const r = ok(h, ['decide', '--span', armsSpan(h, RID(1), ready.block), '--tasks-dir', h.tasks, '--now', '2026-11-10T09:00+11:00'])
+  assert.equal(r.stdout, 'no rule proposal or held trade: no decision task\n')
+  assert.ok(!fs.existsSync(path.join(h.tasks, 'thread-skill-decisions-2026-11-10.md')), 'no decision task written')
+})
+
 // ---- span, end to end ---------------------------------------------------------------------------------------------
 
-test('span reads the arms end to end: the stamps from the notes, Hands-off from score.py, the ceiling from ladder.toml [share], agreement from closed Reflections only; no window flag', (t) => {
+test('span reads the arms end to end: the stamps from the notes, Hands-off from score.py, the ceiling from rollouts.toml over ladder.toml\'s [share] seed, agreement from closed Reflections only, its landing in `ceilings`; no window flag', (t) => {
   const h = setup(t)
   fs.mkdirSync(path.join(h.home, '.config', 'thread'), { recursive: true })
   fs.writeFileSync(path.join(h.home, '.config', 'thread', 'ladder.toml'),
-    '[[rung]]\nname = "opus-high"\nmodel = "opus"\neffort = "high"\njudge = "high"\nreview = "xhigh"\n\n[share]\nmaster-review = 0.5\n')
+    '[[rung]]\nname = "opus-high"\nmodel = "opus"\neffort = "high"\njudge = "high"\nreview = "xhigh"\n\n[share]\nmaster-review = 0.3\nlead = 0.2\n')
+  fs.writeFileSync(path.join(h.home, 'rollouts.toml'), 'schema = 10\n\n[defaults]\nfable_ceiling_master_review = 50\n')
   const { records, stamps } = week()
   // every line through run_record.emit, so each is a line the record would hold; o2's act is a Recorded answer
   const rows = records.rw.map(([_ms, _n, d]) => { const { v, ts, host, rollout, task, kind, ...f } = d; return [ts, kind, task, f, rollout] })
@@ -473,7 +532,9 @@ test('span reads the arms end to end: the stamps from the notes, Hands-off from 
   const mr = s.arms.roles['master-review']
   assert.deepEqual([mr.opus.landed, mr.opus.handsOff, mr.fable.landed, mr.fable.handsOff], [3, 2, 3, 3], 'score.py\'s acts, read whole')
   assert.deepEqual(pick(mr, ['verdict', 'from', 'to', 'agreement', 'agreedWith', 'ready', 'item']),
-    { verdict: 'win', from: 50, to: 60, agreement: 3, agreedWith: [R(2), R(1)], ready: true, item: 'ceiling' })
+    { verdict: 'win', from: 50, to: 60, agreement: 3, agreedWith: [R(2), R(1)], ready: true, item: null }, 'rollouts.toml\'s 50 over the seed\'s 30')
   assert.deepEqual([s.arms.roles.lead.opus.landed, s.arms.roles.builder.excluded.none], [6, 6])
+  assert.deepEqual(s.ceilings, { now: { 'master-review': 50, builder: null, investigator: null, lead: 20 },
+    land: [{ role: 'master-review', from: 50, to: 60, kid: mr.kid, signal: 'win', agreement: 3 }], revert: [], held: [] })
   assert.ok(s.cannotShow.some((c) => c.startsWith('arms: ')), 'a block that holds a row brings its cannotShow')
 })

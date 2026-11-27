@@ -31,7 +31,9 @@ export const meta = {
 //                                    //   rungs: [{ name, model, effort, judge, review[, plan] }, …][, roles:
 //                                    //   { <LADDER_ROLES>: <model> }][, share: { <LADDER_SHARE_ROLES>: <0..1> }] },
 //                                    //   bottom first (ADR 0079: a rung's plan model and the ladder's role models,
-//                                    //   runOn; the share is reconcile's draw, and the engine reads only its
+//                                    //   runOn; the share is the resolved Fable ceilings, rollouts.toml's
+//                                    //   fable_ceiling_<role> / 100, else the ladder's [share] seed: ladder.py's
+//                                    //   engine view, p46-10; reconcile draws by it, and the engine reads only its
 //                                    //   master-review entry, for a doubled master review's first reviewer,
 //                                    //   fableNamedForReview, p52-2). Fixed for the call: a
 //                                    //   resume re-passes its call's own ladder, so an edit reaches a task at
@@ -2334,8 +2336,9 @@ checkout at "${a.repoPath}", which may be stale, dirty or on another branch.`
 //   to: the stage's climb that would strengthen it is recorded as a no-op { stage, from, to: from } and the rung
 //   stays (escalate), its retry gets CAPPED_RETRY_ITERATIONS, and the builder's first pass runs the full loop.
 //
-// Per call, no snapshot (decision 6). The lead runs ladder.py at each call's start and passes its JSON as
-// args.ladder; the call keeps it to the end, and a resume re-passes it. With none, BUILT_IN_LADDER applies
+// Per call, no snapshot (decision 6). The lead runs ladder.py at each call's start and passes its JSON (its engine
+// view: share is the resolved Fable ceiling, p46-10) as args.ladder; the call keeps it to the end, and a resume
+// re-passes it. With none, BUILT_IN_LADDER applies
 // (ladder.py's built-in, pinned equal by tests/ladder.test.mjs): two Opus rungs, nothing above Opus, no max.
 //
 // A task's state (rungState) is mutable and shared by every layer of the call: the rung it STARTED on, the
@@ -2361,9 +2364,10 @@ const LADDER_MODELS = ['opus', 'fable']   // ladder.py's MODELS (tests/ladder.te
 const LADDER_EFFORTS = ['low', 'medium', 'high', 'xhigh', 'max']
 // ladder.py's ROLES (tests/ladder.test.mjs pins them equal): the roles args.ladder.roles may give their own model.
 const LADDER_ROLES = ['master-review', 'builder', 'investigator']
-// ladder.py's SHARE_ROLES (tests/ladder.test.mjs pins them equal): the roles args.ladder.share may give a Fable share.
+// ladder.py's SHARE_ROLES (tests/ladder.test.mjs pins them equal): the roles args.ladder.share may give a Fable share,
+// each its resolved Fable ceiling (p46-10: rollouts.toml's fable_ceiling_<role> / 100, else the ladder's [share] seed).
 // The engine never draws (reconcile-rollout.py does, at a task's first dispatch, and stamps `arms:`): it validates the
-// share, and reads only share['master-review'], as the operator's file naming Fable for a doubled master review's first
+// share, and reads only share['master-review'], as the operator's files naming Fable for a doubled master review's first
 // reviewer (fableNamedForReview, p52-2).
 const LADDER_SHARE_ROLES = ['master-review', 'builder', 'investigator', 'lead']
 // The roles args.task.arms may place in an arm (ADR 0079 decision 3): the drawn roles the engine dispatches. Never the
@@ -2597,7 +2601,7 @@ function rungState(task, a) {
   // arms (p46-2): the task's stamped arms (args.task.arms), read only through armOf.
   // unreachable (p52-1): the call's readings of an Unreachable surface, set by planLoop (plan, judge, planned) and runAgent
   // (result, paths), against args.unreachablePaths' globs; unreachableRow reads them into the row.
-  // share (p52-2): the ladder's [share], read only by fableNamedForReview. doubled (p52-2): set by reviewLoop at a round's
+  // share (p52-2): args.ladder.share, the resolved Fable ceilings (p46-10), read only by fableNamedForReview. doubled (p52-2): set by reviewLoop at a round's
   // start once this call's mark or task.unreachable holds, sticky for the call; armOf reads it.
   // allowance (p46-3, ADR 0079 d7): absent until runAgent reads an allowance refusal, then { refused, fellBack } for the
   // rest of the call (every later Fable dispatch runs on Opus); rowRecord copies it onto the row.
@@ -2716,8 +2720,9 @@ function runOn(st, role) {
   const effort = role === 'plan-judge' ? judgeEffort(st, 'judge') : role === 'master-review' ? judgeEffort(st, 'review') : implEffort(st)
   return { model: rung.model, effort }
 }
-// A doubled master review (p52-2, ADR 0081 d2). Whether the operator's file names Fable for the master review: its
-// `roles` gives the master review Fable, or its [share] gives it a share above 0. Never on an all-Fable rung, where the
+// A doubled master review (p52-2, ADR 0081 d2). Whether the operator's files name Fable for the master review: the
+// ladder's `roles` gives the master review Fable, or its resolved Fable ceiling (args.ladder.share, p46-10: rollouts.toml's
+// fable_ceiling_master_review, else the ladder's [share] seed) is above 0. Never on an all-Fable rung, where the
 // rung runs every role. The engine cannot see the Login's room: a first reviewer on Fable that dies twice is read as an
 // allowance refusal (p46-3, runAgent), so it reruns once on Opus and every later Fable dispatch of the call, a `[role]`
 // second reviewer's included, runs on Opus at once.

@@ -111,7 +111,7 @@ Subcommands:
       (the rollout's `verifier:`, through reconcile's command reader), date (today), knownBaselineFailures (the rollout's
       `## Known baseline failures` with HTML comments removed: every non-blank line, one leading `- ` stripped, a `none`
       line skipped; omitted when none is left), envBootstrap (the rollout's `env_bootstrap:`, the same reader; omitted
-      when empty), ladder (ladder.py's load(), the object its CLI prints), verifySlot ({script: verify-slot.py beside
+      when empty), ladder (ladder.py's engine_view(), the object its CLI prints), verifySlot ({script: verify-slot.py beside
       reconcile-rollout.py, slots: the machine's verify_slots}, verify-timeout's own), securityCheck (reconcile's
       _security_check of the rollout, present only when it is on) and task: slug, taskPath, scope, planGate (execute
       § 3.5: `plan_approval` on the task, then the rollout, else scope-gated), maxIterations, maxReviewRounds and
@@ -2874,14 +2874,17 @@ def _approved_gates(note):
 
 
 def _ladder_json():
-    """ladder.py's load(), the object its CLI prints (execute § 3, read at this call's start). Any failure, a refused
-    file or python < 3.11 among them, is EnvError `ladder file refused: <where>: <reason>`."""
+    """ladder.py's engine_view() view, the object its CLI prints (execute § 3, read at this call's start; p46-10: its
+    `share` the resolved Fable ceilings, rollouts.toml's over the ladder's [share] seed), so a seeded revise's and an
+    integrate call's args.ladder equal the CLI's stdout. A rollouts.toml that gives no ceiling leaves `share` out, as the
+    CLI does. Any failure of the ladder itself, a refused file or python < 3.11 among them, is EnvError `ladder file
+    refused: <where>: <reason>`."""
     mod = None
     try:
         spec = importlib.util.spec_from_file_location("thread_ladder", rr.LADDER_PY)
         mod = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(mod)
-        return mod.load()
+        return mod.engine_view()[0]
     except Exception as e:
         path = ""
         try:

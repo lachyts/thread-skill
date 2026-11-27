@@ -240,7 +240,7 @@ const GRADE_S11 = ['Read `span.json`\'s `grades`', '`window.readyHandsOff`', '`$
 const GRADE_S17 = 'the grade accuracy (the Ready headline'
 const GRADE_CANNOT = ['`DECISION_MINUTES`', '`REVIEW_MINUTES`']
 const WEEKLY_ORDER = [/reflect\.py span /, /reflect\.py watch /, /reflect\.py bug /, /reflect\.py ledger /, /reflect\.py attention /,
-  /tune\.py\b.*--revert /, /tune\.py\b.*--auto /, /reflect\.py knobs /, /reflect\.py decide /, /reflect\.py close /]
+  /tune\.py\b.*--revert /, /tune\.py\b.*--auto /, /tune\.py --ceilings /, /reflect\.py knobs /, /reflect\.py decide /, /reflect\.py close /]
 // The Time-lost ledger (p29-11, w18): who starts the reading, the audit step and the ledger step, the load hold, a gap's
 // answer, gaps and quiet, and what the ledger cannot price.
 const LEDGER_START = ['What starts it is Chorus\'s weekly Runner first: on the Thursday Reflection Routine\'s morning',
@@ -416,7 +416,7 @@ function check(files, notes = []) {
   if (!/`skills\/reflect\/scripts\/tune\.py` is the \*\*only writer\*\* of `rollouts\.toml` and of `tunings\.jsonl`/.test(s) ||
     !/runs tune\.py \*\*exactly once\*\*/.test(s) ||
     fenced.some((l) => /rollouts\.toml|tunings\.jsonl/.test(l)) ||
-    fenced.filter((l) => /tune\.py/.test(l)).some((l) => !/^python3 \$\{CLAUDE_PLUGIN_ROOT\}\/skills\/reflect\/scripts\/tune\.py --scores /.test(l))) fails.push('writer')
+    fenced.filter((l) => /tune\.py/.test(l)).some((l) => !/^python3 \$\{CLAUDE_PLUGIN_ROOT\}\/skills\/reflect\/scripts\/tune\.py --(?:scores|ceilings|ceiling-revert|ceiling-yes) /.test(l))) fails.push('writer')
   if (!collapse(s).includes('A picked Tuning takes effect at the next `/thread:schedule` (or its `--regenerate`, which stamps freshly resolved values)') ||
     !collapse(s).includes('A rollout note already stamped, running, paused or not yet started, keeps its own frontmatter values')) fails.push('effect')
   // the triggers name the rollout, never Chorus's Companion, and the description sends the Companion to Chorus
@@ -557,6 +557,7 @@ test('control: tune before the score, or before Lachy answers, fails order', () 
 
 test('control: a second writer or a lost "exactly once" fails writer', () => {
   only('skill', swap('skill', 'runs tune.py **exactly once**', 'runs tune.py'), ['writer'])
+  only('skill:verbless', swap('skill', 'tune.py --ceiling-yes --role <role>', 'tune.py --role <role>'), ['writer'])
   only('skill:sed', swap('skill', 'mkdir -p /tmp/thread-reflect-<rollout-slug>\n', 'mkdir -p /tmp/thread-reflect-<rollout-slug>\nsed -i "" "s/= 3/= 4/" ~/.config/thread/rollouts.toml\n'), ['writer'])
 })
 
@@ -884,20 +885,17 @@ test('control: the carried read without --dry-run, an owed entry worded done, or
   assert.deepEqual(carriedRead(swap("Step 17's carried read runs `reconcile-rollout.py prove` with", 'Step 17 reads')), ['scope'])
 })
 
-// The arms (p46-4, ADR 0079 d9): step 11 reads plans as a before and after, never a comparison, and says the reading never
-// edits ladder.toml; § Deciding says the session deciding the task applies a ceiling's yes, by ladder.py's read; the
-// writers at the top name [share] as having no script writer, its yes the one by-hand edit; and § What the record cannot
-// show says an applied yes writes no Run record line.
+// The arms (p46-4, ADR 0079 d9; p46-10): step 11 reads plans as a before and after, never a comparison, and says the
+// reading never edits ladder.toml, a ceiling moving only through tune.py; § Deciding says a ceiling's yes runs tune.py
+// --ceiling-yes, a stale from recorded moot; the writers at the top name tune.py as the ceiling's one script writer,
+// nothing in the skill writing ladder.toml, and each move's `ceiling` line as its record.
 const ARMS_PLANS = 'Read `plans` as a before and after, not a comparison: planning has no Opus arm'
-const ARMS_NEVER = 'The reading never edits `ladder.toml`: a Fable ceiling moves only on Lachy\'s yes to its decision-task item, which the session deciding the task applies'
-const ARMS_DEC = ['**A yes to a Fable ceiling** (a `- ceiling` item, whatever its held reason): the session deciding the task applies it',
-  'Read `[share] <role>` in `~/.config/thread/ladder.toml`', 'the yes cannot apply: record it with `moot --trade <kid> --from <from>`',
-  'set that one value to the item\'s `to` / 100, leaving every other byte of the file as it was',
-  'run `python3 ${CLAUDE_PLUGIN_ROOT}/skills/_shared/scripts/ladder.py` to see the new share read',
-  '**A no to a Fable ceiling**: nothing to run.', 'each ceiling\'s yes saw `ladder.py` print the new share']
-const ARMS_WRITER = ['`~/.config/thread/ladder.toml`\'s `[share]` values (each role\'s Fable ceiling, ADR 0079 d9) have **no script writer** until p46-10',
-  'A ceiling\'s yes in § Deciding the decision task is the one by-hand edit this skill makes']
-const ARMS_RECORD = 'An applied Fable ceiling\'s yes writes no Run record line: no `tuning` line in `tunings.jsonl` and nothing in `reflections.jsonl`'
+const ARMS_NEVER = 'The reading never edits `ladder.toml`: a Fable ceiling moves only through tune.py, an agreed move at step 14 and a trade or a caution on Lachy\'s yes'
+const ARMS_DEC = ['**A yes to a Fable ceiling** (a `- ceiling` item, whatever its held reason, a ready one an older task lists included): run tune.py `--ceiling-yes`',
+  'A `stale from` refusal (exit 2: the ceiling moved since the reading) means the yes cannot apply: record it with `moot --trade <kid> --from <from>`',
+  '**A no to a Fable ceiling**: nothing to run.', 'each ceiling\'s yes printed `applied ceiling`']
+const ARMS_WRITER = ['tune.py is also the one script writer of each drawn role\'s **Fable ceiling**', 'Nothing in this skill writes `ladder.toml`']
+const ARMS_RECORD = 'Every move writes one `ceiling` line in `tunings.jsonl`, its record'
 function armsFails(skill) {
   const s11 = collapse(sectionOf(skill, /^### 11\. /))
   const dec = collapse(sectionOf(skill, /^## Deciding the decision task$/))
@@ -907,11 +905,11 @@ function armsFails(skill) {
   if (!s11.includes(ARMS_NEVER)) out.push('never')
   if (!ARMS_DEC.every((n) => dec.includes(n))) out.push('decide')
   if (!ARMS_WRITER.every((n) => top.includes(n))) out.push('writer')
-  if (!collapse(sectionOf(skill, /^## What the record cannot show$/)).includes(ARMS_RECORD)) out.push('record')
+  if (!top.includes(ARMS_RECORD)) out.push('record')
   return out
 }
 
-test('the arms: plans are a before and after, the reading never edits ladder.toml, and the deciding session applies a ceiling\'s yes by ladder.py', () => {
+test('the arms: plans are a before and after, the reading never edits ladder.toml, and a ceiling\'s yes runs tune.py --ceiling-yes', () => {
   assert.deepEqual(armsFails(real.skill), [])
 })
 
@@ -919,7 +917,7 @@ test('control: the plans sentence, the never-edits sentence, the ceiling\'s yes 
   const swap = (from, to) => { assert.ok(real.skill.includes(from), `control setup: ${from}`); return real.skill.replace(from, to) }
   assert.deepEqual(armsFails(swap('as a before and after, not a comparison:', 'as a comparison:')), ['plans'])
   assert.deepEqual(armsFails(swap('The reading never edits `ladder.toml`:', 'The reading may edit `ladder.toml`:')), ['never'])
-  assert.deepEqual(armsFails(swap('to see the new share read', 'when it can')), ['decide'])
-  assert.deepEqual(armsFails(swap('have **no script writer**', 'have a writer')), ['writer'])
-  assert.deepEqual(armsFails(swap('An applied Fable ceiling\'s yes writes no Run record line', 'An applied Fable ceiling\'s yes is recorded')), ['record'])
+  assert.deepEqual(armsFails(swap('run tune.py `--ceiling-yes` with', 'edit `ladder.toml` with')), ['decide'])
+  assert.deepEqual(armsFails(swap('Nothing in this skill writes `ladder.toml`.', 'The deciding session writes `ladder.toml`.')), ['writer'])
+  assert.deepEqual(armsFails(swap('Every move writes one `ceiling` line in `tunings.jsonl`, its', 'No move writes a line in `tunings.jsonl`, its')), ['record'])
 })

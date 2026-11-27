@@ -237,15 +237,18 @@ Subcommands:
               `started:` write, per note: `--start resume` draws, stamps and prints nothing (a resume re-passes its
               call's own args). A note with `arms:` keeps it and prints `<slug>: arms <compact JSON>`, roles in order
               (e.g. `{"master-review":"fable","builder":"none"}`), which the lead passes as args.task.arms on a fresh
-              call; one that does not parse is kept, with one `WARN:` and no line. With no `arms:` and a ladder that
-              has a [share] table (ladder.py, read once per run), it stamps `arms: <role>=<opus|fable|none> ...` and
+              call; one that does not parse is kept, with one `WARN:` and no line. With no `arms:` and a role with a
+              resolved Fable ceiling (p46-10: ladder.py's engine view, read once per run: rollouts.toml's
+              fable_ceiling_<role>, else the ladder's [share] seed), it stamps `arms: <role>=<opus|fable|none> ...` and
               prints the line: a first dispatch (no `started:` before this call) draws every role of the task's kind
               (the master review and the builder, or the investigator for `scope: read-only`; the builder only when
               the task is hard: `work_depth: deep` or `scope: cross-cutting`); a later one stamps them all `none`, the
-              task having begun outside the draw. No [share] table: nothing, the note's bytes as before. A refused
-              ladder: nothing stamped, no line, one `WARN:` per run. defer keeps the stamp, as it keeps `rung:`.
+              task having begun outside the draw. No resolved ceiling: nothing, the note's bytes as before. A refused
+              ladder: nothing stamped, no line, one `WARN:` per run; a rollouts.toml that gives no ceiling (refused,
+              say) the same, its one `WARN: fable ceiling: rollouts.toml <why>: no role is drawn` line per run. defer
+              keeps the stamp, as it keeps `rung:`.
               The paced share (p46-3, ADR 0079 decision 6): a first dispatch draws each role against its Fable ceiling
-              (the [share] value, _fable_ceiling) times the pace fable_pace.py reads for the caller's Login
+              (the resolved ceiling, _fable_ceiling) times the pace fable_pace.py reads for the caller's Login
               (_caller_login) from the quota store, read once per run, and writes one `fable-share` Run record line per
               task drawn (login, ceiling, share, pace, then the reading or its why; nothing on --dry-run). A reading
               with a why (no Login, no store, unreadable, no row, a stale or ended window, a stamp ahead) paces 0, so
@@ -616,8 +619,8 @@ Subcommands:
               serial, superseded, done or dropped note prints `[skip] <stem>: <why>: no entry recorded` and writes
               nothing, no lease either. Prints one line naming what it wrote (`(dry-run)`: nothing written, no
               lease); a lease it cannot write prints one `lease: warning: …` line on stderr. The lead's arm (p46-2,
-              ADR 0079 decision 3): off --dry-run, while the ladder has a [share] table and the rollout note has no
-              `arms:`, it also stamps `arms: lead=<opus|fable|none>` on the rollout note (drawn by the rollout's slug
+              ADR 0079 decision 3): off --dry-run, while a role has a resolved Fable ceiling (p46-10) and the rollout
+              note has no `arms:`, it also stamps `arms: lead=<opus|fable|none>` on the rollout note (drawn by the rollout's slug
               when `lead` has a share; `none` when it has none, or when the record already held a lead-entry) and prints
               a second line, `<stem>: arms lead=<arm> (stamped)`. The stamp is kept whatever the share is later. It
               is the seam Chorus reads: nothing here runs the lead on it, and the lead-entry line carries no arm. Its
@@ -4791,20 +4794,23 @@ LADDER_PY = Path(__file__).resolve().parent.parent.parent / "_shared" / "scripts
 
 
 def _ladder():
-    """The operator's ladder, read through ladder.py's load(): {source, rungs: [names, bottom first], share, error}.
-    `share` is the ladder's [share] table ({role: number}, p46-2), {} when the file names none. `error` is None when
-    it reads. When it cannot be read (a refused file: LadderError, exit 2 or 3 from the
-    CLI; or a ladder.py that will not load) `rungs` is [], `share` {}, `source` the path load() reads (ladder.py's
-    default_path(), '' when ladder.py itself will not load) and `error` the CLI's own words without its
-    `ladder: ` prefix: `<path>:<line>: <reason>`, or `<path>: <reason>` when no line applies."""
+    """The operator's ladder, read through ladder.py's engine_view() (the CLI's object): {source, rungs: [names, bottom
+    first], share, ceilingError, error}. `share` is each drawn role's resolved Fable ceiling ({role: number in [0, 1]},
+    p46-10: rollouts.toml's `fable_ceiling_<role>` / 100, else the ladder's [share] seed, p46-2), {} when no role has
+    one. `ceilingError` is engine_view's why, the reason rollouts.toml gave no ceiling (refused, say), else None:
+    _fable_ceiling WARNs it once. `error` is None when the ladder reads. When it cannot be read (a refused file:
+    LadderError, exit 2 or 3 from the CLI; or a ladder.py that will not load) `rungs` is [], `share` {}, `ceilingError`
+    None, `source` the path load() reads (ladder.py's default_path(), '' when ladder.py itself will not load) and
+    `error` the CLI's own words without its `ladder: ` prefix: `<path>:<line>: <reason>`, or `<path>: <reason>` when no
+    line applies."""
     mod = None
     try:
         spec = importlib.util.spec_from_file_location("thread_ladder", LADDER_PY)
         mod = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(mod)
-        ladder = mod.load()
+        ladder, why = mod.engine_view()
         return {"source": ladder["source"], "rungs": [r["name"] for r in ladder["rungs"]],
-                "share": dict(ladder.get("share") or {}), "error": None}
+                "share": dict(ladder.get("share") or {}), "ceilingError": why, "error": None}
     except Exception as e:  # any failure is the caller's ERROR or flag, never a guessed rung
         path = ""
         try:
@@ -4814,7 +4820,8 @@ def _ladder():
         reason = str(getattr(e, "reason", "") or e) or type(e).__name__
         line = getattr(e, "line", None)
         where = path if line is None else f"{path}:{line}"
-        return {"source": path, "rungs": [], "share": {}, "error": f"{where}: {reason}" if where else reason}
+        return {"source": path, "rungs": [], "share": {}, "ceilingError": None,
+                "error": f"{where}: {reason}" if where else reason}
 
 
 def _ladder_top():
@@ -4827,8 +4834,8 @@ def _ladder_top():
 
 # ---- arms (p46-2, ADR 0079 decisions 3 and 4) -----------------------------------------------------------------------
 # A drawn role falls in its Opus or its Fable arm by a draw fixed by the task's name (a rollout's lead by the rollout's),
-# compared with the role's Fable share: its Fable ceiling (the ladder's [share] table, _fable_ceiling, until p46-10 moves
-# it into the Rollout settings) times the pace fable_pace.py reads for the caller's Login (p46-3, ADR 0079 decision 6:
+# compared with the role's Fable share: its resolved Fable ceiling (_fable_ceiling: the Rollout settings' fable_ceiling_
+# <role>, else the ladder's [share] seed, p46-10) times the pace fable_pace.py reads for the caller's Login (p46-3, ADR 0079 decision 6:
 # the Login's Fable and general weekly windows run down together; a missing or stale reading paces 0, so every role
 # draws Opus, with one `fable-share` Run record line per draw and one WARN, never a stop). The draw is made
 # once, at a task's first dispatch (mark-started), and stamped on its note as `arms:`, as its rung is, so a resume or a
@@ -4922,9 +4929,18 @@ def _fable_pace_module():
     return _FABLE_PACE_MOD or None
 
 
+FABLE_CEILING_WARN = "WARN: fable ceiling:"
+
+
 def _fable_ceiling(ladder) -> dict:
-    """Each drawn role's Fable ceiling (ADR 0079 decision 6), {role: number in [0, 1]}: the ladder's [share] table (p46-2),
-    {} with none. The one place task p46-10 changes when it moves the ceiling into the Rollout settings."""
+    """Each drawn role's Fable ceiling (ADR 0079 decision 6), {role: number in [0, 1]}: _ladder()'s `share`, the
+    resolved ceiling (p46-10: rollouts.toml's fable_ceiling_<role> / 100, else the ladder's [share] seed), {} with none.
+    A ladder dict whose `ceilingError` is set (rollouts.toml gave no ceiling: its share is {}) prints one
+    `WARN: fable ceiling: rollouts.toml <why>: no role is drawn` line the first time it is read, and is marked so, so a
+    run that reads one dict (mark-started's ladder_once) WARNs once."""
+    if ladder.get("ceilingError") and not ladder.get("ceilingWarned"):
+        print(f"{FABLE_CEILING_WARN} rollouts.toml {ladder['ceilingError']}: no role is drawn", file=sys.stderr)
+        ladder["ceilingWarned"] = True
     return dict(ladder.get("share") or {})
 
 
@@ -4973,11 +4989,12 @@ def _start_arms(note, slug, first, explicit, ladder_once, pace_once):
     """mark-started's arms for one note (p46-2): (arms, drawn). arms is the stamp to print as `<slug>: arms <json>`, or
     None for no line; drawn is the draw's `fable-share` Run record fields (_fable_share_fields), or None when nothing
     was drawn. `--start resume` draws, stamps and prints nothing (a resume re-passes its call's own args). A note with
-    `arms:` keeps it (one WARN and no line when it does not parse). Else, with a [share] table: a first dispatch
-    (`first`: no `started:` before this call's writes) draws every role of the task's kind (_task_arms) against its Fable
-    ceiling (_fable_ceiling) times the pace of `pace_once()` (p46-3: the run's one reading, _fable_reading); a later one
-    stamps them all `none` (the task began outside the draw), reading nothing. No [share] table, or a refused ladder:
-    nothing. Sets ARMS_KEY when it stamps; the caller saves the note, then writes drawn's one line for the task, so a
+    `arms:` keeps it (one WARN and no line when it does not parse). Else, with a resolved ceiling (p46-10): a first
+    dispatch (`first`: no `started:` before this call's writes) draws every role of the task's kind (_task_arms) against
+    its Fable ceiling (_fable_ceiling) times the pace of `pace_once()` (p46-3: the run's one reading, _fable_reading); a
+    later one stamps them all `none` (the task began outside the draw), reading nothing. No resolved ceiling, a refused
+    rollouts.toml (one WARN per run, _fable_ceiling's) or a refused ladder: nothing. Sets ARMS_KEY when it stamps; the
+    caller saves the note, then writes drawn's one line for the task, so a
     save that fails records no draw for a task never stamped (as _lead_arm writes its line once its stamp lands)."""
     if explicit == "resume":
         return None, None
@@ -11308,7 +11325,7 @@ def cmd_record_entry(args) -> int:
     flight at its `at`. Before the record is read, once the skip passes and off --dry-run, it renews the lead's lease
     (_lease_write, by "entry"; p28-4), so a lapsed lead counts in the Trickle again from its first entry, naming its
     Login (_caller_login, p36-7) as `next`'s does. Off --dry-run, it stamps the lead's arm (p46-2, _lead_arm) on the
-    rollout note while the ladder has a [share] table and the note has no `arms:`: `arms: lead=<arm>`, drawn by the
+    rollout note while a role has a resolved Fable ceiling (p46-10) and the note has no `arms:`: `arms: lead=<arm>`, drawn by the
     rollout's slug when `lead` has a share (paced, p46-3: its ceiling times the caller's Login's pace, with one
     fable-share line), `none` when it has none or the record already held a lead-entry (the rollout was led before the
     draw). The lead-entry line itself carries no arm."""
@@ -11401,8 +11418,9 @@ def cmd_record_entry(args) -> int:
 
 def _lead_arm(note, ro, led, args=None, now=None):
     """record-entry's stamp of the lead's arm on the rollout note (p46-2): the arm stamped, or None when it stamps
-    nothing (the note has `arms:`, parsed or not; the ladder has no [share] table; or the ladder is refused, which
-    the lead's own ladder.py call at each Workflow call names, so a heartbeat tick never repeats it). The arm is
+    nothing (the note has `arms:`, parsed or not; no role has a resolved ceiling, p46-10; rollouts.toml gives none, with
+    _fable_ceiling's one WARN per entry; or the ladder is refused, which the lead's own ladder.py call at each Workflow
+    call names, so a heartbeat tick never repeats it). The arm is
     drawn by the rollout's slug when `lead` has a Fable ceiling (_fable_ceiling), against that ceiling times the pace of
     the caller's Login (p46-3, _fable_reading at `now`, read once; one WARN when it names why), else `none`; `none`
     too when the record already held a lead-entry (`led`), since the rollout was led before the draw. A draw whose stamp

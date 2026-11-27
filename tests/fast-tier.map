@@ -49,6 +49,7 @@ FOREIGN-ONLY SKILL.md tests/serial-chains.test.sh tests/estate-dispatch.test.mjs
 FOREIGN-ONLY SKILL.md tests/fast-tier.test.sh  # R11's select --paths arguments, C4's temp skills tree
 FOREIGN-ONLY SKILL.md skills/execute/tests/approved-gates-resume.test.mjs  # a header comment
 FOREIGN-ONLY SKILL.md skills/execute/tests/reconcile-rollout-compactions.test.sh  # a temp snapshot's skill file and the hook line's path
+FOREIGN-ONLY SKILL.md tests/reflect-arms.test.mjs  # the decision task's `- ceiling` line text (p46-10)
 
 # ---- The walkers: tests that read the whole tree, so every changed path selects them ----
 ** ALSO tests/contracts/continuity-shared.test.mjs tests/contracts/execute-archive-move.test.mjs

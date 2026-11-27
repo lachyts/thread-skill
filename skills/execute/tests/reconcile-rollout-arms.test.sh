@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # p46-2 (ADR 0079 decisions 3 and 4): arms. A drawn role falls in its Opus or Fable arm by a draw fixed by the task's
-# name (a rollout's lead by the rollout's), compared with the role's Fable share (the ladder's [share] table), stamped
+# name (a rollout's lead by the rollout's), compared with the role's Fable share (its resolved Fable ceiling: rollouts.toml's
+# fable_ceiling_<role>, else the ladder's [share] table, p46-10), stamped
 # on the note at the task's first dispatch, so a resume or a later dispatch keeps it whatever the share is by then.
 #   D  the draw (reconcile-rollout.py loaded by importlib): 1,000 slugs at a share of 0.5 land 45 to 55% in Fable for
 #      each drawn role, two roles' draws are independent (each of the four combinations 20 to 30%), a share of 0 draws
@@ -26,6 +27,9 @@
 #      unlanded stamped task.
 #   C  (p46-3) the role-call fold of a fell-back call: fellBack from the ran flag, a redirected plan judge's model and
 #      effort from its `asked`, refused from an errored agent's refusal text, never from a connection drop.
+#   N  (p46-10) the resolved ceiling: rollouts.toml's fable_ceiling_<role> over the [share] seed, as a fraction on the
+#      fable-share line; a ceiling with no [share] table draws; a refused rollouts.toml draws nothing, with one WARN per
+#      run. The seed alone keeps today's lines (P1's line, byte for byte).
 # HOME points at a temp dir holding each case's ~/.config/thread/ladder.toml and ~/.claude/state/agent-quotas.json.
 # Temp dirs only.
 # Usage: bash reconcile-rollout-arms.test.sh   (exit 0 = pass)
@@ -388,6 +392,29 @@ mkt p8 "scope: single-file" "started: 2026-11-12T09:00+11:00"
 ms p8 >/dev/null
 ok "$(fm p8 arms)|$(shares ro | wc -l | tr -d ' ')" "arms: master-review=none builder=none|$n" "P8: a later dispatch's none stamp reads nothing and writes no line"
 quota 0 50
+
+echo "== N. (p46-10) the resolved ceiling: rollouts.toml's fable_ceiling_<role> over the ladder's [share] seed"
+SETTINGS="$HOME/.config/thread/rollouts.toml"
+quota 0 50
+ladder $'[share]\nbuilder = 0'
+printf 'schema = 10\n\n[defaults]\nfable_ceiling_builder = 100\n' > "$SETTINGS"
+mkt n1 "scope: single-file" "work_depth: deep"
+out=$(ms n1); rc=$?
+ok "$rc|$(fm n1 arms)" "0|arms: master-review=none builder=fable" "N1: 100 over a seed of 0 draws the builder Fable; the master review has no ceiling"
+ok "$(shares ro | tail -1 | python3 -c 'import json,sys; d=json.load(sys.stdin); print(d["ceiling"], d["share"], d["task"])')" \
+  "{'builder': 1.0} {'builder': 1.0} n1" "N1: its fable-share line's ceiling is the resolved one"
+noladder; ladder ''
+printf 'schema = 10\n\n[defaults]\nfable_ceiling_master_review = 100\n' > "$SETTINGS"
+mkt n2 "scope: single-file"
+ok "$(ms n2 >/dev/null; fm n2 arms)" "arms: master-review=fable builder=none" "N2: a ceiling with no [share] table stamps arms"
+ladder $'[share]\nmaster-review = 1'
+printf '[defaults]\nparallel_ceiling = 0\n' > "$SETTINGS"
+mkt n3a "scope: single-file"; mkt n3b "scope: single-file"
+out=$(ms n3a,n3b); rc=$?
+ok "$rc|$(fm n3a arms)$(fm n3b arms)|$(grep -c ': arms ' <<< "$out")" "0|<none><none>|0" "N3: a refused rollouts.toml stamps nothing, no line"
+ok "$(grep -c "^WARN: fable ceiling: rollouts.toml $SETTINGS:2: \[defaults\] parallel_ceiling must be an integer >= 1, got 0: no role is drawn$" "$TMP/err")" 1 \
+  "N3: one WARN for the run, naming why"
+rm -f "$SETTINGS"
 
 echo "== A. (p46-3) a row's allowance stamps fell_back:; an allowance block is a Blocker diagnosis; status shows it"
 rec_row() {  # rec_row <slug> <row json fields>: reconcile one task-mode row from in_progress; prints rc

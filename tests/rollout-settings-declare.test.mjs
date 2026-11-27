@@ -479,3 +479,22 @@ test('D10 the metered-key declaration: ONE line in the repo table, schema raised
   assert.match(out, /^declared \[repo\."o\/chorus"\] metered_keys = /)
   assert.deepEqual(resolves(home, ['--repo', clone]).metered_keys, { value: JSON.parse(VALUE), source: 'file:repo' })
 })
+
+// p46-10: a Fable ceiling is machine-wide (DEFAULTS_ONLY), so `declare` writes it to [defaults], raises the schema to 10
+// and refuses --repo; the reader's 0..100 rule refuses 101.
+test('D11 a Fable ceiling\'s declaration: ONE line in [defaults], schema raised to 10; --repo and 101 are refused', (t) => {
+  const home = tmpHome(t)
+  const clone = gitRepo(home, 'clone', 'https://github.com/o/r.git')
+  const was = 'schema = 9\n\n[defaults]\nparallel_ceiling = 4\n'
+  writeSettings(home, was)
+  verbRefused(home, ['declare', '--repo', clone, '--key', 'fable_ceiling_builder', '--value', '60', ...RULING],
+    /fable_ceiling_builder is machine-wide: it takes no --repo/, { was })
+  verbRefused(home, ['declare', '--key', 'fable_ceiling_builder', '--value', '101', ...RULING],
+    /does not validate \(.*\[defaults\] fable_ceiling_builder must be an integer from 0 to 100 \(a percent\), got 101/, { was })
+  const out = wrote(home, ['declare', '--key', 'fable_ceiling_builder', '--value', '60', ...RULING])
+  const [e] = readLog(home)
+  assert.equal(body(home), `schema = 10\n\n[defaults]\nparallel_ceiling = 4\n${e.line}\n`)
+  assert.deepEqual([e.table, e.key, e.value, e.schema], ['defaults', 'fable_ceiling_builder', 60, { from: 9, to: 10 }])
+  assert.match(out, /^declared \[defaults\] fable_ceiling_builder = 60 in /)
+  assert.deepEqual(resolves(home).fable_ceiling.builder, { value: 60, source: 'file:defaults' })
+})

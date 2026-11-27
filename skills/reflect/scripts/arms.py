@@ -3,13 +3,14 @@
 docstring is the one copy of its rules. Reads only; writes nothing.
 
 python >= 3.9, stdlib only. skills/reflect/scripts/reflect.py's `span` loads it by path (as ARMS) and writes its block
-into span.json as `arms`; reflect.py's `close` writes its `arms` line (line()), `decide` lists each ceiling it holds, and
-the next span's agreement walk reads the line back. It is pure: its only I/O is loading run_record.py by path (RR:
+into span.json as `arms`; reflect.py's `close` writes its `arms` line (line()), `decide` lists each ceiling it holds for
+Lachy, span's `ceilings` reads each ready role and each revertGuard for tune.py (`--ceilings` and `--ceiling-revert`,
+p46-10), and the next span's agreement walk reads the line back. It is pure: its only I/O is loading run_record.py by path (RR:
 verdict_key, arms_key, ARM_ROLES, ARMS_ROLES, ARMS_COUNT_KEYS), as grades.py does. Every vault, ladder and settings read
 is span's, passed in as a value or a memoised callable:
 
-    reading(records, since, until, *, read, arm_stamp, lead_stamp, hands_off, escapes, breaches, share, share_error,
-            bounds, bounds_error, earlier, canon, built_in) -> block
+    reading(records, since, until, *, read, arm_stamp, lead_stamp, hands_off, escapes, breaches, ceiling,
+            ceiling_error, bounds, bounds_error, earlier, canon, built_in) -> block
     holds_row(block) -> bool                line(block, rid, since, until) -> the `arms` line's fields
 
 records is span's whole read ({slug: [(ms, n, line)]}, every record's lines in time then file order, a --fold's role-call
@@ -17,9 +18,10 @@ lines included); since and until are ms; read the slugs span read this week (mod
 `arms:` stamp as {role: opus | fable | none}, or None (no key, or one that does not parse: span flags it);
 lead_stamp(rollout) a rollout note's `arms: lead=` arm, or None; hands_off {rollout: {task: acts}}, each read rollout's
 score.json handsOff.tasks (score.py's rule, read whole); escapes the Escape friction items of every span entry, read and
-escapes-only; breaches the (rollout, Guardrail) pairs close counts (a read rollout whose breachCounts is true); share
-ladder.toml's [share] table (or None: no ladder file, no table, or a refused ladder, whose reason is share_error);
-bounds the [guardrails] bounds (score.py's guardrail_bounds of rollout-settings.py's resolve with no repo; bounds_error
+escapes-only; breaches the (rollout, Guardrail) pairs close counts (a read rollout whose breachCounts is true); ceiling
+each role's resolved Fable ceiling ({role: {percent, ...}}, rollout-settings.py's fable_ceilings(): rollouts.toml's
+fable_ceiling_<role>, else ladder.toml's [share] seed, p46-10; a role with none absent), or None when the ladder or
+rollouts.toml is refused, whose reason is ceiling_error; bounds the [guardrails] bounds (score.py's guardrail_bounds of rollout-settings.py's resolve with no repo; bounds_error
 names a refused settings file, read as the built-ins); earlier the `arms` lines of closed Reflections in file order,
 never this Reflection's own; canon the slug rule every join goes through (escapes.py's _canon); built_in the built-in
 ladder's rung names (ladder.py's BUILT_IN), bottom first.
@@ -84,10 +86,11 @@ place; null with no token task). The lead's calls are every role's calls in its 
 first reviewer included (no drawn role's stats hold it). `excluded` {fellBack, fableRung, unreachable, none} counts the
 distinct tasks with an in-window row of the role that sit out of both arms. Then verdict,
 signal, direction, from, to, kid, agreement, agreedWith (the agreeing Reflections' ids), held, caution, item, ready,
-breached (the Guardrails read below) and rollouts (the read rollouts whose rows fed an arm, sorted).
+breached (the Guardrails read below), revertGuard ({widening, narrowing}: CEILING_RISKS' lines, below, each [] unless
+measured; computed for every role) and rollouts (the read rollouts whose rows fed an arm, sorted).
 
-Verdict, on ADR 0037's two headlines alone (declared heuristics: MIN_LANDED 3 per arm, STEP 10 points, AGREE 3 as in ADR
-0037 d5), compared exactly (as fractions, never the rounded rates):
+Verdict, on ADR 0037's two headlines alone (declared heuristics: MIN_LANDED 3 per arm, STEP 10 points (run_record's
+CEILING_STEP), AGREE 3 as in ADR 0037 d5), compared exactly (as fractions, never the rounded rates):
 - thin: either arm has fewer than MIN_LANDED landed, or a null Hands-off rate;
 - win: Fable's Hands-off rate at least Opus's and its escapesPerLanded at most Opus's, one of the two strictly better;
 - loss: the mirror of a win;
@@ -97,15 +100,16 @@ Verdict, on ADR 0037's two headlines alone (declared heuristics: MIN_LANDED 3 pe
 signal is the verdict's (win, loss, or the trade's), null when thin or even; direction +1 for a win, -1 for a loss, and
 +1 for a trade (posed as a widening: a yes widens, a no keeps).
 
-Proposal. from = round(100 x share[role]), the role's Fable ceiling in percent. With no ladder file, a refused ladder,
-no [share] table, or the role absent from it, from is null and held "no Fable ceiling for <role> (ladder.toml [share])";
-only a refused ladder adds a flag. to = from + STEP x direction; outside [0, 100] there is no proposal (held "at the
+Proposal. from = ceiling[role]'s percent, the role's resolved Fable ceiling. With no ceiling for the role (neither
+rollouts.toml nor the seed names it, or the ladder or rollouts.toml is refused), from is null and held "no Fable ceiling
+for <role> (rollouts.toml fable_ceiling_<key>, else ladder.toml's [share])"; only a refusal adds a flag, `arms: no Fable
+ceiling is read (<why>)`. to = from + STEP x direction; outside [0, 100] there is no proposal (held "at the
 edge"). kid = RR.arms_key(role, signal). agreement is run_record's arms Agreement rule: 1 for this week, then earlier's
 lines newest first, a line with the role absent or thin skipped, the same signal at the same from adding 1, anything
 else ending the walk.
 
-Hold order, one rule, in this order (every listed item is item "ceiling", a decision-task line; nothing here or in any
-writer lands a ceiling: the session deciding the task applies a yes, until p46-10):
+Hold order, one rule, in this order (an item is item "ceiling", a decision-task line Lachy answers; a ready move has
+none, since tune.py --ceilings lands it at the weekly reading's step 14, p46-10):
 1. thin or even: no proposal (held says which);
 2. agreement under AGREE: held "agreement <n> of 3", no item;
 3. a trade: held "a trade (gains <h>, costs <q>): Lachy decides", item; a trade is posed as a widening, so with a
@@ -114,13 +118,24 @@ writer lands a ceiling: the session deciding the task applies a yes, until p46-1
 4. a widening while a Guardrail is breached: held "a Guardrail is breached (<which>)", no item; step 17 reports it;
 5. a narrowing while a Guardrail is breached: caution "risks <which>: a Guardrail against a Guardrail" and held "a
    caution: Lachy decides", item (as score.py's lowers);
-6. otherwise ready: held READY_HELD, item.
+6. a narrowing whose to is 0: caution "turns the <role> arm off (0 is set by hand)" and held "a caution: Lachy
+   decides", item: a ceiling of 0 is his, never the reading's;
+7. otherwise ready: held READY_HELD, ready true, no item.
 A from that is null or at the edge stops at step 1's place, after thin and even.
 
 Guardrails read. Tokens per merge in the direction's risk: a widening is breached when Fable's exceeds Opus's by more
 than the `tokens_per_merge_pct` bound (built-in 25), or when either is null, so it fails closed; a narrowing is
 breached only when Opus's exceeds Fable's by more than the bound. And every read rollout this week with breachCounts
 true and a non-empty breached list (the pairs close counts), whichever role.
+
+CEILING_RISKS: the declared risk a revert reads, per direction (p46-10; tune.py's --ceiling-revert reverts a landed move
+only on its role's revertGuard for the move's direction). A widening reverts only on this role's own measured tokens per
+merge, Fable's over Opus's by more than the bound; a narrowing only on the mirror, Opus's over Fable's. Both arms must
+hold at least MIN_LANDED token tasks (tokenTasks), so a thin or noisy week never reverts. The fail-closed line (tokens
+per merge unknown on an arm) and a rollout's Guardrail breach hold a new widening (above) but never revert a landing:
+neither is this role's own measure. quota_stalls is left out by judgement: a spent Fable allowance is an allowance
+refusal (p46-3), never a stall, and tokens per merge already reads Fable's general-window cost. revertGuard is span's
+only: line() never writes it, and it reads the arms' own whole-life tokens (Attributes, above), so it holds no row.
 
 Plans (no arm; a before and after). The split is the earliest planner role-call segment, across every record up to
 until, whose model is fable and which carries no fableRung (null with none): a planner call on the all-Fable top rung
@@ -193,12 +208,11 @@ FIRST_REVIEWER = "first-reviewer"   # a doubled master review's first reviewer (
 FABLE_KINDS = RR.ARMS_FABLE_KINDS
 CALL_KINDS = FABLE_KINDS + ("firstReviewer",)   # fableCalls' and fellBack.byKind's counted kinds, in order
 MIN_LANDED = 3                  # a declared heuristic: landed tasks per arm before a verdict reads
-STEP = 10                       # a ceiling moves this many points per agreed move
+STEP = RR.CEILING_STEP          # a ceiling moves this many points per agreed move (10; tune.py reads the same)
 AGREE = 3                       # ADR 0037 d5: three Reflections agree
 TOKENS_BOUND = "tokens_per_merge_pct"
 TOKENS_BOUND_BUILT_IN = 25      # score.py's GUARDRAILS_BUILT_IN value, read when bounds carries none
-P46_10 = "[[thread-skill-p46-10-an-agreed-fable-ceiling-lands-on-its-own]]"
-READY_HELD = ("agreed by 3 Reflections (ADR 0037 d5); no writer lands a Fable ceiling until %s: Lachy decides" % P46_10)
+READY_HELD = "agreed by 3 Reflections (ADR 0037 d5): tune.py --ceilings lands it at step 14"
 PLANS_NOTE = "planning has no Opus arm: a before and after, not a comparison"
 FELL_BACK_LINE = "%d Fable call(s) fell back to Opus: another Login with Fable room would have carried them"
 STAT_KEYS = ("landed", "handsOff", "handsOffUnknown", "handsOffRate", "firstApprove", "firstChanges", "reviewRounds",
@@ -288,21 +302,42 @@ def _tpm(s):
     return Fraction(s["tokens"], s["tokenTasks"]) if s["tokenTasks"] else None
 
 
+def _tokens_over(direction, po, pf, bound):
+    """The measured tokens-per-merge line in a move's risk, or None: a widening's when Fable's exceeds Opus's by more than
+    the bound, a narrowing's on the mirror (both measured)."""
+    if po is None or pf is None:
+        return None
+    b = Fraction(str(bound))
+    if direction > 0 and pf * 100 > po * (100 + b):
+        return "tokens per merge: fable %s over opus %s by more than %s %%" % (round(float(pf), 1), round(float(po), 1),
+                                                                               bound)
+    if direction < 0 and po * 100 > pf * (100 + b):
+        return "tokens per merge: opus %s over fable %s by more than %s %%" % (round(float(po), 1), round(float(pf), 1),
+                                                                               bound)
+    return None
+
+
 def guardrails(direction, o, f, breaches, bound):
     """The Guardrails a move reads (the docstring's Guardrails read): the rollouts' breaches, then tokens per merge."""
     out = ["[[%s]] %s" % (r, g) for r, g in sorted(breaches)]
     po, pf = _tpm(o), _tpm(f)
-    b = Fraction(str(bound))
-    if direction > 0:
-        if po is None or pf is None:
-            out.append("tokens per merge unknown on an arm: a widening fails closed")
-        elif pf * 100 > po * (100 + b):
-            out.append("tokens per merge: fable %s over opus %s by more than %s %%" % (round(float(pf), 1),
-                                                                                       round(float(po), 1), bound))
-    elif direction < 0 and po is not None and pf is not None and po * 100 > pf * (100 + b):
-        out.append("tokens per merge: opus %s over fable %s by more than %s %%" % (round(float(po), 1), round(float(pf), 1),
-                                                                                   bound))
+    if direction > 0 and (po is None or pf is None):
+        out.append("tokens per merge unknown on an arm: a widening fails closed")
+    elif direction:
+        line = _tokens_over(direction, po, pf, bound)
+        if line:
+            out.append(line)
     return out
+
+
+def revert_guard(o, f, bound):
+    """A role's revertGuard (the docstring's CEILING_RISKS): {widening, narrowing}, each the measured tokens-per-merge
+    line in that direction's risk, [] unless both arms hold at least MIN_LANDED token tasks. Never the fail-closed line,
+    never a rollout's breach."""
+    if o["tokenTasks"] < MIN_LANDED or f["tokenTasks"] < MIN_LANDED:
+        return {"widening": [], "narrowing": []}
+    po, pf = _tpm(o), _tpm(f)
+    return {name: [x for x in (_tokens_over(d, po, pf, bound),) if x] for name, d in (("widening", 1), ("narrowing", -1))}
 
 
 def propose(role, o, f, frm, earlier, breaches, bound):
@@ -319,7 +354,8 @@ def propose(role, o, f, frm, earlier, breaches, bound):
         out["held"] = "even: the two arms read the same on both headlines"
         return out
     if frm is None:
-        out["held"] = "no Fable ceiling for %s (ladder.toml [share])" % role
+        out["held"] = "no Fable ceiling for %s (rollouts.toml fable_ceiling_%s, else ladder.toml's [share])" % (
+            role, role.replace("-", "_"))
         return out
     to = frm + STEP * direction
     if not 0 <= to <= 100:
@@ -341,15 +377,18 @@ def propose(role, o, f, frm, earlier, breaches, bound):
     elif direction < 0 and breached:
         out.update(caution="risks %s: a Guardrail against a Guardrail" % "; ".join(breached),
                    held="a caution: Lachy decides", item="ceiling")
+    elif direction < 0 and to == 0:
+        out.update(caution="turns the %s arm off (0 is set by hand)" % role, held="a caution: Lachy decides",
+                   item="ceiling")
     else:
-        out.update(ready=True, held=READY_HELD, item="ceiling")
+        out.update(ready=True, held=READY_HELD)
     return out
 
 
 # ---- the reading ------------------------------------------------------------------------------------------------------
 
 def reading(records, since, until, *, read=(), arm_stamp=None, lead_stamp=None, hands_off=None, escapes=(),
-            breaches=(), share=None, share_error=None, bounds=None, bounds_error=None, earlier=(), canon=None,
+            breaches=(), ceiling=None, ceiling_error=None, bounds=None, bounds_error=None, earlier=(), canon=None,
             built_in=()):
     """The arms block (the docstring's Output) over span's records and the values span passes in."""
     canon = canon or _lower
@@ -358,8 +397,8 @@ def reading(records, since, until, *, read=(), arm_stamp=None, lead_stamp=None, 
     hands_off = hands_off or {}
     read = set(read)
     flags = []
-    if share_error:
-        flags.append("arms: the ladder is refused (%s): no Fable ceiling is read" % share_error)
+    if ceiling_error:
+        flags.append("arms: no Fable ceiling is read (%s)" % ceiling_error)
     if bounds_error:
         flags.append("arms: rollout-settings refused (%s): the built-in Guardrail bounds are read" % bounds_error)
     bound = (bounds or {}).get(TOKENS_BOUND, TOKENS_BOUND_BUILT_IN)
@@ -604,10 +643,11 @@ def reading(records, since, until, *, read=(), arm_stamp=None, lead_stamp=None, 
 
     # the roles: counts, rates, verdict, proposal
     pct = {}
-    if isinstance(share, dict):
-        for r, v in share.items():
-            if isinstance(v, (int, float)) and not isinstance(v, bool):
-                pct[r] = int(round(100 * v))
+    if isinstance(ceiling, dict):
+        for r, c in ceiling.items():
+            v = c.get("percent") if isinstance(c, dict) else None
+            if isinstance(v, int) and not isinstance(v, bool):
+                pct[r] = v
     roles_out = {}
     for r in ROLES:
         arms = {}
@@ -625,7 +665,8 @@ def reading(records, since, until, *, read=(), arm_stamp=None, lead_stamp=None, 
         prop = propose(r, stats[r]["opus"], stats[r]["fable"], pct.get(r), earlier, breaches, bound)
         roles_out[r] = dict({"opus": arms["opus"], "fable": arms["fable"],
                              "excluded": {k: len(excluded[r][k]) for k in RR.ARMS_EXCLUDED}},
-                            **prop, rollouts=sorted(x for x in fed[r] if x in read))
+                            **prop, revertGuard=revert_guard(stats[r]["opus"], stats[r]["fable"], bound),
+                            rollouts=sorted(x for x in fed[r] if x in read))
 
     plans, plan_rows, rejection_rows, plan_flags = _plans(calls, lines_of, first_slot, rejections, since, until,
                                                           list(built_in))

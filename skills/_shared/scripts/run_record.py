@@ -45,7 +45,7 @@ here creates the link, and on a machine without it the first emit's os.makedirs 
 there. THREAD_EVENTS_DIR is for tests and non-default setups. `dir` prints the resolved directory, so any writer can confirm it lands in
 the same place.
 
-Files: <rollout>.jsonl, one per rollout; review-round always goes to reviews.jsonl, tuning to tunings.jsonl, the
+Files: <rollout>.jsonl, one per rollout; review-round always goes to reviews.jsonl, tuning and ceiling to tunings.jsonl, the
 weekly reading's kinds (watch, watch-raised, proposal, reflection, time-lost, attention, arms) to reflections.jsonl, the
 Grade log's kind (grade) to grades.jsonl, the Note overlap's kind (note-overlap) to overlaps.jsonl, and the master-run
 kind to master-runs.jsonl. All six names are RESERVED: refused as a rollout slug and as a carried `from`.
@@ -74,7 +74,9 @@ reader (noteOverlaps). A line's rollout and task are the editing run's, so it na
 so no rollout's record, score or ledger reads it.
 
 tunings.jsonl holds one line per by-hand Reflection, plus one `close` line per rollout, at its completion ceremony or
-its supersede, plus one `auto` line per knob the weekly reading lands or reverts (skills/reflect/scripts/tune.py is
+its supersede, plus one `auto` line per knob the weekly reading lands or reverts, plus one `ceiling` line per move of
+a Fable ceiling (p46-10: the weekly reading's landing or revert, or Lachy's yes; a kind of its own, with no rollout, so
+every `tuning` reader skips it; tune.py's load_ceilings() and reflect.py's span read it) (skills/reflect/scripts/tune.py is
 its one emitter; score.py reads it for baselines and the applied tally; tune.py and
 skills/reflect/scripts/close-score.py read it to refuse a second close line; tune.py `--auto`/`--revert` and
 skills/reflect/scripts/reflect.py read it for a key's last move and the auto lines): the scored window, its ten scores
@@ -140,8 +142,8 @@ with its newline. The common keys come first, in this order:
              Any other ISO timestamp field a caller adds must be UTC `Z` too; call-journal's and
              role-call's startTime are the one epoch field (the journal's own epoch-ms integer, verbatim).
     host     the hostname up to its first dot
-    rollout  the rollout slug (null only for review-round, grade and the seven reflections.jsonl kinds; a tuning's is
-             a provenance stamp)
+    rollout  the rollout slug (null only for review-round, grade, ceiling and the seven reflections.jsonl kinds; a
+             tuning's is a provenance stamp)
     task     the task slug, or null
     kind     one of the kinds below
 
@@ -314,8 +316,9 @@ Kinds (T: a task is required; `?` marks an optional field; every enum is closed)
                      utilization); fetchedAt? (a UTC Z stamp: the older window's fetch); why? (a non-empty string:
                      why the reading gave a share of nothing, then neither fable, general nor fetchedAt). p46-3, ADR
                      0079 decision 6: one line per arms draw, by reconcile-rollout.py mark-started (a task's first
-                     dispatch, its task set) and record-entry (the lead's draw, no task): the ceiling ([share]) times
-                     fable_pace.py's pace for the Login is the share each role was drawn against.
+                     dispatch, its task set) and record-entry (the lead's draw, no task): the ceiling (the resolved
+                     Fable ceiling: rollouts.toml's fable_ceiling_<role>, else ladder.toml's [share] seed, p46-10; as a
+                     fraction) times fable_pace.py's pace for the Login is the share each role was drawn against.
   review-round       repo, head, digest; doc?; mode?; effort?; findings?, original?, regression?
                      (ints >= 0); verdict? (legacy, a string and no enum: stop or continue, written only before
                      fresh-review ADR 0001 and ADR 0065 retired the ledger's STOP rule; review-round.py writes none
@@ -384,7 +387,22 @@ Kinds (T: a task is required; `?` marks an optional field; every enum is closed)
                      evidence one of at most 300; agreeing an integer >= 0; agreed (an integer >= 1, on every
                      entry of a non-void auto landing and on no other line); no other key. Never auto and close on one
                      line.
-  watch              id, rule, shape, rollouts, count, reflection; ledgerClass?, circling? (p21-7: one per (Reflection,
+  ceiling            id, applied (a list of 0 to 4 {role, from, to, rule, evidence, kid?, agreed?}); auto?, reflection?,
+                     reverts?, voids?, decisionTask? (p46-10, ADR 0079 d6 and d9: one move of drawn roles' Fable
+                     ceilings in rollouts.toml, skills/reflect/scripts/tune.py its one writer: `--ceilings` lands an
+                     agreed move, `--ceiling-revert` its declared-risk revert, `--ceiling-yes` Lachy's yes to a decision
+                     task's `- ceiling` item; tune.py's header holds the rules). No rollout, no task; lands in
+                     tunings.jsonl, read by tune.py's load_ceilings() alone (every `tuning` reader skips the kind). id a
+                     t- id. applied: each role one of SHARE_ROLES (ladder.py's), no role twice; from and to integers
+                     from 0 to 100 (percent), from != to; rule one of ARMS_SIGNALS, or `revert:<signal>` on a revert,
+                     at most 64 characters; evidence a non-empty string of at most 300; kid 8 lowercase hex
+                     (arms_key(role, signal)); agreed an integer >= 3 (the arms Agreement rule's count); no other key.
+                     auto (true only) and reflection (an r- id: the weekly reading's) go together; reverts (the t- id of
+                     the auto line a revert undoes) needs auto, exactly one entry and a `revert:` rule; agreed is on
+                     every entry of a non-void, non-revert auto landing and on no other line; decisionTask (a slug: the
+                     decision task whose item Lachy said yes to) only on a line that is not auto; voids (the t- id of
+                     the line a replace failure voids), and applied [] only beside it.
+  watch             id, rule, shape, rollouts, count, reflection; ledgerClass?, circling? (p21-7: one per (Reflection,
                      Watch); id is watch_id(rule, shape); rule and shape stripped, each at most 120 characters;
                      rollouts 1 to 64 slugs, none reserved, every rollout where the Reflection saw it; count an integer >= 1; ledgerClass,
                      p29-11, one of TIME_LOST_CLASSES: the Time-lost ledger's Watch on that class, written by reflect.py
@@ -524,8 +542,9 @@ Kinds (T: a task is required; `?` marks an optional field; every enum is closed)
                      reading's line, at most one per Reflection, reflect.py `close` its one writer;
                      skills/reflect/scripts/arms.py's docstring holds the rules. reflection an r- id; since and until UTC
                      Z stamps, since <= until; roles a non-empty object keyed by ARMS_ROLES (the drawn roles and the
-                     lead), each {verdict (one of ARMS_VERDICTS), from (an integer 0 to 100, or null: the role's Fable
-                     ceiling in percent, ladder.toml's [share]), opus, fable (each exactly ARMS_COUNT_KEYS, integers >=
+                     lead), each {verdict (one of ARMS_VERDICTS), from (an integer 0 to 100, or null: the role's
+                     resolved Fable ceiling in percent, rollouts.toml's fable_ceiling_<role>, else ladder.toml's [share]
+                     seed, p46-10), opus, fable (each exactly ARMS_COUNT_KEYS, integers >=
                      0), excluded (exactly fellBack, fableRung, unreachable and none, integers >= 0; a line written
                      before p52-2 holds fellBack, fableRung and none, and reads back valid); to? (an integer 0 to 100),
                      signal? (one of ARMS_SIGNALS), kid? (arms_key(role, signal), with signal), agreement? (an integer
@@ -709,6 +728,7 @@ docstring lists each verb's events and the stage, reasonClass and idle-reason ta
   re-judge after a cache miss, a known overcount); two head-less approve lines for one round collapse (rounds
   only, no findings).
 - tuning: see tunings.jsonl under Files (the baseline, void, close and auto rules).
+- ceiling (p46-10): see its catalogue entry; tune.py's load_ceilings() reads it, every `tuning` reader skips it.
 - The Watch rule (p21-7, ADR 0037 d2 and d5). A Watch's id is watch_id(rule, shape), the first 8 hex of sha1 over the
   stripped rule, a newline and the stripped shape (Chorus's watch_id, re-implemented), so a pattern named the same
   way is one Watch. A Reflection writes one `watch` line per Watch, naming every rollout where it saw it (a later
@@ -822,14 +842,14 @@ sync filesystems). Any failure to write (a short write, an OSError, anything une
 `run_record: warning: cannot write <path>: <err>` and writes nothing more; the CLI still exits 0.
 
 Exit codes: 0 written, skipped as a duplicate fold, or a warned write failure; 2 refused (an unknown kind,
-a missing or out-of-enum field, a task-scoped kind with no task, a tuning with one, a grade with a rollout, a reserved
-rollout or `from`, --json not a JSON object, a common-key
+a missing or out-of-enum field, a task-scoped kind with no task, a tuning with one, a ceiling with a rollout or a
+task, a grade with a rollout, a reserved rollout or `from`, --json not a JSON object, a common-key
 collision, NaN, a bad slug, a naive or malformed --ts, a line over 16 KiB, a review-verdict whose original +
 regression exceed its findings, a review-round whose open exceeds its blocking or whose filed + unconfirmed exceed its
 findings, a grade whose low exceeds its decisions, an inert-proof-failed with empty readers and no error, a watch
 whose rule or shape is not stored stripped, whose id is not watch_id(rule, shape) or that carries both ledgerClass and
-circling, a tuning, proposal, stopped, suite-ended, base-moved, time-lost or attention line that breaks its kind's
-cross-field rules),
+circling, a tuning, ceiling, proposal, stopped, suite-ended, base-moved, time-lost or attention line that breaks its
+kind's cross-field rules),
 with one line starting `run_record: ` on
 stderr and nothing written; `dir` exits 1 when the directory cannot be resolved.
 """
@@ -1609,6 +1629,64 @@ def _percent(v):
     return isinstance(v, int) and not isinstance(v, bool) and 0 <= v <= 100
 
 
+# ---- the Fable ceiling's own line (skills/reflect/scripts/tune.py; p46-10, ADR 0079 d6 and d9) -------------------------
+# A `ceiling` line's applied entries: at most one per drawn role, each a move in percent.
+CEILING_APPLIED_KEYS = ("role", "from", "to", "rule", "evidence")
+CEILING_APPLIED_OPTIONAL = ("kid", "agreed")
+CEILING_AGREE = 3   # the arms Agreement rule's landing count (ADR 0037 d5)
+CEILING_STEP = 10   # a Fable ceiling's one move in points: arms.py's STEP and tune.py's ceiling verbs read it here
+
+
+def _ceiling_applied(v):
+    """ceiling's applied: 0 to len(SHARE_ROLES) {role, from, to, rule, evidence, kid?, agreed?}, no role twice."""
+    if not isinstance(v, list) or len(v) > len(SHARE_ROLES):
+        return "a list of at most %d entries" % len(SHARE_ROLES)
+    roles = []
+    for e in v:
+        if not isinstance(e, dict) or not set(CEILING_APPLIED_KEYS) <= set(e) <= set(CEILING_APPLIED_KEYS +
+                                                                                    CEILING_APPLIED_OPTIONAL):
+            return "a list of objects with exactly the keys %s (and kid?, agreed? only)" % ", ".join(CEILING_APPLIED_KEYS)
+        if e["role"] not in SHARE_ROLES:
+            return "a list whose role is one of %s" % ", ".join(SHARE_ROLES)
+        if not _percent(e["from"]) or not _percent(e["to"]) or e["from"] == e["to"]:
+            return "a list whose from and to are integers from 0 to 100 that differ"
+        rule = e["rule"]
+        signal = rule[len("revert:"):] if isinstance(rule, str) and rule.startswith("revert:") else rule
+        if signal not in ARMS_SIGNALS or len(rule) > 64:
+            return "a list whose rule is one of %s, or revert:<it>" % ", ".join(ARMS_SIGNALS)
+        if _text(300)(e["evidence"]):
+            return "a list whose evidence is a non-empty string of at most 300 characters"
+        if "kid" in e and not (isinstance(e["kid"], str) and ARMS_KID_RE.match(e["kid"])):
+            return "a list whose kid is 8 lowercase hex"
+        if "agreed" in e and _int(CEILING_AGREE)(e["agreed"]):
+            return "a list whose agreed is an integer >= %d" % CEILING_AGREE
+        roles.append(e["role"])
+    if len(set(roles)) != len(roles):
+        return "a list naming each role at most once"
+    return None
+
+
+def _check_ceiling(f):
+    """ceiling's cross-field rules (its catalogue entry): auto <=> reflection; reverts => auto, one entry and a revert:
+    rule; decisionTask only on a line that is not auto; agreed on every entry of a non-void, non-revert auto landing
+    and on no other line; applied [] only beside voids."""
+    auto = f.get("auto") is True
+    if auto != ("reflection" in f):
+        raise Refused("ceiling: auto and reflection go together (the weekly reading's landing carries both)")
+    if "reverts" in f and (not auto or len(f["applied"]) != 1 or not f["applied"][0]["rule"].startswith("revert:")):
+        raise Refused("ceiling: reverts needs auto, exactly one applied entry and a revert:<signal> rule")
+    if auto and "decisionTask" in f:
+        raise Refused("ceiling: decisionTask is only on Lachy's yes, never on an auto line")
+    if not f["applied"] and "voids" not in f:
+        raise Refused("ceiling: applied is [] only on a void line")
+    has_agreed = [e for e in f["applied"] if "agreed" in e]
+    landing = auto and "reverts" not in f and "voids" not in f
+    if has_agreed and not landing:
+        raise Refused("ceiling: agreed is only on an auto landing's entries (never a yes, a revert or a void)")
+    if landing and len(has_agreed) != len(f["applied"]):
+        raise Refused("ceiling: every entry of an auto landing carries agreed")
+
+
 def _arms_roles(v):
     """arms' roles: {role: {verdict, from, opus, fable, excluded; to?, signal?, kid?, agreement?, held?, item?, ready?}}."""
     if not isinstance(v, dict) or not v or not set(v) <= set(ARMS_ROLES):
@@ -1922,6 +2000,9 @@ KINDS = {
     "tuning": (False, {"id": _str, "repo": _repo, "window": _window, "scores": _scores, "applied": _applied},
                {"binding": _enum(*BINDINGS), "voids": _str, "close": _enum(*CLOSES), "auto": _true,
                 "reflection": _rid, "reverts": _tid, "shape": _enum("serial")}),
+    # A move of drawn roles' Fable ceilings (p46-10, ADR 0079 d6 and d9): tune.py its one writer; no rollout, no task.
+    "ceiling": (False, {"id": _tid, "applied": _ceiling_applied},
+                {"auto": _true, "reflection": _rid, "reverts": _tid, "voids": _tid, "decisionTask": _slug}),
     "watch": (False, {"id": _str, "rule": _short(RULE_MAX), "shape": _short(RULE_MAX),
                       "rollouts": _slugs(1, MAX_ROLLOUTS), "count": _int(1), "reflection": _rid},
               {"ledgerClass": _enum(*TIME_LOST_CLASSES), "circling": _enum(*CIRCLING_RULES)}),
@@ -2191,6 +2272,8 @@ def _check_fields(kind, fields):
                           % (filed, unconfirmed, fields["findings"]))
     if kind == "tuning":
         _check_tuning(fields)
+    elif kind == "ceiling":
+        _check_ceiling(fields)
     elif kind == "watch":
         if fields["rule"] != fields["rule"].strip() or fields["shape"] != fields["shape"].strip():
             raise Refused("watch: rule and shape are stored stripped")
@@ -2450,6 +2533,9 @@ def _prepare(rollout, kind, task, fields, ts):
     elif kind == "grade":
         if rollout is not None:
             raise Refused("grade has no rollout (it lands in %s.jsonl)" % GRADE_LOG)
+    elif kind == "ceiling":
+        if rollout is not None or task is not None:
+            raise Refused("ceiling has no rollout or task (it lands in %s.jsonl)" % TUNINGS)
     else:
         if rollout is None:
             raise Refused("%s: a rollout is required" % kind)
@@ -2485,7 +2571,8 @@ def _prepare(rollout, kind, task, fields, ts):
     stamp, host = _stamp(ts), _host()
     out = []
     for r in targets:
-        name = REFLECTIONS if kind in REFLECTION_KINDS else GRADE_LOG if kind == "grade" else REVIEWS if r is None \
+        name = REFLECTIONS if kind in REFLECTION_KINDS else GRADE_LOG if kind == "grade" else TUNINGS if kind == "ceiling" \
+            else REVIEWS if r is None \
             else TUNINGS if kind == "tuning" else NOTE_OVERLAPS if kind == "note-overlap" \
             else MASTER_RUNS if kind == "master-run" else r
         out.append((name, _line(stamp, host, r, task, kind, fields)))

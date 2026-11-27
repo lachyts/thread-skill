@@ -1,24 +1,38 @@
 #!/usr/bin/env python3
 """tune.py — land the Tunings Lachy picked from a by-hand Reflection, or the knobs the weekly reading lands or reverts on
-its own (ADR 0037 d5), and record each (p15-5, ADR 0032).
+its own (ADR 0037 d5), and the Fable ceilings (p46-10, ADR 0079 d6 and d9), and record each (p15-5, ADR 0032).
 
 python >= 3.8, stdlib only (score.py, which it loads, keeps the same floor). The Reflection's only writer of
 rollouts.toml (inert-paths.py writes only `inert_paths`, a repo's Inert paths; rollout-settings.py `declare`
 writes any other key he has ruled on, Tuning keys included, and this script then reads that value as a hand edit: its
-revert reason prints `a hand edit, left alone`) and the only writer of tunings.jsonl. An edit that adds a key above the file's `schema` raises its top-level `schema` line in the same edit
-(rollout-settings.py's header, ADR 0043): raise_schema(), below. Three callers (ADR 0037 d4-d5): skills/reflect/SKILL.md step 7 runs it exactly once per by-hand
+revert reason prints `a hand edit, left alone`) and the only writer of tunings.jsonl. It is also the one script writer of
+the Fable ceilings, rollouts.toml's `[defaults] fable_ceiling_<role>` (p46-10; rollout-settings.py's header holds the
+keys and the seed rule; a ruled `declare` of one is read here as a hand edit: a stale `from`). An edit that adds a key above the file's `schema` raises its top-level `schema` line in the same edit
+(rollout-settings.py's header, ADR 0043): raise_schema(), below. Four callers (ADR 0037 d4-d5): skills/reflect/SKILL.md step 7 runs it exactly once per by-hand
 Reflection that reached its scores; skills/reflect/scripts/close-score.py runs `--record-only --close <kind>` once at
-each rollout's close (its completion ceremony, or its supersede); and SKILL.md step 14 (the weekly reading) runs
-`--revert` then `--auto`, zero or more times per repo:
+each rollout's close (its completion ceremony, or its supersede); SKILL.md step 14 (the weekly reading) runs
+`--revert` then `--auto`, zero or more times per repo, then `--ceiling-revert` once per span `ceilings.revert[]` item and
+`--ceilings` once when `ceilings.land[]` is non-empty; and SKILL.md § Deciding the decision task runs `--ceiling-yes` for
+Lachy's yes to a `- ceiling` item:
 
     python3 ${CLAUDE_PLUGIN_ROOT}/skills/reflect/scripts/tune.py --scores <score.json|-> \\
         (--pick p1[,p2...] --repo <dir> | --record-only [--close completion|supersede] |
          --auto --repo <dir> --reflection <id> | --revert <tuning id> --repo <dir> --reflection <id>)
         [--config <path>] [--tasks-dir <dir>] [--dry-run]
+    tune.py --ceilings --span <span.json> --reflection <id> [--config <path>] [--tasks-dir <dir>] [--dry-run]
+    tune.py --ceiling-revert <tuning id> --span <span.json> --reflection <id> [--config <path>] [--tasks-dir <dir>]
+        [--dry-run]
+    tune.py --ceiling-yes --role <role> --from <F> --to <T> --kid <kid> --task <decision task slug> [--config <path>]
+        [--tasks-dir <dir>] [--dry-run]
 
---scores is score.py's JSON. --pick, --record-only, --auto and --revert are mutually exclusive and one is required.
---reflection (an r- id, the weekly reading's) is required with --auto and --revert and refused with the other two (exit
-2, nothing written); --close with --auto or --revert is refused by --close's own rule (it needs --record-only).
+--pick, --record-only, --auto, --revert, --ceilings, --ceiling-revert and --ceiling-yes are mutually exclusive and one
+is required. --scores is score.py's JSON: required with the four knob verbs, refused with the three ceiling verbs.
+--reflection (an r- id, the weekly reading's) is required with --auto, --revert, --ceilings and --ceiling-revert and
+refused with --pick, --record-only and --ceiling-yes; --close with any verb but --record-only is refused by --close's own
+rule (it needs --record-only). --span (span.json) is required with --ceilings and --ceiling-revert and refused with every
+other verb; --repo is refused with the three ceiling verbs (a Fable ceiling is machine-wide); --role, --from, --to (ints),
+--kid and --task are required with --ceiling-yes and refused elsewhere. --config, --tasks-dir and --dry-run go with
+every verb. Each refusal is exit 2, nothing read or written.
 
 Reads: --scores; rollouts.toml through rollout-settings.py (resolve() and _origin_slug()); tunings.jsonl (close_line()
 for --close; for --auto and --revert, score.py's load_tunings(): a key's last move and the auto lines); and, for --auto
@@ -26,7 +40,10 @@ and --revert, reflections.jsonl at reflections_path() (run_record's events direc
 agreement): a missing file is no earlier Reflection, a line that does not parse is skipped, and a file that exists but
 cannot be read prints `tune: reflections.jsonl cannot be read: ...` and exits 1, nothing written (as does an
 unresolvable events directory, `tune: cannot resolve the events directory: ...`). Both modes refuse a --reflection that
-already has its `reflection` (close) line: exit 2, `Reflection <id> is closed`.
+already has its `reflection` (close) line: exit 2, `Reflection <id> is closed`. The ceiling verbs (p46-10) read --span
+(span.json's `reflection` and `arms.roles`), ladder.toml through ladder.py's load() (the seed), tunings.jsonl's `ceiling`
+lines (load_ceilings()), reflections.jsonl as --auto does (--ceilings and --ceiling-revert, the latter its closed ids
+too), and for --ceiling-yes the decision task note; nothing else.
 
 --auto --repo <dir> --reflection <id> (ADR 0037 d5) lands every proposal in scores.proposals whose key is one of
 rollout-settings.py's TUNING_KEYS (KEYS, then capacity_max and the two Weight keys, p53-5, then overtime_runs, p39-14)
@@ -63,6 +80,45 @@ reverted, and never load-held: it restores a value the Mac already ran at. rollo
 resolve(), so a capacity_max or Weight landing is found as a round cap's is. A refusal is exit 2, nothing written.
 
 Void lines (a replace failure, below) in --auto or --revert carry the same `auto` and `reflection`, never `close`.
+
+The Fable ceilings (p46-10, ADR 0079 d6 and d9; ADR 0037 d5's landing). Each drawn role's ceiling is an integer percent
+in rollouts.toml's `[defaults]` (fable_ceiling_master_review, _builder, _investigator, _lead), seeded by ladder.toml's
+`[share]` for a role the file does not set; the ceiling now is ceilings_now(), rollout-settings.py's fable_ceilings()
+over resolve(repo=None, path=--config)'s `fable_ceiling` and ladder.py's load() (a refused ladder or rollouts.toml is
+exit 2, or 3 with no tomllib). A move is one `ceiling` line in tunings.jsonl (run_record.py's catalogue entry), never a
+`tuning` line, so no knob reader counts it; load_ceilings() reads them back. Every move is one STEP (run_record.py's
+CEILING_STEP, 10 points, which arms.py reads too) between 0 and 100. The three verbs:
+- --ceilings --span <span.json> --reflection <id> (the weekly reading's step 14) refuses a span whose `reflection` is
+  not --reflection's and a closed Reflection (exit 2, as --auto does). For every role of the span's `arms.roles` (in
+  SHARE_ROLES order) with `ready: true`, ceiling_auto_check() runs these checks in order, the first that fails the
+  reason: (1) the role is ready and well formed (from, to, signal, kid, agreement); (2) to is not 0 (a move to 0 is
+  Lachy's, a caution) and 0 <= to <= 100; (3) |to - from| is STEP; (4) no non-voided auto `ceiling` line of this
+  Reflection has moved the role (`Reflection <id> already moved <role> (<id>)`: so a re-run names its landing); (5) from
+  is the ceiling now (else `stale from: the ceiling is <n> now (a hand edit or a declaration since span)`). A held role prints `held ceiling
+  <role>: <reason>`; the eligible roles land as ONE auto line (auto, reflection, each entry's rule the signal, kid,
+  agreed the role's agreement, evidence both arms' counts) and one rollouts.toml edit. With nothing eligible (or no
+  ready role) it exits 0 and writes nothing.
+- --ceiling-revert <tuning id> --span <span.json> --reflection <id> undoes one role of an auto landing on the declared
+  risk this reading measures (arms.py's CEILING_RISKS). ceiling_revert_check() passes only when the id is a non-voided
+  auto `ceiling` line that is no revert, whose Reflection is closed and is not this one (a landing is read against a
+  later week), and an entry of it is not reverted yet, rollouts.toml still holds its `to` (else `a hand edit, left
+  alone`), this reading's `from` for the role is that `to`, and the role's revertGuard for the move's direction
+  (widening when to > from, else narrowing) is non-empty. It lands to = the entry's from as one auto line with
+  `reverts: <id>`, rule `revert:<signal>`, the guard lines as evidence and no agreed. A revert is never reverted, and a
+  multi-role line is reverted one role per call. A refusal is exit 2, nothing written.
+- --ceiling-yes --role R --from F --to T --kid K --task S is Lachy's yes to a decision task's `- ceiling` item (SKILL.md
+  § Deciding the decision task). It refuses (exit 2, nothing written) a role that is no drawn role, a move that is no
+  STEP or leaves 0..100, a kid that is no arms_key(R, s) for an s in ARMS_SIGNALS (that s is the line's rule), a task
+  <tasks-dir>/<S>.md (default ~/repos/obsidian/Work/Tasks) that lists no `- ceiling K at F: Fable ceiling R F% -> T%`
+  line, and a stale from, F not the ceiling now (`stale from: record it with reflect.py moot`). It writes one line that
+  is not auto, carrying `decisionTask: S`. A move to 0 (a caution) lands this way only.
+The write is --pick's (below: one write half for every verb): the key set in `[defaults]` (_edit_table, a key in dotted
+or inline form refused), the schema raised to 10 with the reader check, and the temp file validated by
+load_tables(): it must read as the file before with exactly each moved `[defaults] fable_ceiling_<role>` at its `to`,
+every other table, key and repo identical (every setting, Weight, Guardrail, inert_paths, test_credentials,
+metered_keys, test_logins and every other ceiling) and `schema` only raised. A void line (a replace failure) keeps
+`auto` and `reflection`, never `reverts` or `decisionTask`. On success stdout names the line, then one line per role:
+`applied ceiling <role> <from> → <to>: <CEILING_EFFECT>`.
 
 --record-only writes ONE `tuning` line (applied: []) through run_record.emit and never reads or touches the
 config: every Reflection leaves its scores as the next Reflection's baseline. A line's `scores` are score.py's
@@ -124,12 +180,15 @@ key from `file:defaults`, a repo one from `file:repo`, a Weight key in `weight`)
 and Guardrail unchanged, and every
 repo's `inert_paths` (p29-3, ADR 0045: schedule's inert-paths.py `record` and `drop` are its only writers),
 every repo's `test_credentials` (ADR 0063: declared on his ruling only, never a Tuning), every repo's `metered_keys`
-(p56-6: the same rule) and the resolved `[defaults] test_logins` (p37-4: the operator's declared test Logins, declared
-on his ruling only, never a Tuning) unchanged.
+(p56-6: the same rule), the resolved `[defaults] test_logins` (p37-4: the operator's declared test Logins, declared
+on his ruling only, never a Tuning) and the resolved `fable_ceiling` (p46-10: the ceiling verbs alone move it)
+unchanged.
 
 The reader check (rollout-settings.py's header: a writer that raises the schema runs it), only when the edit raises the
-file's `schema`: a capacity_max Tuning raises it to 4, a Weight Tuning to 6 and an overtime_runs Tuning to 8 (p39-14), an
-unattended --auto landing (and a --revert) included, since all three share _apply(). A pre-P29 reader refuses any top-level `schema` line, and a refused
+file's `schema`: a capacity_max Tuning raises it to 4, a Weight Tuning to 6, an overtime_runs Tuning to 8 (p39-14) and a
+Fable ceiling to 10 (p46-10), an unattended --auto or --ceilings landing (and a revert) included, since every verb
+shares the write half (_write_config()). Every P29+ reader ignores a newer key under a newer `schema` (the schema
+rule), so in practice only a pre-P29 root refuses. A pre-P29 reader refuses any top-level `schema` line, and a refused
 file halts every rollout on the machine at its next `verify-timeout`, so before anything is written each live rollout's
 engine root reads the temp file: inert-paths.py's reader_check() (its header has the rule: the live notes directly in
 --tasks-dir, default ~/repos/obsidian/Work/Tasks, each engine root's own rollout-settings.py under `python3 -I -B`,
@@ -140,9 +199,9 @@ release, or wait for the rollout to finish`, then `tune: nothing written: a live
 unusable snapshot is a `WARN: tune: ...` line on stderr, and the write goes on; a check that will not load is exit 1
 (fail closed). With the schema not raised, no check runs. --dry-run runs it too.
 
-Write order: (1) every check above, the reader check last; (2) ONE `tuning` line carrying every pick, through
-run_record.emit(strict=True), its returned bool checked: one os.write, so tunings.jsonl gains the whole set
-or nothing; (3) os.replace(temp, realpath).
+Write order (_write_config(), the one write half every verb shares): (1) every check above, the reader check last; (2)
+ONE `tuning` line carrying every pick (a `ceiling` line for a ceiling verb), through run_record.emit(strict=True), its
+returned bool checked: one os.write, so tunings.jsonl gains the whole set or nothing; (3) os.replace(temp, realpath).
 - emit returns False (an unwritable events dir, a short write): the temp file goes, rollouts.toml was never
   touched, exit 1. emit refuses: the same, exit 2.
 - os.replace fails after the line landed: the temp file goes and a compensating `tuning` line follows with
@@ -160,11 +219,13 @@ Weight key `takes effect at <repo>'s next `next` call or start, running rollouts
 running rollouts included (read live); schedule stamps it on no rollout note` (p39-14).
 
 Exit codes: 0 applied, recorded, already recorded (a --close run whose rollout has its close line), not recorded
-for a null repo, or nothing eligible under --auto (each `held` line printed); 1 a write failed (nothing applied, or the
-line voided), the reader check refuses (or will not load), tunings.jsonl cannot be read for --close, --auto or
---revert, or reflections.jsonl cannot be read; 2
-refused (usage, scores, picks, identity, a stale from, a refused or unvalidated config, a closed Reflection, a revert
-revert_check refuses); 3 no tomllib for a present config.
+for a null repo, nothing eligible under --auto or --ceilings (each `held` line printed), or a ceiling landed, reverted
+or yes'd; 1 a write failed (nothing applied, or the line voided; a ceiling's write or void included), the reader check
+refuses (or will not load), tunings.jsonl cannot be read for --close, --auto, --revert or a ceiling verb, or
+reflections.jsonl cannot be read; 2 refused (usage, scores, picks, identity, a stale from, a refused or unvalidated
+config, a refused ladder, a closed Reflection, a revert revert_check or ceiling_revert_check refuses, a span.json that is
+not --reflection's, or for --ceiling-yes a stale from, an unlisted item or a kid no signal of the role makes); 3 no
+tomllib for a present config.
 """
 from __future__ import annotations
 
@@ -224,9 +285,17 @@ RR = _load("thread_run_record", os.path.join(SHARED, "run_record.py"))
 RS = _load("thread_rollout_settings", os.path.join(SHARED, "rollout-settings.py"))
 # score.py (python >= 3.8 too): RULE_EFFECTS for --revert, load_tunings() and agreeing() for --auto and --revert
 SCORE = _load("thread_score", os.path.join(HERE, "score.py"))
+STEP = RR.CEILING_STEP  # a Fable ceiling's one move (p46-10): run_record.py's, which arms.py's STEP reads too
 CLOSES = RR.CLOSES  # completion | supersede: the close that wrote a line (run_record.py's Close rule)
 AGREE = 3  # ADR 0037 d5: a knob lands once three Reflections agree (run_record.py's Agreement rule)
 LOAD_HELD = "machine load tops the Time-lost ledger"  # check (6)'s reason (reflect.py's span lists these as its holds)
+# The Fable ceilings (p46-10): each drawn role's key in rollouts.toml's [defaults], what a landing prints, and where
+# --ceiling-yes reads the decision task by default.
+CEILING_KEY = {role: key for key, role in RS.CEILING_ROLES.items()}
+CEILING_EFFECT = ("takes effect, read live, at each task's first dispatch, each rollout's lead draw and each Workflow "
+                  "call's doubled-review first reviewer on a p46-10+ engine snapshot (a stamped task keeps its arm; a "
+                  "rollout on an older snapshot keeps drawing on ladder.toml's [share] until it ends)")
+TASKS_DIR = "~/repos/obsidian/Work/Tasks"
 
 
 class Stop(Exception):
@@ -525,6 +594,139 @@ def revert_check(scores, tid, tunings, now_values):
     return None, why or "%s applied nothing" % tid
 
 
+# ---- the Fable ceilings (p46-10): the reads and the checks ---------------------------------------------------------
+
+def load_ceilings(base):
+    """Every `ceiling` line of <base>/tunings.jsonl, in time then file order, each a copy carrying `_t` (its ts in ms)
+    and `_voided` (another ceiling line's `voids` names it). [] with no file; OSError when it exists but cannot be
+    read. Shared with reflect.py's span (its `ceilings`)."""
+    path = os.path.join(base, RR.TUNINGS + ".jsonl")
+    if not os.path.exists(path):
+        return []
+    rows, _skipped = SCORE.read_lines(path, kinds=("ceiling",))
+    voided = {d.get("voids") for _t, _n, d in rows if isinstance(d.get("voids"), str)}
+    out = []
+    for t, _n, d in rows:
+        d = dict(d)
+        d["_t"] = t
+        d["_voided"] = d.get("id") in voided
+        out.append(d)
+    return out
+
+
+def ceilings_now(config):
+    """Each drawn role's Fable ceiling now, rollout-settings.py's fable_ceilings() over resolve(repo=None,
+    path=config)'s `fable_ceiling` and ladder.py's load(): {role: {percent, share, source}}. A refused rollouts.toml or
+    ladder is a Stop with its own code (2, or 3 with no tomllib)."""
+    try:
+        part = RS.resolve(repo=None, path=config)["fable_ceiling"]
+    except RS.SettingsError as e:
+        raise Stop("rollout-settings: %s" % e, e.code)
+    lad = RS._ladder()
+    try:
+        ladder = lad.load()
+    except lad.LadderError as e:
+        raise Stop("ladder: %s%s: %s" % (lad.default_path(), "" if e.line is None else ":%d" % e.line, e.reason), e.code)
+    return RS.fable_ceilings(part, ladder)
+
+
+def _percent_now(ceilings):
+    """{role: the ceiling now in percent, or None} for every drawn role (SHARE_ROLES)."""
+    return {role: (ceilings.get(role) or {}).get("percent") for role in RR.SHARE_ROLES}
+
+
+def arms_evidence(r):
+    """A role's two arms as one line of evidence (both arms' landed, Hands-off rate, Escapes and tokens per merge, and the
+    agreeing Reflections), unfolded and uncut: reflect.py's arms_items() and --ceilings share it."""
+    out = "; ".join("%s %s landed, Hands-off %s, %s Escape(s), tokens per merge %s" % (
+        a, x.get("landed"), x.get("handsOffRate"), x.get("escapes"),
+        "unknown" if x.get("tokensPerMerge") is None else x["tokensPerMerge"])
+        for a, x in (("opus", r.get("opus") or {}), ("fable", r.get("fable") or {})))
+    if r.get("agreedWith"):
+        out += "; agreed with %s" % ", ".join(str(x) for x in r["agreedWith"])
+    return out
+
+
+def _int(v):
+    return isinstance(v, int) and not isinstance(v, bool)
+
+
+def ceiling_auto_check(role, r, now, lines, rid):
+    """(ok, reason) for one arms role under --ceilings (the module docstring's checks, in order): (1) ready and well
+    formed, (2) to is not 0 and in 0..100, (3) |to - from| is STEP, (4) no non-voided auto `ceiling` line of Reflection
+    `rid` has moved the role, (5) from is the ceiling now (`now`, a percent or None). (4) comes before (5) so a re-run
+    after a landing names the landing, never a stale from. Pure: reflect.py's span calls it with load_ceilings()'s lines
+    and the ceiling now."""
+    r = r if isinstance(r, dict) else {}
+    frm, to = r.get("from"), r.get("to")
+    if r.get("ready") is not True or not _int(frm) or not _int(to) or r.get("signal") not in RR.ARMS_SIGNALS or \
+            not isinstance(r.get("kid"), str) or not _int(r.get("agreement")) or r["agreement"] < AGREE:
+        return False, "not a well-formed ready role (ready, from, to, signal, kid, agreement)"
+    if to == 0:
+        return False, "a move to 0 turns the arm off: Lachy decides (a caution)"
+    if not 0 <= to <= 100:
+        return False, "to %d is outside 0..100" % to
+    if abs(to - frm) != STEP:
+        return False, "a move of %d points is no step of %d" % (abs(to - frm), STEP)
+    for d in lines:
+        if d["_voided"] or d.get("auto") is not True or d.get("reflection") != rid:
+            continue
+        if any(isinstance(e, dict) and e.get("role") == role for e in d.get("applied") or []):
+            return False, "Reflection %s already moved %s (%s)" % (rid, role, d.get("id"))
+    if frm != now:
+        return False, "stale from: the ceiling is %s now (a hand edit or a declaration since span)" % (
+            "unset" if now is None else now)
+    return True, None
+
+
+def ceiling_revert_check(tid, lines, roles, now, rid, closed):
+    """(entry, None) for the first entry of auto `ceiling` line `tid` a revert may undo now, its `guard` the revertGuard
+    lines it reverts on, else (None, why). `roles` is span's arms.roles, `now` {role: percent or None} (the ceiling
+    now), `rid` this Reflection, `closed` the closed Reflections' ids. The module docstring's checks: a non-voided auto
+    landing that is no revert, from a closed Reflection other than this one; then per entry, in order: not reverted
+    yet, rollouts.toml still holds its `to`, this reading's `from` is that `to`, and the role's revertGuard for the
+    move's direction is non-empty. A multi-role line is reverted one role per call. Pure: reflect.py's span calls it."""
+    line = next((d for d in lines if d.get("id") == tid), None)
+    if line is None:
+        return None, "%s is no ceiling line" % tid
+    if line["_voided"] or line.get("auto") is not True:
+        return None, "%s is not a standing auto ceiling line (only the weekly reading's own landing is reverted unasked)" % tid
+    if isinstance(line.get("reverts"), str):
+        return None, "%s is itself a revert: a revert is never reverted" % tid
+    landed = line.get("reflection")
+    if landed == rid:
+        return None, "%s landed in this Reflection (%s): only a later reading is evidence against it" % (tid, rid)
+    if landed not in closed:
+        return None, "%s's Reflection %s is not closed: its week is no evidence yet" % (tid, landed)
+    done = {(d["reverts"], e.get("role")) for d in lines if not d["_voided"] and isinstance(d.get("reverts"), str)
+            for e in d.get("applied") or [] if isinstance(e, dict)}
+    roles = roles if isinstance(roles, dict) else {}
+    why = None
+    for e in line.get("applied") or []:
+        if not isinstance(e, dict) or not _int(e.get("from")) or not _int(e.get("to")):
+            continue
+        role = e.get("role")
+        if (tid, role) in done:
+            why = why or "%s's %s is already reverted" % (tid, role)
+            continue
+        if now.get(role) != e["to"]:
+            why = why or "rollouts.toml no longer holds %s's %s %s (it is %s now): a hand edit, left alone" % (
+                tid, role, e["to"], now.get(role))
+            continue
+        r = roles.get(role) if isinstance(roles.get(role), dict) else {}
+        if r.get("from") != e["to"]:
+            why = why or "this reading's %s from is %s, not %s's %s" % (role, r.get("from"), tid, e["to"])
+            continue
+        direction = "widening" if e["to"] > e["from"] else "narrowing"
+        guard = [x for x in (r.get("revertGuard") or {}).get(direction) or [] if isinstance(x, str)]
+        if not guard:
+            why = why or "no declared risk of a %s is read for %s (its revertGuard is empty: arms.py's CEILING_RISKS)" % (
+                direction, role)
+            continue
+        return dict(e, guard=guard), None
+    return None, why or "%s applied nothing" % tid
+
+
 def emit(scores, fields):
     """True written; False a write failure; Stop(2) refused."""
     try:
@@ -626,14 +828,16 @@ def _edit_table(lines, target, label, picks, written):
 
 def edit_text(text, slug, picks, doc):
     """The config text with each pick's key set to its `to`: a machine-wide key (rollout-settings.py's MACHINE_ONLY,
-    capacity_max) in [defaults], every other in [repo."<slug>"] (_edit_table: a Stop(2) for a form it won't edit), and
-    the file's `schema` raised for a newer key (raise_schema)."""
+    capacity_max, and p46-10's CEILING_KEYS, the Fable ceilings) in [defaults], every other in [repo."<slug>"]
+    (_edit_table: a Stop(2) for a form it won't edit), and the file's `schema` raised for a newer key (raise_schema).
+    `slug` is read only for a per-repo key (a ceiling edit passes None)."""
     lines = text.split("\n") if text else []
     trailing = bool(lines) and lines[-1] == ""
     if trailing:
         lines = lines[:-1]
-    machine = [p for p in picks if p["key"] in RS.MACHINE_ONLY]
-    per_repo = [p for p in picks if p["key"] not in RS.MACHINE_ONLY]
+    defaults = RS.MACHINE_ONLY + RS.CEILING_KEYS
+    machine = [p for p in picks if p["key"] in defaults]
+    per_repo = [p for p in picks if p["key"] not in defaults]
     if machine:
         lines = _edit_table(lines, ("defaults",), "[defaults]", machine, "defaults" in (doc or {}))
     if per_repo:
@@ -788,27 +992,21 @@ def pick(scores, picks_arg, repo, config, dry_run, tasks_dir=None):
     return _apply(scores, applied, [p["id"] for p in picks], repo, config, before, dry_run, tasks_dir=tasks_dir)
 
 
-def _apply(scores, applied, names, repo, config, before, dry_run, auto=None, tasks_dir=None):
-    """Land `applied` (tuning entries) in rollouts.toml and record them as ONE tuning line (pick, --auto and --revert
-    share it): each entry's `from` must be the key's value now, then the edit, its validation, the reader check when
-    the edit raises the file's `schema`, the line, the replace. The floor (FLOOR) is checked first, before any read."""
-    for e, name in zip(applied, names):
-        if below_floor(e):
-            raise Stop("%s: %s: nothing written" % (name, FLOOR % e["key"]), 2)
-    values = now_values(before)
-    for e, name in zip(applied, names):
-        now = values.get(e["key"])
-        if now != e["from"]:
-            raise Stop("%s's from is stale: %s is %s now, not %s (re-run the Reflection's score)"
-                       % (name, e["key"], now, e["from"]), 2)
+def _write_config(config, edit, validate, fields_of, void_of, record, dry_run, tasks_dir):
+    """The write half every config write shares (the module docstring's Write order), for the knob verbs and the three
+    ceiling verbs: the config's realpath and text, edit(text, doc) (the text edit with its schema raise; a Stop for a
+    form it won't edit), a temp file in the same directory (a missing directory made, and removed again when a failure
+    leaves it empty), validate(tmp) (a Stop when the temp file does not read as intended, else whether its schema rose:
+    then the reader check runs), ONE line through record(fields_of(tid), strict=True), os.replace, and on a replace
+    failure a void line record(void_of(vid, tid), strict=False). --dry-run prints the diff and the would-be line and
+    writes nothing. The line's id, or None on --dry-run."""
     real = os.path.realpath(config)
     try:
         text = open(real, encoding="utf-8").read() if os.path.exists(real) else ""
         read = RS._ladder().read_toml(config)
     except Exception as e:
         raise Stop("cannot read %s: %s" % (config, e), 2)
-    picks = [{"key": e["key"], "to": e["to"]} for e in applied]
-    new_text = edit_text(text, scores["repo"], picks, read[1] if read else None)
+    new_text = edit(text, read[1] if read else None)
     created = Created(os.path.dirname(real))
     tmp = None
     try:
@@ -818,11 +1016,76 @@ def _apply(scores, applied, names, repo, config, before, dry_run, auto=None, tas
             f.write(new_text)
         mode = stat.S_IMODE(os.stat(real).st_mode) if os.path.exists(real) else 0o644
         os.chmod(tmp, mode)
+        if validate(tmp):
+            reader_check(tmp, tasks_dir)
+        tid = new_id()
+        fields = fields_of(tid)
+        if dry_run:
+            diff = difflib.unified_diff(text.splitlines(True), new_text.splitlines(True), config, config + " (tuned)")
+            sys.stdout.write("".join(diff))
+            print("would record %s in %s: %s" % (tid, tunings_path(), json.dumps(fields, ensure_ascii=False)))
+            _unlink(tmp)
+            created.undo()
+            return None
+        try:
+            ok = record(fields, True)
+        except RR.Refused as e:
+            raise Stop("the run record refused the line: %s" % e, 2)
+        if not ok:
+            raise Stop("nothing applied: the Reflection's line could not be written (see run_record above); "
+                       "rollouts.toml is unchanged", 1)
+        try:
+            os.replace(tmp, real)
+        except OSError as e:
+            _unlink(tmp)
+            created.undo()
+            vid = new_id()
+            ok = False
+            try:
+                ok = record(void_of(vid, tid), False)
+            except Exception:
+                ok = False
+            if not ok:
+                say("the void line could not be written either: tunings.jsonl claims %s applied, but "
+                    "rollouts.toml lacks it" % tid)
+            raise Stop("rollouts.toml was not written (%s): nothing applied%s" % (e, "; %s voided by %s" % (tid, vid)
+                                                                                 if ok else ""), 1)
+    except Stop:
+        if tmp:
+            _unlink(tmp)
+        created.undo()
+        raise
+    except OSError as e:
+        if tmp:
+            _unlink(tmp)
+        created.undo()
+        raise Stop("cannot write next to %s: %s" % (real, e), 1)
+    print("recorded %s in %s" % (tid, tunings_path()))
+    return tid
+
+
+def _apply(scores, applied, names, repo, config, before, dry_run, auto=None, tasks_dir=None):
+    """Land `applied` (tuning entries) in rollouts.toml and record them as ONE tuning line (pick, --auto and --revert
+    share it): each entry's `from` must be the key's value now, then the write half (_write_config): the edit, its
+    validation, the reader check when the edit raises the file's `schema`, the line, the replace. The floor (FLOOR) is
+    checked first, before any read."""
+    for e, name in zip(applied, names):
+        if below_floor(e):
+            raise Stop("%s: %s: nothing written" % (name, FLOOR % e["key"]), 2)
+    values = now_values(before)
+    for e, name in zip(applied, names):
+        now = values.get(e["key"])
+        if now != e["from"]:
+            raise Stop("%s's from is stale: %s is %s now, not %s (re-run the Reflection's score)"
+                       % (name, e["key"], now, e["from"]), 2)
+    picks = [{"key": e["key"], "to": e["to"]} for e in applied]
+    picked = {p["key"]: p["to"] for p in picks}
+
+    def validate(tmp):
         try:
             after = RS.resolve(repo=repo, path=tmp)
         except RS.SettingsError as e:
             raise Stop("the edit does not validate (%s): nothing written" % e, 2)
-        picked = {p["key"]: p["to"] for p in picks}
         # every rollout key: a picked machine-wide one at its `to` from [defaults], a picked repo one from its repo
         # table, every other unchanged; and each Weight part the same way (p53-5)
         for k in RS.SETTING_KEYS:
@@ -846,52 +1109,67 @@ def _apply(scores, applied, names, repo, config, before, dry_run, auto=None, tas
         # them.
         if after.get("test_logins") != before.get("test_logins"):
             raise Stop("the edit changes test_logins: nothing written", 2)
-        if after["schema"]["file"] > before["schema"]["file"]:
-            reader_check(tmp, tasks_dir)
-        tid = new_id()
-        fields = line_fields(scores, applied, tid, auto=auto)
-        if dry_run:
-            diff = difflib.unified_diff(text.splitlines(True), new_text.splitlines(True), config, config + " (tuned)")
-            sys.stdout.write("".join(diff))
-            print("would record %s in %s: %s" % (tid, tunings_path(), json.dumps(fields, ensure_ascii=False)))
-            _unlink(tmp)
-            created.undo()
-            return 0
-        if not emit(scores, fields):
-            raise Stop("nothing applied: the Reflection's line could not be written (see run_record above); "
-                       "rollouts.toml is unchanged", 1)
-        try:
-            os.replace(tmp, real)
-        except OSError as e:
-            _unlink(tmp)
-            created.undo()
-            vid = new_id()
-            ok = False
-            void_auto = {k: v for k, v in (auto or {}).items() if k in ("auto", "reflection")}  # never reverts
-            try:
-                ok = RR.emit(scores["rollout"], "tuning", fields=line_fields(scores, [], vid, voids=tid, auto=void_auto))
-            except Exception:
-                ok = False
-            if not ok:
-                say("the void line could not be written either: tunings.jsonl claims %s applied, but "
-                    "rollouts.toml lacks it" % tid)
-            raise Stop("rollouts.toml was not written (%s): nothing applied%s" % (e, "; %s voided by %s" % (tid, vid)
-                                                                                 if ok else ""), 1)
-    except Stop:
-        if tmp:
-            _unlink(tmp)
-        created.undo()
-        raise
-    except OSError as e:
-        if tmp:
-            _unlink(tmp)
-        created.undo()
-        raise Stop("cannot write next to %s: %s" % (real, e), 1)
-    print("recorded %s in %s" % (tid, tunings_path()))
+        # p46-10: a knob never moves a Fable ceiling (the ceiling verbs are its writer).
+        if after.get("fable_ceiling") != before.get("fable_ceiling"):
+            raise Stop("the edit changes a Fable ceiling: nothing written", 2)
+        return after["schema"]["file"] > before["schema"]["file"]
+
+    void_auto = {k: v for k, v in (auto or {}).items() if k in ("auto", "reflection")}  # never reverts
+    tid = _write_config(config, lambda text, doc: edit_text(text, scores["repo"], picks, doc), validate,
+                        lambda tid: line_fields(scores, applied, tid, auto=auto),
+                        lambda vid, tid: line_fields(scores, [], vid, voids=tid, auto=void_auto),
+                        lambda fields, strict: RR.emit(scores["rollout"], "tuning", fields=fields, strict=strict),
+                        dry_run, tasks_dir)
+    if tid is None:
+        return 0
     for a in applied:
         effect = TAKES_EFFECT_BY.get(a["key"], TAKES_EFFECT)
         print("applied %s %d → %d for %s: %s" % (a["key"], a["from"], a["to"], scores["repo"],
                                                  effect % scores["repo"] if "%s" in effect else effect))
+    return 0
+
+
+def _ceiling_validate(config, tmp, picks):
+    """A ceiling edit's validation (the module docstring's Fable ceilings): load_tables() of the temp file must read as
+    the config's with exactly each picked `[defaults]` key at its `to`, every other table, key and repo identical and
+    `schema` only raised. Whether the schema rose; a Stop(2) otherwise."""
+    try:
+        before = RS.load_tables(config) or dict(RS._NO_TABLES)
+        after = RS.load_tables(tmp)
+    except RS.SettingsError as e:
+        raise Stop("the edit does not validate (%s): nothing written" % e, 2)
+    moved = {p["key"]: p["to"] for p in picks}
+    for key, to in moved.items():
+        if not RS._same(after["defaults"].get(key), to):
+            raise Stop("the edit sets [defaults] %s to %s, not %s: nothing written" % (
+                key, json.dumps(after["defaults"].get(key)), to), 2)
+
+    def rest(t):
+        return {"defaults": {k: v for k, v in t["defaults"].items() if k not in moved}, "guardrails": t["guardrails"],
+                "repo": t["repo"], "ignored": t["ignored"], "retired": t["retired"]}
+    if not RS._same(rest(before), rest(after)):
+        raise Stop("the edit changes more than %s: nothing written" % ", ".join(moved), 2)
+    if after["schema"] < before["schema"]:
+        raise Stop("the edit lowers the schema: nothing written", 2)
+    return after["schema"] > before["schema"]
+
+
+def _ceiling_apply(applied, config, dry_run, tasks_dir, extra):
+    """Land `applied` (ceiling entries: role, from, to, rule, evidence[, kid][, agreed]) in rollouts.toml's [defaults]
+    and record them as ONE `ceiling` line carrying `extra` (auto and reflection, plus reverts; or decisionTask), through
+    the write half (_write_config). The caller has checked each from against the ceiling now."""
+    picks = [{"key": CEILING_KEY[e["role"]], "to": e["to"]} for e in applied]
+    void_extra = {k: v for k, v in extra.items() if k in ("auto", "reflection")}  # never reverts or decisionTask
+    tid = _write_config(config, lambda text, doc: edit_text(text, None, picks, doc),
+                        lambda tmp: _ceiling_validate(config, tmp, picks),
+                        lambda tid: dict({"id": tid, "applied": applied}, **extra),
+                        lambda vid, tid: dict({"id": vid, "applied": [], "voids": tid}, **void_extra),
+                        lambda fields, strict: RR.emit(None, "ceiling", fields=fields, strict=strict),
+                        dry_run, tasks_dir)
+    if tid is None:
+        return 0
+    for e in applied:
+        print("applied ceiling %s %d → %d: %s" % (e["role"], e["from"], e["to"], CEILING_EFFECT))
     return 0
 
 
@@ -964,6 +1242,113 @@ def revert(scores, tid, repo, reflection, config, dry_run, tasks_dir=None):
                   auto={"auto": True, "reflection": reflection, "reverts": tid}, tasks_dir=tasks_dir)
 
 
+def _span(path, reflection):
+    """span.json's object, refused (exit 2) when it cannot be read or is another Reflection's."""
+    try:
+        with open(os.path.expanduser(path), encoding="utf-8") as f:
+            doc = json.load(f)
+    except (OSError, ValueError) as e:
+        raise Stop("--span %s cannot be read as span's JSON: %s" % (path, e), 2)
+    if not isinstance(doc, dict) or doc.get("reflection") != reflection:
+        raise Stop("--span %s is Reflection %s's, not %s's" % (
+            path, doc.get("reflection") if isinstance(doc, dict) else None, reflection), 2)
+    return doc
+
+
+def _span_roles(span):
+    """span.json's arms.roles ({} when the reading had no arms block)."""
+    arms = span.get("arms")
+    roles = arms.get("roles") if isinstance(arms, dict) else None
+    return roles if isinstance(roles, dict) else {}
+
+
+def _ceiling_lines():
+    try:
+        return load_ceilings(RR.events_dir())
+    except ValueError as e:
+        raise Stop("cannot resolve the events directory: %s" % e, 1)
+    except OSError as e:
+        raise Stop("tunings.jsonl cannot be read: %s: nothing written" % e, 1)
+
+
+def _config(config):
+    return os.path.expanduser(config or RS.default_path())
+
+
+def ceilings(span_path, reflection, config, dry_run, tasks_dir=None):
+    """--ceilings: land every ready role ceiling_auto_check passes, as ONE auto line; `held ceiling <role>: <reason>` for
+    the rest."""
+    span = _span(span_path, reflection)
+    _reflection_open(reflection)
+    lines = _ceiling_lines()
+    roles = _span_roles(span)
+    ready = [role for role in RR.SHARE_ROLES if isinstance(roles.get(role), dict) and roles[role].get("ready") is True]
+    if not ready:
+        return 0
+    config = _config(config)
+    now = _percent_now(ceilings_now(config))
+    land = []
+    for role in ready:
+        r = roles[role]
+        ok, reason = ceiling_auto_check(role, r, now[role], lines, reflection)
+        if not ok:
+            print("held ceiling %s: %s" % (role, reason))
+            continue
+        land.append({"role": role, "from": r["from"], "to": r["to"], "rule": r["signal"],
+                     "evidence": " ".join(arms_evidence(r).split())[:300], "kid": r["kid"], "agreed": r["agreement"]})
+    if not land:
+        return 0
+    return _ceiling_apply(land, config, dry_run, tasks_dir, {"auto": True, "reflection": reflection})
+
+
+def ceiling_revert(tid, span_path, reflection, config, dry_run, tasks_dir=None):
+    """--ceiling-revert <tid>: undo one role of an auto landing on the declared risk this reading measures."""
+    span = _span(span_path, reflection)
+    closed = {d.get("id") for d in _reflection_open(reflection) if d.get("kind") == "reflection"}
+    lines = _ceiling_lines()
+    config = _config(config)
+    e, why = ceiling_revert_check(tid, lines, _span_roles(span), _percent_now(ceilings_now(config)), reflection, closed)
+    if e is None:
+        raise Stop("%s is not reverted: %s: nothing written" % (tid, why), 2)
+    entry = {"role": e["role"], "from": e["to"], "to": e["from"], "rule": ("revert:%s" % e.get("rule"))[:64],
+             "evidence": ("revert %s: %s" % (tid, "; ".join(e["guard"])))[:300]}
+    if isinstance(e.get("kid"), str):
+        entry["kid"] = e["kid"]
+    return _ceiling_apply([entry], config, dry_run, tasks_dir, {"auto": True, "reflection": reflection, "reverts": tid})
+
+
+def ceiling_yes(role, frm, to, kid, task, config, dry_run, tasks_dir=None):
+    """--ceiling-yes: Lachy's yes to a decision task's `- ceiling` item, checked against the item's line and the ceiling
+    now, written as one line that is not auto, carrying decisionTask."""
+    if role not in RR.SHARE_ROLES:
+        raise Stop("--role %s is no drawn role (%s)" % (role, ", ".join(RR.SHARE_ROLES)), 2)
+    if not (0 <= frm <= 100 and 0 <= to <= 100) or abs(to - frm) != STEP:
+        raise Stop("a Fable ceiling moves one step of %d points between 0 and 100, not %d -> %d" % (STEP, frm, to), 2)
+    signal = next((x for x in RR.ARMS_SIGNALS if RR.arms_key(role, x) == kid), None)
+    if signal is None:
+        raise Stop("--kid %s is no ceiling id of %s (arms_key(role, signal) for a signal in %s)" % (
+            kid, role, ", ".join(RR.ARMS_SIGNALS)), 2)
+    if not RR.SLUG_RE.fullmatch(task):
+        raise Stop("--task %s is no task slug" % task, 2)
+    note = os.path.join(os.path.expanduser(tasks_dir or TASKS_DIR), task + ".md")
+    want = "- ceiling %s at %d: Fable ceiling %s %d%% -> %d%%" % (kid, frm, role, frm, to)
+    try:
+        with open(note, encoding="utf-8") as f:
+            listed = any(line.startswith(want) for line in f.read().split("\n"))
+    except (OSError, UnicodeDecodeError) as e:
+        raise Stop("[[%s]] cannot be read (%s): nothing written" % (task, e), 2)
+    if not listed:
+        raise Stop("[[%s]] lists no `%s` line: nothing written" % (task, want), 2)
+    config = _config(config)
+    now = _percent_now(ceilings_now(config))[role]
+    if now != frm:
+        raise Stop("stale from: the %s ceiling is %s now, not %d: record it with reflect.py moot" % (
+            role, "unset" if now is None else now, frm), 2)
+    entry = {"role": role, "from": frm, "to": to, "rule": signal, "kid": kid,
+             "evidence": ("Lachy's yes to [[%s]]'s - ceiling %s at %d" % (task, kid, frm))[:300]}
+    return _ceiling_apply([entry], config, dry_run, tasks_dir, {"decisionTask": task})
+
+
 class Parser(argparse.ArgumentParser):
     def error(self, message):
         say(message)
@@ -972,15 +1357,24 @@ class Parser(argparse.ArgumentParser):
 
 def main(argv):
     p = Parser(prog="tune.py", description="Apply a Reflection's picked Tunings to rollouts.toml and record the Reflection.")
-    p.add_argument("--scores", required=True)
+    p.add_argument("--scores")
     g = p.add_mutually_exclusive_group(required=True)
     g.add_argument("--pick")
     g.add_argument("--record-only", action="store_true")
     g.add_argument("--auto", action="store_true")
     g.add_argument("--revert", metavar="TUNING_ID")
+    g.add_argument("--ceilings", action="store_true")
+    g.add_argument("--ceiling-revert", metavar="TUNING_ID")
+    g.add_argument("--ceiling-yes", action="store_true")
     p.add_argument("--close", choices=CLOSES)
     p.add_argument("--reflection")
     p.add_argument("--repo")
+    p.add_argument("--span")
+    p.add_argument("--role")
+    p.add_argument("--from", dest="frm", type=int)
+    p.add_argument("--to", type=int)
+    p.add_argument("--kid")
+    p.add_argument("--task")
     p.add_argument("--config")
     p.add_argument("--tasks-dir")
     p.add_argument("--dry-run", action="store_true")
@@ -989,16 +1383,51 @@ def main(argv):
         say("--close needs --record-only")
         return 2
     weekly = a.auto or a.revert is not None
+    spanned = a.ceilings or a.ceiling_revert is not None
+    ceiling = spanned or a.ceiling_yes
+    if ceiling and a.scores is not None:
+        say("--scores goes with --pick, --record-only, --auto or --revert only")
+        return 2
+    if not ceiling and a.scores is None:
+        say("--pick, --record-only, --auto and --revert need --scores <score.json|->")
+        return 2
+    if ceiling and a.repo is not None:
+        say("--repo goes with no ceiling verb: a Fable ceiling is machine-wide")
+        return 2
     if weekly and not a.reflection:
         say("--auto and --revert need --reflection <id> (the weekly reading's)")
         return 2
-    if a.reflection is not None and not weekly:
-        say("--reflection goes with --auto or --revert only")
+    if spanned and not a.reflection:
+        say("--ceilings and --ceiling-revert need --reflection <id> (the weekly reading's)")
         return 2
-    if weekly and not RR.REFLECTION_ID_RE.match(a.reflection):
+    if a.reflection is not None and not (weekly or spanned):
+        say("--reflection goes with --auto, --revert, --ceilings or --ceiling-revert only")
+        return 2
+    if (weekly or spanned) and not RR.REFLECTION_ID_RE.match(a.reflection):
         say("--reflection %s is no r- id" % a.reflection)
         return 2
+    if spanned and a.span is None:
+        say("--ceilings and --ceiling-revert need --span <span.json> (the weekly reading's)")
+        return 2
+    if a.span is not None and not spanned:
+        say("--span goes with --ceilings or --ceiling-revert only")
+        return 2
+    yes = {"--role": a.role, "--from": a.frm, "--to": a.to, "--kid": a.kid, "--task": a.task}
+    missing = [k for k, v in yes.items() if v is None]
+    if a.ceiling_yes and missing:
+        say("--ceiling-yes needs %s" % ", ".join(missing))
+        return 2
+    given = [k for k, v in yes.items() if v is not None]
+    if given and not a.ceiling_yes:
+        say("%s go%s with --ceiling-yes only" % (", ".join(given), "es" if len(given) == 1 else ""))
+        return 2
     try:
+        if a.ceilings:
+            return ceilings(a.span, a.reflection, a.config, a.dry_run, a.tasks_dir)
+        if a.ceiling_revert is not None:
+            return ceiling_revert(a.ceiling_revert, a.span, a.reflection, a.config, a.dry_run, a.tasks_dir)
+        if a.ceiling_yes:
+            return ceiling_yes(a.role, a.frm, a.to, a.kid, a.task, a.config, a.dry_run, a.tasks_dir)
         scores = read_scores(a.scores)
         if is_serial(scores) and not a.record_only:
             raise Stop("a serial score proposes no Tuning: --pick, --auto and --revert take a parallel score only", 2)

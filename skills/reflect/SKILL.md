@@ -24,13 +24,13 @@ passes Lachy's answer on:
   has two more writers: `inert-paths.py` writes only `inert_paths` (a repo's Inert paths), and `rollout-settings.py
   declare` writes any other key he has ruled on (ADR 0063's 2026-11-24 amendment), Tuning keys included: `tune.py` then
   reads that value as a hand edit (its `--revert` reason prints `a hand edit, left alone`). Never edit
-  either file by hand from this skill, and never compute a score or write a Tuning in the conversation, save the one
-  by-hand edit below.
-- `~/.config/thread/ladder.toml`'s `[share]` values (each role's Fable ceiling, ADR 0079 d9) have **no script writer**
-  until p46-10: arms.py proposes a move and reflect.py lists it on the decision task, and neither writes the file. A
-  ceiling's yes in § Deciding the decision task is the one by-hand edit this skill makes: that one value, and no
-  other byte of the file. ADR 0079 d9 calls the change a Tuning, yet no script records it (§ What the record cannot
-  show).
+  either file by hand from this skill, and never compute a score or write a Tuning in the conversation.
+- tune.py is also the one script writer of each drawn role's **Fable ceiling** (ADR 0079 d6 and d9, p46-10): its home
+  is `rollouts.toml`'s `[defaults] fable_ceiling_<role>`, in percent, seeded by `~/.config/thread/ladder.toml`'s
+  `[share]` for a role `rollouts.toml` does not set. arms.py proposes a move; tune.py `--ceilings` lands an agreed one
+  at step 14, `--ceiling-revert` reverts one on its declared risk, and `--ceiling-yes` applies Lachy's yes to a
+  decision-task item (§ Deciding the decision task). Every move writes one `ceiling` line in `tunings.jsonl`, its
+  record. Nothing in this skill writes `ladder.toml`.
 - `skills/reflect/scripts/reflect.py` is the **only writer** of `reflections.jsonl` (the weekly reading's Watches,
   proposals, Time-lost ledger lines, attention lines, arms lines and close), and of the bug and decision tasks it files. Its header
   is the one copy of its rules.
@@ -317,9 +317,10 @@ call or start, running rollouts included (both read live; ADR 0083).
 
 `/thread:reflect --weekly` reads every rollout since the last weekly Reflection, on its own, once a week (ADR 0037
 d4), or once a fortnight on a quiet streak (d6): the scripts score and sweep, the model traces each cost to its rule,
-and the writers record the outcome. It lands a bug task, an agreed knob or a knob's revert unasked (ADR 0037 d5); a
-rule proposal (with any Watch to confirm beside it), a held trade (a knob ADR 0037 d1 leaves to Lachy), a role's Fable
-ceiling (ADR 0079 d9) or a Monthly audit's gap goes into one decision task for Chorus's Thursday Reflection Routine. It
+and the writers record the outcome. It lands a bug task, an agreed knob or a knob's revert, and an agreed Fable ceiling
+or its revert (ADR 0079 d9, p46-10), unasked (ADR 0037 d5); a rule proposal (with any Watch to confirm beside it), a
+held trade (a knob ADR 0037 d1 leaves to Lachy), a role's Fable ceiling that is a trade or a caution, or a Monthly
+audit's gap goes into one decision task for Chorus's Thursday Reflection Routine. It
 also reads each drawn role's two **arms**, Opus and Fable, side by side (ADR 0079 d9). It also keeps the **Time-lost ledger** (ADR 0051):
 the hours each cause class cost across every rollout, ranked by cause and trended week on week, with a Monthly audit
 on the month's first reading. And it keeps the **attention ledger** (ADR 0056): the questions put to Lachy by Owner, each
@@ -399,10 +400,16 @@ rule's Watch as step 13b would write it (`fresh`, and `held`, the items a closed
 Its `arms` block is the **arms** reading (ADR 0079 d9; `skills/reflect/scripts/arms.py`'s header holds every rule), each
 row placed by its own time and every wider read declared there: `roles`, the master review's, the builder's, the
 investigator's and the lead's `opus` and `fable` arms with their counts, `excluded` (the tasks out of both arms), the
-`verdict`, and the Fable ceiling it proposes (`from`, `to`, `agreement`, `held`, `item`) from `ladder.toml`'s `[share]`;
+`verdict`, and the Fable ceiling it proposes (`from`, `to`, `agreement`, `held`, `item`, `ready`) from the resolved
+ceiling (`rollouts.toml`'s `fable_ceiling_<role>`, else `ladder.toml`'s `[share]` seed), with its `revertGuard`;
 `plans`, the rejected plans per 100 tasks before and after planning moved to Fable; `fableCalls` and `fellBack`; and the
 rows the window check reads (`tasks`, `calls`, `reviews`, `escapes`, `planTasks`, `rejections`). Its flags and
 `cannotShow` lines join span's only when it holds a row.
+
+Its `ceilings` block is what step 14's Fable ceiling calls will do (p46-10; `reflect.py`'s header holds the rules):
+`now`, each role's ceiling in percent; `revert`, each landed ceiling a revert undoes on its declared risk (`tuning`,
+`role`, `from`, `to`, `breached`); `land`, each ready role tune.py `--ceilings` lands (`role`, `from`, `to`, `kid`,
+`signal`, `agreement`); and `held`, each ready role it holds, with its reason.
 
 Its `suite` block is the **Suite budget** and **CI headroom** (ADR 0073 d5; `reflect.py`'s header holds the rules),
 each on the week's median over the window's rows: `local`, each repo's suites by tier (`integration`, a rollout's
@@ -659,8 +666,8 @@ leaves out (`leftOut` and `onFable` before, `fellBack` and `onOpus` after). Repo
 `plans`, each drawn role, `other`, `firstReviewer` and `leads`: `firstReviewer` counts a doubled master review's first
 reviewers that asked Fable, outside the draw, and a fell-back one counts in `fellBack.byKind.firstReviewer`), and quote
 `fellBack.line` verbatim
-when it is there. The reading never edits `ladder.toml`: a Fable ceiling moves only on Lachy's yes to its decision-task
-item, which the session deciding the task applies (§ Deciding the decision task).
+when it is there. The reading never edits `ladder.toml`: a Fable ceiling moves only through tune.py, an agreed move at
+step 14 and a trade or a caution on Lachy's yes (§ Deciding the decision task).
 
 **The nights** (`span.json`'s `nights`, p28-7) read as step 5's do, over every record this week: per night, keyed by
 host and Morning, its held starts and its ran-past tasks split fallback / underestimate / unchecked, the `totals`, its
@@ -757,11 +764,14 @@ block.
 
 ### 14. Knobs
 
-From `span.json`'s `knobs`: each revert first, then each landing, then one `knobs` call.
+From `span.json`'s `knobs`: each revert first, then each landing; then, from its `ceilings`, each Fable ceiling revert,
+then the ceilings' landing; then one `knobs` call.
 
 ```
 python3 ${CLAUDE_PLUGIN_ROOT}/skills/reflect/scripts/tune.py --scores /tmp/thread-reflect-week-<YYYY-MM-DD>/<slug>.score.json --revert <tuning id> --repo <Project root> --reflection <reflection id>
 python3 ${CLAUDE_PLUGIN_ROOT}/skills/reflect/scripts/tune.py --scores /tmp/thread-reflect-week-<YYYY-MM-DD>/<slug>.score.json --auto --repo <Project root> --reflection <reflection id>
+python3 ${CLAUDE_PLUGIN_ROOT}/skills/reflect/scripts/tune.py --ceiling-revert <tuning id> --span /tmp/thread-reflect-week-<YYYY-MM-DD>/span.json --reflection <reflection id>
+python3 ${CLAUDE_PLUGIN_ROOT}/skills/reflect/scripts/tune.py --ceilings --span /tmp/thread-reflect-week-<YYYY-MM-DD>/span.json --reflection <reflection id>
 python3 ${CLAUDE_PLUGIN_ROOT}/skills/reflect/scripts/reflect.py knobs --span /tmp/thread-reflect-week-<YYYY-MM-DD>/span.json
 ```
 
@@ -782,6 +792,15 @@ lower waits (ADR 0051, ADR 0083)` are the load hold too. A revert is never held,
 for Reflection <id>: run reflect.py ledger first` means step 13a was skipped: run it, then `--auto` again; `knobs`
 refuses (`run ledger`) for the same reason.
 
+`--ceiling-revert` runs once per `ceilings.revert[]` item (its `tuning`; a line that moved two roles is reverted one
+role per call), and `--ceilings` once when `ceilings.land[]` is non-empty: one call lands every eligible role as one
+`ceiling` line (ADR 0037 d5: three Reflections agreed, no Guardrail breached). Report every exit verbatim: an `applied
+ceiling <role> <from> → <to>: …` line, a `held ceiling <role>: <reason>` line (a `stale from` means a hand edit or a
+declaration moved the ceiling since span, so the next reading's agreement starts again), a refusal (exit 2) or a write
+failure or refused reader check (exit 1, nothing written: a live rollout's engine cannot read the `schema` line the
+landing raises; the next reading retries it at agreement 4). A trade or a caution is never landed here: step 15 lists
+it. Never edit `rollouts.toml` or `ladder.toml` for a ceiling.
+
 ### 15. Decide
 
 Write `/tmp/thread-reflect-week-<YYYY-MM-DD>/decisions.json`, `{"<watch id>": {"why": "...", "amends": "..."}}`,
@@ -798,10 +817,11 @@ It refuses (`run ledger`, exit 2, nothing written) while step 13a's `ledger` has
 ledger's Watch and the audit's gaps reach the task only through its lines, and the task's section is written once. It
 refuses (`run attention`) for the same reason while step 13b has not written this reading's `attention` line: the
 circling Watches reach the task only through it.
-A Fable ceiling (an `arms` role whose `item` is `ceiling`: three Reflections agreed on a move, a trade or a caution) is
-held for Lachy as a trade is: it follows the trades under its own lead, one `- ceiling <kid> at <from>: ...` line per
-(ceiling id, `from`), listed once, kept open on a `## Still open` line (`ceiling <kid> at <from> still open ...`), and
-decided or moot as a trade is. No writer lands a ceiling until p46-10, so even an agreed one is his yes.
+A Fable ceiling whose move is a trade or a caution (an `arms` role whose `item` is `ceiling`; a caution includes a
+move to 0, which is his) is held for Lachy as a trade is: it follows the trades under its own lead, one `- ceiling
+<kid> at <from>: ...` line per (ceiling id, `from`), listed once, kept open on a `## Still open` line (`ceiling <kid> at
+<from> still open ...`), and decided or moot as a trade is. Only a trade or a caution reaches the task: an agreed move
+has no item, since step 14 landed it.
 It writes a decision task only with a rule proposal or a held trade, or a Monthly audit that names a gap: a week with
 Watches to confirm alone writes none, and they wait (a task a held trade alone writes lists none). An audit's gaps come
 after the trades, in an audit part of their own: the hours it found and the record's by class, the sources read and
@@ -874,8 +894,8 @@ skipped behind a revert, the attention ledger (the questions put to Lachy, *your
 while that is above 0, the recommended-pick rate and the hours questions held work; the trails, their rounds and the
 docs-only PRs; the waits to start; each circling item and any Watch it opened), the arms (each role's two arms with
 their counts, its left-out tasks, its verdict and held reason, a widening held behind a breached Guardrail with the
-Guardrail it names, each ceiling the decision task lists, the plans' before and after, the Fable calls by kind and the
-fell-back line), the carried read's three lists (above), the close line's counts and `quiet`, the `cannotShow` list and every other flag. Then `rm -rf /tmp/thread-reflect-week-<YYYY-MM-DD>`.
+Guardrail it names, each ceiling step 14 landed, reverted or held with its reason, each ceiling the decision task
+lists, the plans' before and after, the Fable calls by kind and the fell-back line), the carried read's three lists (above), the close line's counts and `quiet`, the `cannotShow` list and every other flag. Then `rm -rf /tmp/thread-reflect-week-<YYYY-MM-DD>`.
 
 ## Deciding the decision task
 
@@ -907,19 +927,23 @@ python3 ${CLAUDE_PLUGIN_ROOT}/skills/reflect/scripts/reflect.py raised --watch <
   carry what the gap names, citing ADR 0051 d4 (the record carries what the ledger needs), so the weekly reading needs
   the audit less each month.
 - **A no to a gap**: nothing to run. Its `- gap` line is the record once the task is done.
-- **A yes to a Fable ceiling** (a `- ceiling` item, whatever its held reason): the session deciding the task applies
-  it, since no writer lands a ceiling until p46-10: the one by-hand edit this skill makes (the writers, above). Read
-  `[share] <role>` in `~/.config/thread/ladder.toml`. When round(100 × it) is not the item's `from`, the yes cannot
-  apply: record it with `moot --trade <kid> --from <from>` (below). Otherwise set that one value to the item's
-  `to` / 100, leaving every other byte of the file as it was, and run
-  `python3 ${CLAUDE_PLUGIN_ROOT}/skills/_shared/scripts/ladder.py` to see the new share read. On a refusal, put the old
-  value back and record the item moot. A value change adds no key, so every live rollout's snapshot reads it
-  (`ladder.py`'s header, *Across versions*), and the next first dispatch draws by it. Apply the items on one role in the
-  task's order: a later one whose `from` the earlier yes moved is moot.
+- **A yes to a Fable ceiling** (a `- ceiling` item, whatever its held reason, a ready one an older task lists
+  included): run tune.py `--ceiling-yes` with the item's role, `from`, `to` and kid, and the task's slug (below). It
+  checks the item's line in the task and the ceiling now, writes `rollouts.toml`'s `fable_ceiling_<role>` and one
+  `ceiling` line, and prints `applied ceiling …`. A `stale from` refusal (exit 2: the ceiling moved since the reading)
+  means the yes cannot apply: record it with `moot --trade <kid> --from <from>` (below). Report any other refusal or a
+  refused reader check verbatim, and leave the item open. Apply the items on one role in the task's order: a later one
+  whose `from` the earlier yes moved is moot.
 - **A no to a Fable ceiling**: nothing to run. Its `- ceiling` line is the record once the task is done, and `decide`
   never offers that ceiling at that `from` again.
 - **Not now, or not reached**: nothing. The Watch stays open, and the next weekly reading lists it under `## Still
   open`; a held trade stays listed, and the next weekly reading that holds it adds a `## Still open` line.
+
+A Fable ceiling's yes:
+
+```
+python3 ${CLAUDE_PLUGIN_ROOT}/skills/reflect/scripts/tune.py --ceiling-yes --role <role> --from <from> --to <to> --kid <kid> --task <slug>
+```
 
 A yes that cannot apply, recorded under the item's own `## Reflection <id>` section:
 
@@ -929,8 +953,8 @@ python3 ${CLAUDE_PLUGIN_ROOT}/skills/reflect/scripts/reflect.py moot --task <slu
 
 Then mark the task done (`status: done` and `completed: <Melbourne today>`) only once every item it lists has had a
 yes or a no (each `raised` printed `raised` or `exists`; each trade's yes went through tune.py or `moot` printed `moot`
-or `exists`; each ceiling's yes saw `ladder.py` print the new share, or `moot` printed `moot` or `exists`). An item left
-open keeps the task open.
+or `exists`; each ceiling's yes printed `applied ceiling`, or `moot` printed `moot` or `exists`). An item left open
+keeps the task open.
 
 ## What the record cannot show
 
@@ -1002,10 +1026,6 @@ open keeps the task open.
   marked done with a trade unanswered reads as his no; and a hand edit that removes a `- trade` line forgets the no. A
   no holds for that (knob id, `from`) whatever later rollouts show, unlike a declined Watch, which returns when two
   later rollouts show it afresh: the trade is offered again only once its value moves to a new `from`.
-- An applied Fable ceiling's yes writes no Run record line: no `tuning` line in `tunings.jsonl` and nothing in
-  `reflections.jsonl`. Only `ladder.toml`'s new `[share]` value and the done decision task's `- ceiling` line show it,
-  so a yes and a no look the same in the record, and a later Guardrail breach cannot be traced back to the move until
-  p46-10 gives the ceiling a writer.
 - A held trade on a partial window is held `partial window`, so it reaches the decision task only in a later week
   that reads the rollout whole; one on a rollout with no repo, note or settings is never a knob candidate, so it is
   never offered.
@@ -1089,7 +1109,7 @@ open keeps the task open.
   write that one line without his pick, which is his alone (step 6). An exit-2 `--pick` refusal wrote nothing: it allows one corrected `--pick` or falls back to
   `--record-only` (step 7), and never ends the Reflection without a line.
 - By hand, don't pick for Lachy or treat a proposal's `agreeing` count as a pick; the weekly reading lands a knob only
-  through `tune.py --auto` (ADR 0037 d5), never a rule.
+  through `tune.py --auto`, and a Fable ceiling only through `tune.py --ceilings` (ADR 0037 d5), never a rule.
 - Don't write a decision task for Watches to confirm alone: they wait for a rule proposal, and a task a held trade
   alone writes lists none.
 - Don't re-run step 10 after a write: a new span is a new Reflection.

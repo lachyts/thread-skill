@@ -982,6 +982,82 @@ for (const [name, fields] of AUTO_REFUSALS) {
   })
 }
 
+// ---- the Fable ceiling's line (p46-10, ADR 0079 d6 and d9): tune.py's --ceilings, --ceiling-revert and --ceiling-yes ----
+
+const CROLE = { role: 'builder', from: 50, to: 60, rule: 'win', evidence: 'opus 5 landed; fable 5 landed', kid: '0123abcd' }
+const CAUTO = { auto: true, reflection: 'r-20261127T000000Z-abcdef' }
+const ceiling = (over = {}) => ({ id: 't-c1', applied: [{ ...CROLE, agreed: 3 }], ...CAUTO, ...over })
+
+test('ceiling lands in tunings.jsonl with no rollout or task, beside a tuning line score.py and close_line still read alone', (t) => {
+  const home = tmpHome(t)
+  emitOk(home, ['--kind', 'ceiling', '--json', JSON.stringify(ceiling())], { env: EV(home) })
+  emitOk(home, ['--kind', 'ceiling', '--json', JSON.stringify({ id: 't-c2', applied: [{ ...CROLE, from: 60, to: 50, rule: 'revert:win' }], ...CAUTO, reverts: 't-c1' })], { env: EV(home) })
+  emitOk(home, ['--kind', 'ceiling', '--json', JSON.stringify({ id: 't-c3', applied: [{ ...CROLE, to: 40, rule: 'trade-quality' }], decisionTask: 'thread-skill-decisions-2026-11-27' })], { env: EV(home) })
+  emitOk(home, ['--kind', 'ceiling', '--json', JSON.stringify({ id: 't-c4', applied: [], voids: 't-c3' })], { env: EV(home) })
+  emitOk(home, ['--rollout', 'r', '--kind', 'tuning', '--json', JSON.stringify(tuning())], { env: EV(home) })
+  assert.deepEqual(listing(ev(home)), ['tunings.jsonl'])
+  const all = lines(path.join(ev(home), 'tunings.jsonl'))
+  assert.deepEqual(all.map((l) => [l.kind, l.rollout, l.task, l.v]), [['ceiling', null, null, 1], ['ceiling', null, null, 1], ['ceiling', null, null, 1],
+    ['ceiling', null, null, 1], ['tuning', 'r', null, 2]])
+  const SCORE_PY = path.join(root, 'skills', 'reflect', 'scripts', 'score.py')
+  const r = spawnSync('python3', ['-B', '-c', `${LOAD}\nprint(json.dumps([d["id"] for d in m.load_tunings(sys.argv[2])]))`, SCORE_PY, ev(home)],
+    { encoding: 'utf8', cwd: home, env: baseEnv(home) })
+  assert.equal(r.status, 0, r.stderr)
+  assert.deepEqual(JSON.parse(r.stdout), ['t-1'], 'score.py reads the tuning line alone')
+  for (const [flags, what] of [[['--rollout', 'r'], 'a rollout'], [['--task', 't'], 'a task']]) {
+    const x = cli(home, ['emit', ...flags, '--kind', 'ceiling', '--json', JSON.stringify(ceiling({ id: 't-c9' }))], { env: EV(home) })
+    assert.equal(x.status, 2, what)
+    assert.match(x.stderr, /ceiling has no rollout or task \(it lands in tunings\.jsonl\)/, what)
+  }
+  assert.equal(lines(path.join(ev(home), 'tunings.jsonl')).length, 5)
+})
+
+// Each row: [what, fields, the start of its Refused reason after `ceiling: `]. One spawn pushes every row through
+// emit(strict=True); the routing test above keeps the CLI's own refusal (a rollout or a task) and its exit 2.
+const AUTO_PAIR = 'auto and reflection go together'
+const REVERTS = 'reverts needs auto, exactly one applied entry and a revert:<signal> rule'
+const AGREED_ONLY = 'agreed is only on an auto landing\'s entries'
+const FROM_TO = 'applied must be a list whose from and to are integers from 0 to 100 that differ'
+const CEILING_REFUSALS = [
+  ['auto without reflection', ceiling({ reflection: undefined }), AUTO_PAIR],
+  ['reflection without auto', ceiling({ auto: undefined, applied: [CROLE] }), AUTO_PAIR],
+  ['reverts without auto', { id: 't-x', applied: [{ ...CROLE, rule: 'revert:win' }], reverts: 't-c1' }, REVERTS],
+  ['reverts with a rule that is no revert', ceiling({ reverts: 't-c1', applied: [CROLE] }), REVERTS],
+  ['reverts with two entries', ceiling({ reverts: 't-c1', applied: [{ ...CROLE, rule: 'revert:win' }, { ...CROLE, role: 'lead', rule: 'revert:win' }] }), REVERTS],
+  ['decisionTask on an auto line', ceiling({ decisionTask: 'thread-skill-decisions-2026-11-27' }), 'decisionTask is only on Lachy\'s yes'],
+  ['an auto landing entry missing agreed', ceiling({ applied: [{ ...CROLE, agreed: 3 }, { ...CROLE, role: 'lead' }] }), 'every entry of an auto landing carries agreed'],
+  ['agreed on a yes line', { id: 't-x', applied: [{ ...CROLE, agreed: 3 }], decisionTask: 'd' }, AGREED_ONLY],
+  ['agreed on a revert', ceiling({ reverts: 't-c1', applied: [{ ...CROLE, rule: 'revert:win', agreed: 3 }] }), AGREED_ONLY],
+  ['agreed 2', ceiling({ applied: [{ ...CROLE, agreed: 2 }] }), 'applied must be a list whose agreed is an integer >= 3'],
+  ['applied [] with no voids', { id: 't-x', applied: [], decisionTask: 'd' }, 'applied is [] only on a void line'],
+  ['a role twice', ceiling({ applied: [{ ...CROLE, agreed: 3 }, { ...CROLE, agreed: 3 }] }), 'applied must be a list naming each role at most once'],
+  ['an unknown role', ceiling({ applied: [{ ...CROLE, role: 'planner', agreed: 3 }] }), 'applied must be a list whose role is one of'],
+  ['a to of 101', ceiling({ applied: [{ ...CROLE, to: 101, agreed: 3 }] }), FROM_TO],
+  ['from equal to to', ceiling({ applied: [{ ...CROLE, to: 50, agreed: 3 }] }), FROM_TO],
+  ['a rule that is no signal', ceiling({ applied: [{ ...CROLE, rule: 'slot-bound-raise', agreed: 3 }] }), 'applied must be a list whose rule is one of'],
+  ['a kid that is no 8 hex', ceiling({ applied: [{ ...CROLE, kid: 'xyz', agreed: 3 }] }), 'applied must be a list whose kid is 8 lowercase hex'],
+  ['an unknown entry key', ceiling({ applied: [{ ...CROLE, agreed: 3, key: 'parallel_ceiling' }] }), 'applied must be a list of objects with exactly the keys'],
+  ['five entries', ceiling({ applied: ['master-review', 'builder', 'investigator', 'lead', 'lead'].map((role) => ({ ...CROLE, role, agreed: 3 })) }),
+    'applied must be a list of at most 4 entries'],
+  ['an id that is no t- id', ceiling({ id: 'c-1' }), 'id must be a t- id'],
+]
+
+test('ceiling refuses each malformed line with its own reason, nothing written', (t) => {
+  const home = tmpHome(t)
+  const r = api(home, `
+out = []
+for f in json.loads(sys.argv[2]):
+    try:
+        m.emit(None, "ceiling", fields=f, strict=True); out.append("written")
+    except m.Refused as e:
+        out.append(str(e))
+print(json.dumps(out))`, { env: EV(home), args: [JSON.stringify(CEILING_REFUSALS.map((c) => c[1]))] })
+  assert.equal(r.status, 0, r.stderr)
+  const out = JSON.parse(r.stdout)
+  CEILING_REFUSALS.forEach(([what, , reason], i) => assert.ok(out[i].startsWith(`ceiling: ${reason}`), `${what}: ${out[i]}`))
+  assert.deepEqual(listing(ev(home)), [])
+})
+
 // ---- the weekly reading's kinds (p21-7): watch, watch-raised, proposal, reflection, in reflections.jsonl -----------
 
 const RID = 'r-20261015T000000Z-abcdef'

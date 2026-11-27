@@ -842,8 +842,8 @@ test('usage: --auto and --revert are exclusive with --pick and --record-only; --
     [['--scores', scores, '--revert', 't-x', '--pick', 'p1', '--reflection', RNOW], /not allowed with argument/],
     [['--scores', scores, '--reflection', RNOW], /one of the arguments/],
     [['--scores', scores, '--auto', '--repo', repo], /^tune: --auto and --revert need --reflection <id>/],
-    [['--scores', scores, '--record-only', '--reflection', RNOW], /^tune: --reflection goes with --auto or --revert only\n$/],
-    [['--scores', scores, '--pick', 'p1', '--repo', repo, '--reflection', RNOW], /^tune: --reflection goes with --auto or --revert only\n$/],
+    [['--scores', scores, '--record-only', '--reflection', RNOW], /^tune: --reflection goes with --auto, --revert, --ceilings or --ceiling-revert only\n$/],
+    [['--scores', scores, '--pick', 'p1', '--repo', repo, '--reflection', RNOW], /^tune: --reflection goes with --auto, --revert, --ceilings or --ceiling-revert only\n$/],
     [['--scores', scores, '--auto', '--repo', repo, '--reflection', 'week-1'], /^tune: --reflection week-1 is no r- id\n$/],
     [['--scores', scores, '--auto', '--repo', repo, '--reflection', RNOW, '--close', 'completion'], /^tune: --close needs --record-only\n$/],
     [['--scores', scores, '--revert', 't-x', '--repo', repo, '--reflection', RNOW, '--close', 'supersede'], /^tune: --close needs --record-only\n$/],
@@ -1277,4 +1277,227 @@ test('KT7 (b) a pick to 0 or from 0 is refused by the floor, exit 2, rollouts.to
   writeReflections(home, [...TWO_AGREE, TL_NOW])
   held(home, autoArgs(writeScores(home, { proposals: [P('p1', 'overtime_runs', 1, 0, { direction: -1 })], guardrails: OK_GUARDS }), repo),
     new RegExp(`^held overtime_runs: ${OT_FLOOR.replace(/[()]/g, '\\$&')}$`, 'm'), CONFIG)
+})
+
+// ---- KT8: the Fable ceilings (p46-10, ADR 0079 d6 and d9) -------------------------------------------------------------
+// tune.py is the ceiling's one writer: --ceilings lands a ready arms role at step 14 (ADR 0037 d5), --ceiling-revert
+// undoes a landing on its declared risk (arms.py's revertGuard), and --ceiling-yes applies Lachy's yes to a decision
+// task's `- ceiling` item. Each move is one `ceiling` line in tunings.jsonl and one [defaults] key in rollouts.toml; the
+// ladder's [share] is the seed for a role rollouts.toml does not set. The span is written by hand in span.json's shape.
+function armsKey(role, signal) {
+  const body = ['import importlib.util, sys', 'spec = importlib.util.spec_from_file_location("rr", sys.argv[1])',
+    'm = importlib.util.module_from_spec(spec); spec.loader.exec_module(m)', 'print(m.arms_key(sys.argv[2], sys.argv[3]))'].join('\n')
+  return execFileSync('python3', ['-B', '-c', body, RUN_RECORD, role, signal], { encoding: 'utf8', env: { PATH: process.env.PATH, PYTHONDONTWRITEBYTECODE: '1' } }).trim()
+}
+const CEILING_EFFECT = 'takes effect, read live, at each task\'s first dispatch, each rollout\'s lead draw and each Workflow call\'s doubled-review ' +
+  'first reviewer on a p46-10+ engine snapshot (a stamped task keeps its arm; a rollout on an older snapshot keeps drawing on ladder.toml\'s [share] until it ends)'
+const KB = armsKey('builder', 'win')
+const ARM = { landed: 3, handsOffRate: 0.6667, escapes: 0, tokensPerMerge: 2000 }
+const ARMS_EVIDENCE = 'opus 3 landed, Hands-off 0.6667, 0 Escape(s), tokens per merge 2000; fable 3 landed, Hands-off 1, 0 Escape(s), ' +
+  `tokens per merge 2000; agreed with ${R1}, ${R0}`
+const ready = (o = {}) => ({ verdict: 'win', signal: 'win', direction: 1, from: 50, to: 60, kid: KB, agreement: 3, agreedWith: [R1, R0], ready: true,
+  item: null, held: 'agreed by 3 Reflections (ADR 0037 d5): tune.py --ceilings lands it at step 14', caution: '', opus: ARM,
+  fable: { ...ARM, handsOffRate: 1 }, revertGuard: { widening: [], narrowing: [] }, ...o })
+const ladderPath = (home) => path.join(home, '.config', 'thread', 'ladder.toml')
+function ceilingHome(t, { toml = CONFIG, share = 'builder = 0.5', roles = { builder: ready() }, rid = RNOW, reflections = [] } = {}) {
+  const home = tmpHome(t)
+  writeToml(home, toml)
+  fs.writeFileSync(ladderPath(home), `[[rung]]\nname = "opus-high"\nmodel = "opus"\neffort = "high"\njudge = "high"\nreview = "xhigh"\n\n[share]\n${share}\n`)
+  writeReflections(home, reflections)
+  const span = path.join(home, 'span.json')
+  fs.writeFileSync(span, JSON.stringify({ reflection: rid, since: '2026-09-29T00:00:00.000Z', until: '2026-10-06T00:00:00.000Z', rollouts: [], arms: { roles } }))
+  const td = path.join(home, 'vault-tasks')
+  fs.mkdirSync(td)
+  return { home, span, td }
+}
+const ceilingLines = (home) => (fs.existsSync(tuningsPath(home)) ? lines(tuningsPath(home)) : [])
+const bytes = (f) => (fs.existsSync(f) ? fs.readFileSync(f, 'utf8') : null)
+
+test('KT8 (a) --ceilings lands a ready role: schema raised to 10, one [defaults] key, one auto ceiling line; a re-run is held and writes nothing', (t) => {
+  const { home, span, td } = ceilingHome(t)
+  const args = ['--ceilings', '--span', span, '--reflection', RNOW, '--tasks-dir', td]
+  const r = tune(home, args)
+  assert.equal(r.status, 0, r.stderr)
+  assert.equal(r.stderr, '')
+  assert.equal(fs.readFileSync(tomlPath(home), 'utf8'), `schema = 10\n\n${CONFIG.replace('parallel_ceiling = 4\n', 'parallel_ceiling = 4\nfable_ceiling_builder = 60\n')}`)
+  const [l, ...rest] = ceilingLines(home)
+  assert.equal(rest.length, 0)
+  assert.deepEqual([l.kind, l.rollout, l.task, l.auto, l.reflection, l.reverts, l.decisionTask], ['ceiling', null, null, true, RNOW, undefined, undefined])
+  assert.deepEqual(l.applied, [{ role: 'builder', from: 50, to: 60, rule: 'win', evidence: ARMS_EVIDENCE, kid: KB, agreed: 3 }])
+  assert.equal(r.stdout, `recorded ${l.id} in ${tuningsPath(home)}\napplied ceiling builder 50 → 60: ${CEILING_EFFECT}\n`)
+  const toml = fs.readFileSync(tomlPath(home), 'utf8')
+  const again = tune(home, args)
+  assert.equal(again.status, 0, again.stderr)
+  assert.equal(again.stdout, `held ceiling builder: Reflection ${RNOW} already moved builder (${l.id})\n`)
+  assert.equal(fs.readFileSync(tomlPath(home), 'utf8'), toml)
+  assert.equal(ceilingLines(home).length, 1)
+})
+
+test('KT8 (b) --ceilings holds a stale from and leaves a role that is not ready alone; a closed Reflection or another\'s span is refused', (t) => {
+  const declared = `schema = 10\n\n${CONFIG.replace('parallel_ceiling = 4\n', 'parallel_ceiling = 4\nfable_ceiling_builder = 40\n')}`
+  const stale = ceilingHome(t, { toml: declared, roles: { builder: ready(), lead: ready({ ready: false, held: 'agreement 1 of 3', kid: armsKey('lead', 'win') }) } })
+  held(stale.home, ['--ceilings', '--span', stale.span, '--reflection', RNOW, '--tasks-dir', stale.td],
+    /^held ceiling builder: stale from: the ceiling is 40 now \(a hand edit or a declaration since span\)\n$/, declared)
+  const closed = ceilingHome(t, { reflections: [closeLine('2026-10-06T01:00:00.000Z', RNOW)] })
+  refusedNothingWritten(closed.home, ['--ceilings', '--span', closed.span, '--reflection', RNOW, '--tasks-dir', closed.td], 2,
+    new RegExp(`^tune: Reflection ${RNOW} is closed: nothing written\\n$`), CONFIG)
+  const other = ceilingHome(t, { rid: R2 })
+  refusedNothingWritten(other.home, ['--ceilings', '--span', other.span, '--reflection', RNOW, '--tasks-dir', other.td], 2,
+    new RegExp(`^tune: --span \\S+ is Reflection ${R2}'s, not ${RNOW}'s\\n$`), CONFIG)
+})
+
+test('KT8 (c) the schema raise runs the reader check: a pre-P29 live engine refuses it (exit 1, nothing written, a dry run too); at schema 10 no check runs', (t) => {
+  const { home, span } = ceilingHome(t)
+  const { td } = preP29Tasks(home)
+  for (const extra of [[], ['--dry-run']]) {
+    const r = tune(home, ['--ceilings', '--span', span, '--reflection', RNOW, '--tasks-dir', td, ...extra])
+    assert.equal(r.status, 1, r.stderr)
+    assert.match(r.stderr, /tune: nothing written: a live rollout's engine cannot read the raised `schema` line\n$/)
+    assert.equal(fs.readFileSync(tomlPath(home), 'utf8'), CONFIG, 'byte-identical')
+    assert.ok(!fs.existsSync(tuningsPath(home)), 'no tunings.jsonl')
+  }
+  writeToml(home, `schema = 10\n\n${CONFIG}`)
+  const r = tune(home, ['--ceilings', '--span', span, '--reflection', RNOW, '--tasks-dir', td])
+  assert.equal(r.status, 0, r.stderr)
+  assert.equal(r.stderr, '', 'no raise, no check')
+  assert.match(fs.readFileSync(tomlPath(home), 'utf8'), /^\[defaults\]\nparallel_ceiling = 4\nfable_ceiling_builder = 60\n/m)
+})
+
+// A landing a later reading reverts: Reflection R1 (closed) moved builder 50 -> 60; this reading reads it at 60.
+const LANDED = `schema = 10\n\n${CONFIG.replace('parallel_ceiling = 4\n', 'parallel_ceiling = 4\nfable_ceiling_builder = 60\n')}`
+const GUARD = 'tokens per merge: fable 6000.0 over opus 2000.0 by more than 25 %'
+const cline = (id, f, ts = '2026-10-02T03:00:00.000Z') => JSON.stringify({ v: 1, ts, host: 'h', rollout: null, task: null, kind: 'ceiling', id, ...f })
+const LANDING = cline('t-land', { applied: [{ role: 'builder', from: 50, to: 60, rule: 'win', evidence: 'e', kid: KB, agreed: 3 }], auto: true, reflection: R1 })
+function revertHome(t, { tunings = [LANDING], toml = LANDED, guard = [GUARD], reflections = [closeLine('2026-10-02T04:00:00.000Z', R1)] } = {}) {
+  const c = ceilingHome(t, { toml, reflections, roles: { builder: ready({ from: 60, to: 70, ready: false, item: null, held: 'a Guardrail is breached',
+    revertGuard: { widening: guard, narrowing: [] } }) } })
+  fs.writeFileSync(tuningsPath(c.home), tunings.map((x) => `${x}\n`).join(''))
+  return { ...c, args: ['--ceiling-revert', 't-land', '--span', c.span, '--reflection', RNOW, '--tasks-dir', c.td] }
+}
+
+test('KT8 (d) --ceiling-revert lands the reverse on a measured widening guard: one auto line with reverts, revert:<signal>, no agreed', (t) => {
+  const { home, args } = revertHome(t)
+  const r = tune(home, args)
+  assert.equal(r.status, 0, r.stderr)
+  assert.equal(fs.readFileSync(tomlPath(home), 'utf8'), LANDED.replace('fable_ceiling_builder = 60', 'fable_ceiling_builder = 50'))
+  const l = ceilingLines(home)[1]
+  assert.deepEqual([l.auto, l.reflection, l.reverts], [true, RNOW, 't-land'])
+  assert.deepEqual(l.applied, [{ role: 'builder', from: 60, to: 50, rule: 'revert:win', evidence: `revert t-land: ${GUARD}`, kid: KB }])
+  assert.match(r.stdout, /^applied ceiling builder 60 → 50: /m)
+})
+
+test('KT8 (e) --ceiling-revert refuses, exit 2 and nothing written: no guard, a hand edit, its own Reflection, an unclosed one, reverted, a revert', (t) => {
+  const REVERTED = cline('t-rev', { applied: [{ role: 'builder', from: 60, to: 50, rule: 'revert:win', evidence: 'e' }], auto: true, reflection: R2, reverts: 't-land' },
+    '2026-10-03T03:00:00.000Z')
+  const cases = [
+    ['a rollout breach alone (an empty guard)', { guard: [] }, /no declared risk of a widening is read for builder/],
+    ['a hand edit since', { toml: LANDED.replace('= 60', '= 70') }, /rollouts\.toml no longer holds t-land's builder 60 \(it is 70 now\): a hand edit, left alone/],
+    ['the landing\'s own Reflection', { tunings: [LANDING.replace(R1, RNOW)] }, /landed in this Reflection/],
+    ['an unclosed landing Reflection', { reflections: [] }, new RegExp(`t-land's Reflection ${R1} is not closed`)],
+    ['already reverted', { tunings: [LANDING, REVERTED] }, /t-land's builder is already reverted/],
+  ]
+  for (const [name, opts, re] of cases) {
+    const { home, args } = revertHome(t, opts)
+    const before = [bytes(tuningsPath(home)), bytes(tomlPath(home))]
+    const r = tune(home, args)
+    assert.equal(r.status, 2, `${name}: ${r.stderr}`)
+    assert.match(r.stderr, /^tune: t-land is not reverted: /, name)
+    assert.match(r.stderr, re, name)
+    assert.deepEqual([bytes(tuningsPath(home)), bytes(tomlPath(home))], before, `${name}: nothing written`)
+  }
+  const { home, span, td } = revertHome(t, { tunings: [LANDING, REVERTED] })
+  const r = tune(home, ['--ceiling-revert', 't-rev', '--span', span, '--reflection', RNOW, '--tasks-dir', td])
+  assert.equal(r.status, 2, r.stderr)
+  assert.match(r.stderr, /t-rev is itself a revert: a revert is never reverted/)
+})
+
+// Lachy's yes: the decision task lists the item, and the ceiling now is its from.
+function yesHome(t, { toml = CONFIG, share = 'builder = 0.5', item } = {}) {
+  const c = ceilingHome(t, { toml, share })
+  fs.writeFileSync(path.join(c.td, 'thread-skill-decisions-2026-11-27.md'), ['---', 'tags: [task, decisions]', 'status: open', '---', '',
+    `## Reflection ${R2}`, '', 'Fable ceilings for Lachy (…):', item, ''].join('\n'))
+  return c
+}
+const yesArgs = (td, role, from, to, kid) => ['--ceiling-yes', '--role', role, '--from', String(from), '--to', String(to), '--kid', kid,
+  '--task', 'thread-skill-decisions-2026-11-27', '--tasks-dir', td]
+
+test('KT8 (f) --ceiling-yes lands a listed trade and a listed caution to 0, each one line carrying decisionTask; it refuses a stale from, an unlisted item, a wrong kid and a move that is no step', (t) => {
+  const KT = armsKey('builder', 'trade-handsOff')
+  const item = `- ceiling ${KT} at 50: Fable ceiling builder 50% -> 60% (trade-handsOff); a trade (gains handsOffRate, costs quality): Lachy decides; evidence e; rollouts [[a]]`
+  const { home, td } = yesHome(t, { item })
+  const r = tune(home, yesArgs(td, 'builder', 50, 60, KT))
+  assert.equal(r.status, 0, r.stderr)
+  const [l] = ceilingLines(home)
+  assert.deepEqual([l.kind, l.auto, l.reflection, l.decisionTask], ['ceiling', undefined, undefined, 'thread-skill-decisions-2026-11-27'])
+  assert.deepEqual(l.applied, [{ role: 'builder', from: 50, to: 60, rule: 'trade-handsOff', kid: KT,
+    evidence: `Lachy's yes to [[thread-skill-decisions-2026-11-27]]'s - ceiling ${KT} at 50` }])
+  assert.match(fs.readFileSync(tomlPath(home), 'utf8'), /^fable_ceiling_builder = 60$/m)
+  // a second yes to the same item: the ceiling is 60 now, so its from is stale
+  const toml = fs.readFileSync(tomlPath(home), 'utf8')
+  const stale = tune(home, yesArgs(td, 'builder', 50, 60, KT))
+  assert.equal(stale.status, 2)
+  assert.equal(stale.stderr, 'tune: stale from: the builder ceiling is 60 now, not 50: record it with reflect.py moot\n')
+  assert.equal(fs.readFileSync(tomlPath(home), 'utf8'), toml)
+  assert.equal(ceilingLines(home).length, 1)
+  // a caution to 0 lands only this way
+  const KL = armsKey('lead', 'loss')
+  const zero = yesHome(t, { share: 'lead = 0.1', item: `- ceiling ${KL} at 10: Fable ceiling lead 10% -> 0% (loss); a caution: Lachy decides; caution turns the lead arm off (0 is set by hand)` })
+  const z = tune(zero.home, yesArgs(zero.td, 'lead', 10, 0, KL))
+  assert.equal(z.status, 0, z.stderr)
+  assert.match(fs.readFileSync(tomlPath(zero.home), 'utf8'), /^fable_ceiling_lead = 0$/m)
+  for (const [name, args, re] of [
+    ['an unlisted item', yesArgs(td, 'builder', 60, 70, KT), /lists no `- ceiling \S+ at 60: Fable ceiling builder 60% -> 70%` line/],
+    ['a wrong kid', yesArgs(td, 'builder', 60, 70, KL), /--kid \S+ is no ceiling id of builder/],
+    ['a move that is no step', yesArgs(td, 'builder', 60, 80, KT), /one step of 10 points between 0 and 100, not 60 -> 80/],
+  ]) {
+    const x = tune(home, args)
+    assert.equal(x.status, 2, `${name}: ${x.stderr}`)
+    assert.match(x.stderr, re, name)
+    assert.equal(ceilingLines(home).length, 1, `${name}: nothing written`)
+  }
+})
+
+test('KT8 (g) usage: the ceiling verbs\' flags, each refusal exit 2 and nothing written', (t) => {
+  const home = tmpHome(t)
+  writeToml(home, CONFIG)
+  const repo = gitRepo(home)
+  const scores = writeScores(home, { proposals: [RAISE()] })
+  const span = path.join(home, 'span.json')
+  for (const [args, re] of [
+    [['--scores', scores, '--ceilings', '--span', span, '--reflection', RNOW], /^tune: --scores goes with --pick, --record-only, --auto or --revert only\n$/],
+    [['--scores', scores, '--auto', '--repo', repo, '--reflection', RNOW, '--span', span], /^tune: --span goes with --ceilings or --ceiling-revert only\n$/],
+    [['--ceilings', '--reflection', RNOW], /^tune: --ceilings and --ceiling-revert need --span <span\.json>/],
+    [['--ceilings', '--span', span], /^tune: --ceilings and --ceiling-revert need --reflection <id>/],
+    [['--ceiling-yes', '--repo', repo, '--role', 'builder', '--from', '50', '--to', '60', '--kid', 'abcdef01', '--task', 'd'], /^tune: --repo goes with no ceiling verb: a Fable ceiling is machine-wide\n$/],
+    [['--scores', scores, '--pick', 'p1', '--repo', repo, '--role', 'builder'], /^tune: --role goes with --ceiling-yes only\n$/],
+    [['--ceiling-yes', '--reflection', RNOW, '--role', 'builder', '--from', '50', '--to', '60', '--kid', 'abcdef01', '--task', 'd'],
+      /^tune: --reflection goes with --auto, --revert, --ceilings or --ceiling-revert only\n$/],
+    [['--ceiling-yes', '--role', 'builder', '--from', '50'], /^tune: --ceiling-yes needs --to, --kid, --task\n$/],
+    [['--auto', '--repo', repo, '--reflection', RNOW], /^tune: --pick, --record-only, --auto and --revert need --scores <score\.json\|->\n$/],
+  ]) {
+    refusedNothingWritten(home, args, 2, re, CONFIG)
+  }
+})
+
+test('KT8 (h) a knob pick keeps a ceiling line byte-identical, and a knob edit that moves one is refused', (t) => {
+  const home = tmpHome(t)
+  const repo = gitRepo(home)
+  const config = `schema = 10\n\n[defaults]\nfable_ceiling_builder = 60   # landed by tune.py\n\n[repo."o/r"]\nparallel_ceiling = 3\n`
+  writeToml(home, config)
+  const r = tune(home, ['--scores', writeScores(home, { proposals: [RAISE()] }), '--pick', 'p1', '--repo', repo])
+  assert.equal(r.status, 0, r.stderr)
+  assert.equal(fs.readFileSync(tomlPath(home), 'utf8'), config.replace('parallel_ceiling = 3', 'parallel_ceiling = 4'))
+  // control: an edit_text that also moves the ceiling is refused by the knob's validation
+  const home2 = tmpHome(t)
+  writeToml(home2, config)
+  const repo2 = gitRepo(home2)
+  const harness = ['import importlib.util, sys', 'spec = importlib.util.spec_from_file_location("tune", sys.argv[1])',
+    'tune = importlib.util.module_from_spec(spec); spec.loader.exec_module(tune)', 'real = tune.edit_text',
+    'tune.edit_text = lambda text, slug, picks, doc: real(text, slug, picks, doc).replace("fable_ceiling_builder = 60", "fable_ceiling_builder = 70")',
+    'sys.exit(tune.main(sys.argv[2:]))'].join('\n')
+  const x = spawnSync('python3', ['-B', '-c', harness, TUNE, '--scores', writeScores(home2, { proposals: [RAISE()] }), '--pick', 'p1', '--repo', repo2],
+    { encoding: 'utf8', cwd: home2, env: env(home2) })
+  assert.equal(x.status, 2, x.stderr)
+  assert.equal(x.stderr, 'tune: the edit changes a Fable ceiling: nothing written\n')
+  assert.equal(fs.readFileSync(tomlPath(home2), 'utf8'), config)
 })

@@ -27,6 +27,11 @@ the task's rung, is now the engine-wide allowance refusal (ADR 0079 d7): the rer
 effort under the same ` on-rung` label, and after it every Fable dispatch of the call, a `[role]` second reviewer's
 included, runs on Opus, so both reviewers run on Opus for the rest of that call.)*
 
+*(Amended 2026-11-27 by thread-skill-p46-10: "the operator's file names Fable for the master review" reads the ladder's
+`[role]` `master-review = "fable"`, or the master review's resolved Fable ceiling above 0: `rollouts.toml`'s
+`fable_ceiling_master_review` over the ladder's `[share]` seed (ADR 0079's p46-10 amendment), which reaches the engine as
+`args.ladder.share` through `ladder.py`'s engine view. A ceiling tuned to 0 puts the first reviewer on the task's rung.)*
+
 ## Context
 
 The master review approves a task on reading alone when no check in its rollout's verifier exercises its code:
