@@ -111,7 +111,7 @@ Subcommands:
       (the rollout's `verifier:`, through reconcile's command reader), date (today), knownBaselineFailures (the rollout's
       `## Known baseline failures` with HTML comments removed: every non-blank line, one leading `- ` stripped, a `none`
       line skipped; omitted when none is left), envBootstrap (the rollout's `env_bootstrap:`, the same reader; omitted
-      when empty), ladder (ladder.py's load(), the object its CLI prints), verifySlot ({script: verify-slot.py beside
+      when empty), ladder (ladder.py's engine_view(), the object its CLI prints), verifySlot ({script: verify-slot.py beside
       reconcile-rollout.py, slots: the machine's verify_slots}, verify-timeout's own), securityCheck (reconcile's
       _security_check of the rollout, present only when it is on) and task: slug, taskPath, scope, planGate (execute
       § 3.5: `plan_approval` on the task, then the rollout, else scope-gated), maxIterations, maxReviewRounds and

@@ -562,8 +562,10 @@ def load(path=None):
 
 
 def _settings_module():
-    """rollout-settings.py beside this file, loaded by path (the reverse of its own _ladder())."""
+    """rollout-settings.py beside this file, loaded by path (the reverse of its own _ladder()). No bytecode: a
+    __pycache__ beside the scripts would break every suite's no-bytecode check."""
     import importlib.util
+    sys.dont_write_bytecode = True
     spec = importlib.util.spec_from_file_location(
         "thread_rollout_settings", os.path.join(os.path.dirname(os.path.abspath(__file__)), "rollout-settings.py"))
     if spec is None or spec.loader is None:
