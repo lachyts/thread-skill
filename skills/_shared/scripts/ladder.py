@@ -47,11 +47,13 @@ for the whole ladder. An operator's file that uses both might read:
 The table may also be written inline, `role = { builder = "...", ... }`, or as dotted keys, `role.builder = "..."`,
 each before the first `[[rung]]`.
 
-A third optional key is one `[share]` table (ADR 0079 decision 3, task p46-2): each drawn role's Fable ceiling, the
-most of that role's work, in [0, 1], its Fable arm may take. reconcile-rollout.py paces the live share under it per
-Login (p46-3, ADR 0079 decision 6: the ceiling times fable_pace.py's pace for the caller's Login), and a task (a
-rollout, for `lead`) falls in the role's Fable arm with that chance, until task p46-10 moves the ceiling into the
-Rollout settings:
+A third optional key is one `[share]` table (ADR 0079 decision 3, task p46-2): the seed of each drawn role's Fable
+ceiling, the most of that role's work, in [0, 1], its Fable arm may take. Since p46-10 the ceiling's home is the Rollout
+settings (rollouts.toml's `fable_ceiling_<role>`, in percent; rollout-settings.py's header, whose fable_ceilings() holds
+the seed rule): a role rollouts.toml sets reads that value, and `[share]` is read only for a role it does not set, so a
+`[share]` edit for a role whose ceiling has landed there is never read. reconcile-rollout.py paces the live share under
+the resolved ceiling per Login (p46-3, ADR 0079 decision 6: the ceiling times fable_pace.py's pace for the caller's
+Login), and a task (a rollout, for `lead`) falls in the role's Fable arm with that chance:
 
     [share]
     master-review = 0.5    # an int or a float in [0, 1]; a boolean is refused
@@ -62,8 +64,9 @@ Rollout settings:
 Its keys are SHARE_ROLES (ROLES and `lead`), never `planner` or `plan-judge`: planning takes the rung's plan model and
 is never drawn. A role that names its own model in `[role]` runs on that model for every task, so it is never drawn
 and is refused in `[share]`. The inline form `share = { ... }` and dotted keys `share.<role> = ...` are accepted, as
-`[role]`'s are. This loader only validates and passes it on: reconcile-rollout.py draws each task's arms from it, paced, at
-the task's first dispatch and stamps them on the note (`arms:`), and the engine reads only that stamp.
+`[role]`'s are. load() only validates it and returns it as written, the seed. engine_view() (below) resolves each
+role's ceiling over it: reconcile-rollout.py draws each task's arms from that, paced, at the task's first dispatch and
+stamps them on the note (`arms:`), and the engine reads only that stamp for a drawn role.
 
 The plan model and the role models. `plan` and each role's value are a model alias, as `model` is. A rung's `plan`
 is the model its planner, plan reviser and plan judge run on, always at `high`: the judge rides with the planner. A
@@ -108,28 +111,39 @@ then no line. A role's line is its key's line in `[role]` (a `[role.<name>]` hea
 a top-level dotted `role.<name> =` key's own line), else the `role =` or `[role]` line. A share's line is found the
 same way in `[share]`.
 
-Output. Exit 0 and one JSON line on stdout:
+Output. The CLI prints engine_view()'s object: exit 0 and one JSON line on stdout:
 
     {"source": "<the file's path>" | "built-in", "rungs": [{"name", "model", "effort", "judge", "review"[, "plan"]}, ...]
      [, "roles": {"<role>": "<model>", ...}][, "share": {"<role>": <number>, ...}]}
 
 `source` is the expanded path (HOME honoured, symlinks not resolved). The rungs come bottom first, each
 with its keys in that order. A rung carries `plan` only when the file names it, the ladder carries `roles`
-(in ROLES order) only when the file names at least one, and `share` (in SHARE_ROLES order, each value as written)
-only when the file names at least one, so no file, and a file with none of them, print the same bytes as before
-ADR 0079. Exit 2 when the file is refused (or on a usage error), exit 3 when a present
-file needs tomllib and this python has none. On failure stdout is empty and stderr carries one line,
-`ladder: <path>:<line>: <reason>`, or `ladder: <path>: <reason>` when no line applies.
+(in ROLES order) only when the file names at least one, and `share` (in SHARE_ROLES order) only when at least one role
+has a resolved Fable ceiling: the engine view (p46-10). Its `share` is each role's resolved ceiling as a fraction,
+rollouts.toml's `fable_ceiling_<role>` / 100, else the file's `[share]` seed as written, a role `[role]` gives its own
+model left out (rollout-settings.py's fable_ceilings(), the seed rule's one copy). So no file, and a file with none of
+them, with no rollouts.toml ceiling, print the same bytes as before ADR 0079, and a file whose `[share]` alone names a
+ceiling prints the same bytes as before p46-10. The lead passes this line verbatim as the engine's args.ladder
+(execute § 3), so the engine's doubled-review check reads the resolved ceiling too. A rollouts.toml that will not
+resolve (refused, no tomllib, or rollout-settings.py will not load) leaves `share` out and writes one stderr line,
+`WARN: ladder: no Fable ceiling is read: rollouts.toml <why>`, and the CLI still exits 0: the ladder itself read. Exit 2
+when the ladder file is refused (or on a usage error), exit 3 when a present ladder file needs tomllib and this python
+has none. On failure stdout is empty and stderr carries one line, `ladder: <path>:<line>: <reason>`, or
+`ladder: <path>: <reason>` when no line applies.
 
-Importable: load(path=None), read_toml(path) (shared with rollout-settings.py), BUILT_IN, MODELS, EFFORTS,
-FIELDS, OPTIONAL_FIELDS, ROLES, SHARE_ROLES, LadderError.
+Importable: load(path=None) (the file as written, `share` the seed), engine_view(path=None, settings_path=None) ((view,
+why): the CLI's object and the reason rollouts.toml gave no ceiling, else None; a refused ladder raises LadderError as
+load() does; rollout-settings.py is loaded lazily, by path, here and only here), read_toml(path) (shared with
+rollout-settings.py), BUILT_IN, MODELS, EFFORTS, FIELDS, OPTIONAL_FIELDS, ROLES, SHARE_ROLES, LadderError.
 
 Across versions. Each running rollout runs this file from its own Engine snapshot (engine-snapshot.md), and step 2
 there refuses every top-level key, and step 4 every rung key, its version did not know: a snapshot cut before ADR
 0079 refuses `plan` and `[role]`, and one cut before p46-2 refuses `[share]`. A rollout on such a snapshot halts at
 its next call with "ladder refused". So a file that uses a newer key is written only once every live rollout's engine
 root reads it: for each, `HOME=<tmp> python3 <its root>/skills/_shared/scripts/ladder.py` with the candidate file at
-`<tmp>/.config/thread/ladder.toml` exits 0 (task p46-7 writes the operator's file by this rule).
+`<tmp>/.config/thread/ladder.toml` exits 0 (task p46-7 writes the operator's file by this rule). An older snapshot's
+ladder.py (before p46-10) prints the file's `[share]` as its `share`: a rollout on it, and its engine's first reviewer,
+keep reading the seed whatever rollouts.toml's ceilings say, until it finishes or moves to a newer snapshot.
 """
 import argparse
 import json
@@ -547,6 +561,38 @@ def load(path=None):
     return ladder
 
 
+def _settings_module():
+    """rollout-settings.py beside this file, loaded by path (the reverse of its own _ladder())."""
+    import importlib.util
+    spec = importlib.util.spec_from_file_location(
+        "thread_rollout_settings", os.path.join(os.path.dirname(os.path.abspath(__file__)), "rollout-settings.py"))
+    if spec is None or spec.loader is None:
+        raise ImportError("no loader for rollout-settings.py")
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
+
+
+def engine_view(path=None, settings_path=None):
+    """(view, why): the ladder the engine reads (the header's Output, p46-10). view is load(path) with its `share`
+    replaced by each role's resolved Fable ceiling as a fraction (rollout-settings.py's fable_ceilings() over
+    resolve(repo=None, path=settings_path)'s `fable_ceiling` and the file's `[share]` seed), in SHARE_ROLES order and
+    left out when no role has one. A refused ladder raises LadderError, as load() does. When rollouts.toml will not
+    resolve (refused, no tomllib, or rollout-settings.py will not load) the view has no `share` and why is the reason;
+    else why is None. Writes nothing and prints nothing."""
+    ladder = load(path)
+    view = {k: v for k, v in ladder.items() if k != "share"}
+    try:
+        rs = _settings_module()
+        ceilings = rs.fable_ceilings(rs.resolve(repo=None, path=settings_path)["fable_ceiling"], ladder)
+    except Exception as e:  # any failure leaves the ceiling unread, with its reason; the ladder still reads
+        return view, str(e) or type(e).__name__
+    share = {role: ceilings[role]["share"] for role in SHARE_ROLES if role in ceilings}
+    if share:
+        view["share"] = share
+    return view, None
+
+
 def read_toml(path):
     """Read one operator TOML file: None when nothing is at the path, else (text, doc).
 
@@ -602,11 +648,13 @@ def main(argv):
     _Parser(prog="ladder", description="Print the operator's ladder (%s) as JSON." % default_path()).parse_args(argv)
     path = default_path()
     try:
-        ladder = load(path)
+        ladder, why = engine_view(path)
     except LadderError as e:
         where = path if e.line is None else "%s:%d" % (path, e.line)
         sys.stderr.write("ladder: %s: %s\n" % (where, e.reason))
         return e.code
+    if why:
+        sys.stderr.write("WARN: ladder: no Fable ceiling is read: rollouts.toml %s\n" % why)
     sys.stdout.write(json.dumps(ladder) + "\n")
     return 0
 

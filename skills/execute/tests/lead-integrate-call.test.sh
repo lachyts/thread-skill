@@ -135,6 +135,13 @@ parity() {  # parity <label> <HOME> <expected [verifySlot.slots, securityCheck]>
 parity "no security_checks, no rollouts.toml" "$F/home" '[2,null]'
 rk security_checks true
 parity "security_checks: true, verify_slots = 3" "$(home slots rollouts.toml '[defaults]\nverify_slots = 3\n')" "[3,{\"script\":\"$SCRIPTS/security-check.py\"}]"
+# p46-10: args.ladder.share is ladder.py's engine view, the resolved Fable ceiling: rollouts.toml's 0 over the seed's 0.5,
+# so the engine's doubled-review check (fableNamedForReview) reads 0 and puts the first reviewer on the rung.
+CH=$(home ceiling ladder.toml '[[rung]]\nname = "opus-high"\nmodel = "opus"\neffort = "high"\njudge = "high"\nreview = "xhigh"\n\n[share]\nmaster-review = 0.5\n')
+printf 'schema = 10\n\n[defaults]\nfable_ceiling_master_review = 0\n' > "$CH/.config/thread/rollouts.toml"
+parity "a tuned ceiling of 0 over a [share] seed of 0.5 (p46-10)" "$CH" '[2,null]'
+CHOME="$CH" call; ok "$crc|$(j "$(j "$CJ" 'd["args"]')" 'd["ladder"]["share"]')" '0|{"master-review":0.0}' \
+  "F: … args.ladder.share is the resolved ceiling, 0 over the seed's 0.5"; reset
 
 # ── B: the rollout's ## Known baseline failures ───────────────────────────────────────────────────
 # Every non-blank line once the template's comment goes; a block reading `none`: no key.

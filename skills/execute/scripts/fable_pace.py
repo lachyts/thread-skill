@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
 """fable_pace.py — the Fable share's pace for one Login (p46-3, ADR 0079 decision 6).
 
-The share of a drawn role's work its Fable arm takes is its Fable ceiling (the ladder's `[share]` table, until task
-p46-10 gives the ceiling its home in the Rollout settings) times a pace read per Login from the quota store, so that
+The share of a drawn role's work its Fable arm takes is its Fable ceiling (its home the Rollout settings since p46-10,
+rollouts.toml's `fable_ceiling_<role>` in percent, seeded by the ladder's `[share]` table for a role rollouts.toml does
+not set: ladder.py's engine view) times a pace read per Login from the quota store, so that
 the Login's weekly Fable window and its general weekly window run down together. reconcile-rollout.py loads this file
 at each draw (mark-started's `_start_arms`, record-entry's `_lead_arm`) and writes one `fable-share` Run record line
 per draw; the CLI is for its test.

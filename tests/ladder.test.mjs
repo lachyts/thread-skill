@@ -676,3 +676,38 @@ test('L12 (c) SHARE_ROLES equals the engine\'s LADDER_SHARE_ROLES, and the engin
     assert.match(E.ladderArgsError({ source: 'x', rungs: TWO, share: bad }), why)
   }
 })
+
+// ---- L13: the engine view, each role's resolved Fable ceiling (p46-10, ADR 0079 decision 6) ---------------------------
+// The CLI's `share` is each drawn role's resolved ceiling: rollouts.toml's fable_ceiling_<role> / 100, else [share], the
+// seed, as written; a [role] role is left out. A rollouts.toml that will not resolve leaves share out with one WARN, exit
+// 0. The importable load() still returns the file as written.
+const settingsFile = (home, lines) => {
+  const p = path.join(home, '.config', 'thread', 'rollouts.toml')
+  fs.mkdirSync(path.dirname(p), { recursive: true })
+  fs.writeFileSync(p, lines.join('\n') + '\n')
+}
+
+test('L13 the CLI prints the engine view: rollouts.toml\'s ceiling over the [share] seed; load() keeps the seed', (t) => {
+  const plain = tmpHome(t)
+  writeLadder(plain, renderShare({ 'master-review': 0.5, investigator: 0.55 }))
+  const seed = loads(plain)
+  assert.deepEqual(seed.share, { 'master-review': 0.5, investigator: 0.55 }, 'no rollouts.toml: the seed as written, the same bytes')
+  const home = tmpHome(t)
+  writeLadder(home, renderShare({ 'master-review': 0.5, investigator: 0.55 }))
+  settingsFile(home, ['schema = 10', '[defaults]', 'fable_ceiling_master_review = 0', 'fable_ceiling_builder = 60'])
+  assert.deepEqual(loads(home).share, { 'master-review': 0, builder: 0.6, investigator: 0.55 }, 'a tuned 0 over 0.5, 60 over no seed')
+  const own = tmpHome(t)
+  writeLadder(own, render(TWO, undefined, { builder: 'fable' }))
+  settingsFile(own, ['schema = 10', '[defaults]', 'fable_ceiling_builder = 60'])
+  assert.ok(!('share' in loads(own)), 'a [role] role is never drawn: no share')
+  const lib = run(home, ['-B', '-c', 'import json, runpy, sys; print(json.dumps(runpy.run_path(sys.argv[1])["load"]()["share"]))', SCRIPT])
+  assert.equal(lib.status, 0, lib.stderr)
+  assert.deepEqual(JSON.parse(lib.stdout), { 'master-review': 0.5, investigator: 0.55 }, 'load() is the file as written')
+  const bad = tmpHome(t)
+  writeLadder(bad, renderShare({ 'master-review': 0.5 }))
+  settingsFile(bad, ['[defaults]', 'parallel_ceiling = 0'])
+  const r = run(bad)
+  assert.equal(r.status, 0, r.stderr)
+  assert.match(r.stderr, /^WARN: ladder: no Fable ceiling is read: rollouts\.toml .*parallel_ceiling must be an integer >= 1, got 0\n$/)
+  assert.ok(!('share' in JSON.parse(r.stdout)), 'a refused rollouts.toml: no share')
+})

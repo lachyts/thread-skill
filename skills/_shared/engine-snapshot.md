@@ -195,7 +195,7 @@ reads). `rollouts.toml` carries a top-level `schema`: an older reader ignores a 
 refuses a typo, and every writer that adds a newer key raises the line (rollout-settings.py's header). `inert_paths`
 (p29-3, ADR 0045) is the first schema-2 key: an older snapshot ignores it and re-runs its verifier, and inert-paths.py's
 `record` refuses to raise the line while a live rollout's engine root cannot read the new file. `test_credentials` (ADR
-0063) is the first schema-3 key: an older snapshot ignores it, so its rollouts ask every credential gate as before. `test_logins` (p37-4) is the first schema-5 key: an older snapshot ignores it, so its rollouts ask the Login gate as before. `weight_mem_gb` and `weight_cores` (p53-3) are the first schema-6 keys: an older snapshot ignores them, so its slot-taken records the built-in Weight. `unreachable_paths` (p52-1, ADR 0081 d1) is the first schema-7 key: an older snapshot ignores it, and its engine takes no mark. `metered_keys` (p56-6) is the first schema-9 key: an older snapshot ignores it, so its rollouts ask the metered-key gate as before. The plugin's
+0063) is the first schema-3 key: an older snapshot ignores it, so its rollouts ask every credential gate as before. `test_logins` (p37-4) is the first schema-5 key: an older snapshot ignores it, so its rollouts ask the Login gate as before. `weight_mem_gb` and `weight_cores` (p53-3) are the first schema-6 keys: an older snapshot ignores them, so its slot-taken records the built-in Weight. `unreachable_paths` (p52-1, ADR 0081 d1) is the first schema-7 key: an older snapshot ignores it, and its engine takes no mark. `metered_keys` (p56-6) is the first schema-9 key: an older snapshot ignores it, so its rollouts ask the metered-key gate as before. The four `fable_ceiling_<role>` keys (p46-10) are the first schema-10 keys: an older snapshot ignores them, so its rollouts keep drawing on the ladder's `[share]` seed and its engine's first reviewer reads it: a landed ceiling reaches only p46-10+ snapshots. The plugin's
 hooks run from the Primary checkout, not a snapshot, so the Stop-hook driver's `STATUS_RE` and the `ROLLOUT-STATUS`
 line it parses are a cross-version contract (hooks/rollout-stop-driver.py).
 So are the compaction count and its line (ADR 0085 d3 and d4, p55-4; execute § 1.5 *After a compaction*). The count
@@ -237,7 +237,8 @@ snapshot's `ladder.py`, whose validation refuses every key added after its cut (
 `[share]` before p46-2), and a refused ladder halts that rollout at its next call. So a file that uses a newer key is
 written only once every live rollout's engine root reads it: for each, `HOME=<tmp> python3 <its
 root>/skills/_shared/scripts/ladder.py` with the candidate file at `<tmp>/.config/thread/ladder.toml` exits 0; else wait
-for those rollouts to finish or move (ladder.py's docstring, *Across versions*). A task note's `arms:` stamp and a
+for those rollouts to finish or move (ladder.py's docstring, *Across versions*). An older snapshot's `ladder.py`
+(before p46-10) prints the file's `[share]` as its `share`, never the Rollout settings' resolved ceiling. A task note's `arms:` stamp and a
 rollout note's `arms: lead=…` (p46-2) are note lines an older engine ignores. A `role-call` Run record line (p46-2) is
 not: an engine from before it reads one as a live line, task activity and the record's tail (`record-entry`'s
 `NOT_LIVE_KINDS`, `score.py`'s `pair`, `ledger.py`'s `NOT_TAIL`), so a role-call stamped after a heartbeat would move

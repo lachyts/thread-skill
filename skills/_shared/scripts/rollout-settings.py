@@ -15,7 +15,7 @@ below) are the only forms that write. No form makes a network call. This header 
 and of the writer's rules:
 
     # ~/.config/thread/rollouts.toml
-    schema = 9                   # optional, top-level, before the first table (ADR 0043): the file's schema version
+    schema = 10                  # optional, top-level, before the first table (ADR 0043): the file's schema version
 
     [defaults]                   # every rollout on this machine
     parallel_ceiling = 4
@@ -36,6 +36,8 @@ and of the writer's rules:
     test_logins = ["dummy"]      # machine-wide, schema 5 (p37-4): the Claude Logins a credential gate may name and
                                  # still be signed by the standing approval; ONE line, [defaults] only, declared
                                  # on his ruling only (Declaring, below)
+    fable_ceiling_builder = 60   # machine-wide, schema 10 (p46-10, ADR 0079 d6): a drawn role's Fable ceiling in
+                                 # percent, one key per role; [defaults] only; tune.py its one script writer
 
     [guardrails]                 # the Reflection's bounds, machine-wide only
     tokens_per_merge_pct = 25    # tokens per merge may rise at most +25%
@@ -66,8 +68,9 @@ holds every rollout key but `verify_slots` and `capacity_max` (SETTING_KEYS: the
 `capacity_max`, which are machine-wide and refused under a `[repo."o/r"]` label), plus `inert_paths`,
 `test_credentials`, `weight_mem_gb`, `weight_cores` and `unreachable_paths` (REPO_ONLY: each refused under `[defaults]` with `<key> is per
 repo: set it under [repo."owner/name"]`). REPO_ONLY holds `metered_keys` too (p56-6), read only as ONE line inside its
-`[repo."o/r"]` table, as `test_credentials` is (below). `[defaults]` also holds `test_logins` (DEFAULTS_ONLY: machine-wide, refused under a
-`[repo."o/r"]` label as MACHINE_ONLY's keys are, and kept out of `settings`). Dotted keys
+`[repo."o/r"]` table, as `test_credentials` is (below). `[defaults]` also holds `test_logins` and the four
+`fable_ceiling_<role>` keys (DEFAULTS_ONLY: machine-wide, refused under a `[repo."o/r"]` label as MACHINE_ONLY's keys
+are, and kept out of `settings`). Dotted keys
 (`repo."o/r".parallel_ceiling = 5`) and inline tables are read the same as table form, with two exceptions:
 `test_credentials` is read only as ONE line inside its `[repo."o/r"]` table, and `test_logins` only from a key line
 whose value closes on that line, never from inside an inline table (both below), because inert-paths.py,
@@ -180,6 +183,26 @@ reports it as its own top-level `unreachable_paths` (Output). execute's lead pas
 and the engine marks a task whose code-writing agents report a changed path one of these globs matches. A schema-6
 reader ignores it under a schema-7 file (the schema rule below), so that rollout marks only what a task declares.
 
+`fable_ceiling_master_review`, `fable_ceiling_builder`, `fable_ceiling_investigator` and `fable_ceiling_lead` (p46-10,
+ADR 0079 decision 6's p46-3 amendment; schema 10, the first schema-10 keys; CEILING_KEYS, each naming its role in
+CEILING_ROLES, ladder.py's SHARE_ROLES in order) are each drawn role's Fable ceiling: the most of that role's work, in
+percent, its Fable arm may take. Each is an integer from 0 to 100, refused otherwise at its line (`[defaults] <key> must
+be an integer from 0 to 100 (a percent), got <value described>`: a boolean, a float or a string included). They are
+machine-wide (DEFAULTS_ONLY: one Mac draws every rollout's arms against them), so a `[repo."o/r"]` table refuses them,
+and they are not in `settings`: resolve() reports them as its own top-level `fable_ceiling` (Output), {role: {value,
+source}}, a role the file does not set reading `{"value": null, "source": "built-in"}`. The seed rule (fable_ceilings(),
+its one copy): a role this file sets reads its value; a role it does not set reads ladder.toml's `[share]` value for it,
+the seed (ladder.py's header), as written; a role neither names, and a role ladder.toml's `[role]` gives its own model
+(never drawn), has no ceiling. So the first landing writes the key, and from then on this file wins: a later `[share]`
+edit for that role is not read. ladder.py's engine_view() (the lead's args.ladder.share, and through it the engine's
+doubled-review check), reconcile-rollout.py's draws and reflect's span read the ceiling through it. Their one script
+writer is skills/reflect/scripts/tune.py (`--ceilings`, `--ceiling-revert` and `--ceiling-yes`, its header: an agreed
+move the weekly reading lands at step 14, its declared-risk revert, and Lachy's yes to a decision-task item); a ruled
+`declare` writes one too, which tune.py then reads as a hand edit (a stale `from`). They are never stamped on a rollout
+or a task. A schema-9 reader ignores them under a schema-10 file (the schema rule below), so a rollout on an older
+Engine snapshot keeps drawing on the ladder's `[share]` seed; a schema-9 file that holds one is refused with the raise
+remedy.
+
 `[notify]` is retired (ADR 0075 d2: no rollout code notifies Lachy, so nothing reads the ntfy topic it held, ADR 0038
 d3). A top-level `notify`, in any form (a table, a scalar, dotted or inline, valid or not), is skipped whole: never
 validated, never refused and never resolved, only recorded, so `_validate` returns `retired: ["notify"]`, load_tables
@@ -213,7 +236,8 @@ pre-P29 reader refuses any top-level `schema` line and a schema-N reader any kno
 every rollout on the machine at its next `verify-timeout`, so each writer asks every live rollout's engine root to read
 the new file first and refuses the write when one cannot: inert-paths.py `record` (its header, and reader_check(), the
 check's one copy) raising it to 2, and tune.py, which loads that reader_check(), raising it to 4 for capacity_max,
-to 6 for a Weight (p53-5) or to 8 for overtime_runs (p39-14; an unattended --auto landing included; its header).
+to 6 for a Weight (p53-5), to 8 for overtime_runs (p39-14; an unattended --auto landing included; its header) or to 10
+for a Fable ceiling (p46-10; an unattended --ceilings landing included).
 `declare` runs the reader check at every write, raised schema or not.
 
 Repo keys. A repo key must be quoted (`[repo."owner/name"]`) and is an `owner/name` by land.sh's slug rule
@@ -263,6 +287,7 @@ schema rule above):
 - a `metered_keys` under `[defaults]`, in any form but one line in its repo table, a value metered_problem() refuses, or
   a name also in that repo's `test_credentials` (p56-6);
 - a `test_logins` in a repo table, a value that spans lines, or a value logins_problem() refuses (p37-4);
+- a `fable_ceiling_<role>` in a repo table, or one that is not an integer from 0 to 100 (a boolean refused; p46-10);
 - a `weight_mem_gb` or `weight_cores` under `[defaults]`, or one that is not a finite number > 0 (a boolean refused; p53-3);
 - an `unreachable_paths` under `[defaults]`, one `inert_paths` would refuse, or a glob glob_class_problem() refuses (p52-1);
 - a guardrail that is not a non-negative integer or float (a boolean is refused; `quota_stalls` is an
@@ -294,6 +319,8 @@ Output. Exit 0 and one JSON line on stdout:
      "weight": {"mem_gb": {"value": <num>, "source": "file:repo"|"built-in"},       # built-in 3
                 "cores": {"value": <num>, "source": "file:repo"|"built-in"}},       # built-in 2
      "unreachable_paths": {"value": ["<glob>", ...], "source": "file:repo"|"built-in"},  # built-in []
+     "fable_ceiling": {"master-review": {"value": <0-100>, "source": "file:defaults"}    # p46-10, SHARE_ROLES order;
+                                       | {"value": null, "source": "built-in"}, ...},  # null: the ladder's seed rules
      "schema": {"file": <the file's schema, 1 when absent or no file>, "engine": SCHEMA},
      "ignored": ["<scope path of each ignored key>", ...],     # e.g. "defaults.foo", 'repo."o/r".foo', "away"
      "retired": ["notify"] | []}                               # a retired table the file holds (ADR 0075 d2)
@@ -397,7 +424,11 @@ stamps, which tune.py and score.py read), TUNING_KEYS (p53-5: KEYS, then `capaci
 `overtime_runs`, every key a Tuning may move; run_record.py's TUNING_KEYS is pinned to it), SETTING_KEYS (KEYS plus
 `auto_retries`, `spend_approval_usd`, `verify_slots`, `capacity_max` and `overtime_runs`: every key a `settings` object
 holds), MACHINE_ONLY, REPO_ONLY,
-DEFAULTS_ONLY, MINIMUM, WEIGHT_KEYS, WEIGHT_BUILT_IN,
+DEFAULTS_ONLY, CEILING_KEYS, CEILING_ROLES, fable_ceilings(part, ladder) (p46-10: {role: {percent, share, source}}
+in SHARE_ROLES order from resolve()'s `fable_ceiling` part and ladder.py's load(), the seed rule's one copy: source
+`rollouts` for a role this file sets, percent its value and share percent / 100; else `ladder` for a role the ladder's
+`[share]` names, share as written and percent round(100 x share); a role neither names, or one `[role]` gives its own
+model, absent), MINIMUM, WEIGHT_KEYS, WEIGHT_BUILT_IN,
 GUARDRAIL_KEYS, RETIRED, ORIGIN_TIMEOUT, SCHEMA, KEY_SCHEMA, MAX_INERT_GLOBS,
 MAX_CREDENTIAL_KEYS, MAX_TEST_LOGINS, LOGIN_NAME_RE, RESERVED_LOGIN_NAMES, glob_problem(glob),
 glob_class_problem(glob) (why a glob's `[…]` class will not compile, or None: unreachable_paths' extra check),
@@ -450,9 +481,15 @@ WEIGHT_BUILT_IN = {"weight_mem_gb": 3, "weight_cores": 2}
 # rollout note stamps, then the machine-wide capacity_max and a repo's Weight estimates, which no note stamps, then
 # overtime_runs (p39-14, ADR 0070 d8), which tune.py moves only between values >= 1.
 TUNING_KEYS = KEYS + ("capacity_max",) + WEIGHT_KEYS + ("overtime_runs",)
+# Each drawn role's Fable ceiling in percent (p46-10, ADR 0079 decision 6), one key per role: CEILING_ROLES maps each key
+# to its role, in ladder.py's SHARE_ROLES order (tests/rollout-settings.test.mjs pins the two equal).
+CEILING_KEYS = ("fable_ceiling_master_review", "fable_ceiling_builder", "fable_ceiling_investigator", "fable_ceiling_lead")
+CEILING_ROLES = {"fable_ceiling_master_review": "master-review", "fable_ceiling_builder": "builder",
+                 "fable_ceiling_investigator": "investigator", "fable_ceiling_lead": "lead"}
 # Machine-wide keys kept out of `settings` (p37-4): valid under [defaults] only, refused in a repo table, and reported
-# by resolve() as their own top-level field. `test_logins` is the operator's declared test Logins, one line.
-DEFAULTS_ONLY = ("test_logins",)
+# by resolve() as their own top-level field. `test_logins` is the operator's declared test Logins, one line; the
+# CEILING_KEYS (p46-10) each drawn role's Fable ceiling, reported as `fable_ceiling`.
+DEFAULTS_ONLY = ("test_logins",) + CEILING_KEYS
 MAX_TEST_LOGINS = 16
 LOGIN_NAME_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9_-]{0,39}\Z")
 RESERVED_LOGIN_NAMES = ("claude", "login", "logins")
@@ -486,7 +523,7 @@ TABLES = ("defaults", "guardrails", "notify", "repo")
 TOP_KEYS = ("schema",) + TABLES
 # The schema (ADR 0043; the header's schema rule and add-a-key recipe). SCHEMA is this reader's version; KEY_SCHEMA
 # registers every key it knows, by (scope, key), at the schema that introduced it. K10 freezes the schema-1 set.
-SCHEMA = 9
+SCHEMA = 10
 KEY_SCHEMA = {}
 KEY_SCHEMA.update({("top", k): 1 for k in TOP_KEYS})
 KEY_SCHEMA.update({("rollout", k): 1 for k in SETTING_KEYS if k not in ("capacity_max", "overtime_runs")})
@@ -501,6 +538,7 @@ KEY_SCHEMA[("rollout", "weight_cores")] = 6
 KEY_SCHEMA[("rollout", "unreachable_paths")] = 7   # p52-1 (ADR 0081 d1): the first schema-7 key
 KEY_SCHEMA[("rollout", "overtime_runs")] = 8   # p39-14 (ADR 0070 d8): the first schema-8 key
 KEY_SCHEMA[("rollout", "metered_keys")] = 9   # p56-6 (ADR 0063's 2026-11-26 amendment): the first schema-9 key
+KEY_SCHEMA.update({("rollout", k): 10 for k in CEILING_KEYS})   # p46-10 (ADR 0079 d6): the first schema-10 keys
 ORIGIN_TIMEOUT = 20  # seconds for land.sh --origin-slug (one local git call); the whole group dies on expiry
 
 # land.sh's origin_slug rule, so a key can only ever equal a slug land.sh prints.
@@ -975,6 +1013,13 @@ def _validate(text, doc, path):
                     refuse("%s test_logins %s" % (label, why), at + (key,))
                 kept[key] = list(value)
                 continue
+            if key in CEILING_KEYS:
+                # p46-10: a drawn role's Fable ceiling, an integer percent (MINIMUM never sees it).
+                if isinstance(value, bool) or not isinstance(value, int) or not 0 <= value <= 100:
+                    refuse("%s %s must be an integer from 0 to 100 (a percent), got %s" % (label, key, _describe(value)),
+                           at + (key,))
+                kept[key] = value
+                continue
             if key in REPO_ONLY:
                 if at[0] != "repo":
                     refuse("%s is per repo: set it under [repo.\"owner/name\"]" % key, at + (key,))
@@ -1228,12 +1273,37 @@ def resolve(repo=None, path=None):
                         else {"value": WEIGHT_BUILT_IN[key], "source": "built-in"})
     unreachable = ({"value": list(overrides["unreachable_paths"]), "source": "file:repo"}
                    if "unreachable_paths" in overrides else {"value": [], "source": "built-in"})
+    ceiling = {CEILING_ROLES[key]: ({"value": tables["defaults"][key], "source": "file:defaults"}
+                                    if key in tables["defaults"] else {"value": None, "source": "built-in"})
+               for key in CEILING_KEYS}
     return {"path": path, "file": read is not None, "repo": slug, "settings": settings, "guardrails": guardrails,
             "inert_paths": inert, "test_credentials": creds, "metered_keys": metered, "test_logins": logins,
             "weight": weight,
-            "unreachable_paths": unreachable,
+            "unreachable_paths": unreachable, "fable_ceiling": ceiling,
             "schema": {"file": tables["schema"], "engine": SCHEMA}, "ignored": list(tables["ignored"]),
             "retired": list(tables["retired"])}
+
+
+def fable_ceilings(part, ladder):
+    """Each drawn role's Fable ceiling (p46-10, the header's seed rule: its one copy), {role: {percent, share, source}}
+    in SHARE_ROLES order. `part` is resolve()'s `fable_ceiling`; `ladder` is ladder.py's load() (its `share`, the seed,
+    and its `roles`). A role this file sets reads source `rollouts`, percent its value and share percent / 100; a role it
+    does not set and the ladder's `[share]` names reads source `ladder`, share as written and percent round(100 x
+    share); a role neither names, and one the ladder's `[role]` gives its own model (never drawn), is absent."""
+    part = part if isinstance(part, dict) else {}
+    seed = (ladder or {}).get("share") or {}
+    own = (ladder or {}).get("roles") or {}
+    out = {}
+    for key in CEILING_KEYS:
+        role = CEILING_ROLES[key]
+        if role in own:
+            continue
+        v = (part.get(role) or {}).get("value")
+        if isinstance(v, int) and not isinstance(v, bool):
+            out[role] = {"percent": v, "share": v / 100.0, "source": "rollouts"}
+        elif isinstance(seed.get(role), (int, float)) and not isinstance(seed.get(role), bool):
+            out[role] = {"percent": int(round(100 * seed[role])), "share": seed[role], "source": "ladder"}
+    return out
 
 
 # ---- declaring: an agent writes a ruled declaration (p56-5; ADR 0063's 2026-11-24 amendment) -------------------------

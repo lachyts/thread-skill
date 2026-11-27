@@ -2874,14 +2874,17 @@ def _approved_gates(note):
 
 
 def _ladder_json():
-    """ladder.py's load(), the object its CLI prints (execute § 3, read at this call's start). Any failure, a refused
-    file or python < 3.11 among them, is EnvError `ladder file refused: <where>: <reason>`."""
+    """ladder.py's engine_view() view, the object its CLI prints (execute § 3, read at this call's start; p46-10: its
+    `share` the resolved Fable ceilings, rollouts.toml's over the ladder's [share] seed), so a seeded revise's and an
+    integrate call's args.ladder equal the CLI's stdout. A rollouts.toml that gives no ceiling leaves `share` out, as the
+    CLI does. Any failure of the ladder itself, a refused file or python < 3.11 among them, is EnvError `ladder file
+    refused: <where>: <reason>`."""
     mod = None
     try:
         spec = importlib.util.spec_from_file_location("thread_ladder", rr.LADDER_PY)
         mod = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(mod)
-        return mod.load()
+        return mod.engine_view()[0]
     except Exception as e:
         path = ""
         try:

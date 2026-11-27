@@ -2029,18 +2029,20 @@ through time, from attention to merged PRs. Terms only — no implementation.
   of three altitudes, as in Chorus: a **knob** (a value in the operator's
   rollout settings: a repo's Parallel ceiling, a round cap, read by the next
   schedule; capacity_max and a repo's Weight estimate, read live by the next
-  `next`); a **rule** (how a skill or the engine behaves: a grill and an
+  `next`; a role's **Fable ceiling**, read live at each draw); a **rule** (how a skill or the engine behaves: a grill and an
   ADR before a build); a **bug** (the engine or a skill did not do what its
   rule says: a task). By hand Lachy picks the ones that land; the weekly
-  reading lands some unasked under ADR 0037 d5 (a bug filed, a knob three
-  Reflections agree on, the revert of one that breaches a Guardrail); a rule
+  reading lands some unasked under ADR 0037 d5 (a bug filed, a knob or a
+  Fable ceiling three Reflections agree on, the revert of one that breaches a
+  Guardrail or its declared risk); a rule
   never lands unasked. Each by-hand Reflection appends one line to `tunings.jsonl`
   beside the record, with its headline scores (the next Reflection's
   baseline) and the Tunings applied (decision 5's tally). Each rollout's
   close (its completion ceremony or its supersede) appends one scored line
   of its own through the same tune script (ADR 0037 d4). The weekly reading
-  writes a line there only when it lands or reverts a knob, never a close
-  line, and records its Watches, proposals and close in `reflections.jsonl`.
+  writes a line there only when it lands or reverts a knob or a Fable
+  ceiling (a ceiling's own `ceiling` line, as is Lachy's yes to one), never a
+  close line, and records its Watches, proposals and close in `reflections.jsonl`.
   A serial rollout's close line carries `shape: serial` and no repo: it moves
   no key and is never a baseline. _Avoid_: tweak, auto-tune.
 - **Watch** — a pattern a Reflection saw in one rollout and would not yet
@@ -2124,7 +2126,9 @@ through time, from attention to merged PRs. Terms only — no implementation.
   `spend_approval_usd`, which the execute verbs resolve themselves and
   schedule never stamps, and `verify_slots`, which is machine-wide
   (`[defaults]` only), never stamped, and read by execute's `verify-timeout`
-  at each loop entry. That read validates the whole file, so a refused file
+  at each loop entry, and the four drawn roles' Fable ceilings
+  (`fable_ceiling_<role>`), machine-wide too, never stamped, read live at
+  each draw. That read validates the whole file, so a refused file
   halts every rollout on the machine at its next entry; the file carries its
   schema version, and a snapshot ignores a key newer than itself while still
   refusing a typo (ADR 0043). The `[notify]` table is retired by ADR 0075 d2:
@@ -2164,8 +2168,9 @@ through time, from attention to merged PRs. Terms only — no implementation.
   which pacing moves so its Fable allowance and its general allowance run
   down together, never above the role's **Fable ceiling**: the most of a
   drawn role's work its Fable arm may take, one per drawn role, read from the
-  ladder's `[share]` table until p46-10 moves it into the Rollout settings,
-  and the only part a Tuning changes. The pace is read per Login from the
+  Rollout settings (`fable_ceiling_<role>`, a percent), seeded by the ladder's
+  `[share]` table for a role they do not set, and the only part a Tuning
+  changes, its one writer the tune script. The pace is read per Login from the
   quota store at each draw: half the ceiling when the two weekly windows are
   even, less when Fable is further used, more when it is behind, nothing
   when it is spent or the reading is missing or stale (every role then draws

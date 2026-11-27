@@ -48,7 +48,10 @@ which the next reading's agreement reads back. Four readings are declared, the r
    deciding that task applies a yes to `[share]`. This departs from "three Reflections agree" landing it on its own
    (ADR 0037 decision 5): no writer can land a ceiling until p46-3 gives it a writable home, and task p46-10 removes
    the departure. (Amended 2026-11-23 by thread-skill-p46-3: p46-3 gave the ceiling no new home; the writable home and
-   its writer are p46-10's, which removes the departure.)*
+   its writer are p46-10's, which removes the departure.) (Amended 2026-11-27 by thread-skill-p46-10: the departure is
+   gone. An agreed ceiling lands by `tune.py --ceilings` at the weekly reading's step 14, with no decision-task item; a
+   trade or a caution is a `- ceiling` item, which a yes applies through `tune.py --ceiling-yes`; a move to 0 is a
+   caution, Lachy's.)*
 3. *The plans' split: the first planner call on Fable that is not on the Fable rung. Before it a task's plan model is
    its first Slot's rung, after it its planner calls'; each side counts every task, planned or not, and leaves out only
    a planned task whose plan ran on the other model (and, before the split, a task on a rung no built-in ladder names).*
@@ -106,6 +109,18 @@ allowance block, `blocked` with an `allowance refusal` diagnosis, never plan fee
 resumed as a Lost call under a usage limit the lead knows of). The fold reads the refusal's text after the fact as a
 role-call's `refused`. The billing refusal ("payment is past due") kills every model and the lead, so no fallback can
 run there; it is left out on purpose.)*
+
+*(Amended 2026-11-27 by thread-skill-p46-10: decision 6's home and writer, and decision 9's landing, are built. Each
+drawn role's Fable ceiling lives in the Rollout settings, `rollouts.toml`'s `[defaults] fable_ceiling_<role>` (an
+integer percent, machine-wide, the first schema-10 keys), and the ladder's `[share]` is its seed, read only for a role
+the settings do not set (`rollout-settings.py`'s `fable_ceilings()`, the rule's one copy). `skills/reflect/scripts/tune.py`
+is its one script writer, each move one `ceiling` line in `tunings.jsonl`: `--ceilings` lands a ceiling three
+Reflections agreed on, inside the Guardrails, at the weekly reading's step 14 (ADR 0037 decision 5); `--ceiling-revert`
+undoes a landing a later reading finds breaching its declared risk (arms.py's CEILING_RISKS: the role's own measured
+tokens per merge in the move's direction, never a rollout's breach); `--ceiling-yes` applies Lachy's yes to a trade or a
+caution on the decision task. `ladder.py`'s CLI prints the engine view, its `share` each role's resolved ceiling, so
+reconcile's draws and the engine's doubled-review first reviewer (ADR 0081) read the same value. A rollout on an older
+Engine snapshot ignores the new keys and keeps reading the seed until it finishes.)*
 
 ## Context
 
@@ -202,7 +217,9 @@ His, at this repo's orient:
    through the week, never above the role's **Fable ceiling**: the most of a drawn role's work its Fable arm may
    take, a rollout setting, one per drawn role. *(Amended 2026-11-23 by thread-skill-p46-3: the Fable ceiling stays
    the ladder's `[share]` table, read as each drawn role's ceiling, and reconcile paces the live share under it per
-   Login; task thread-skill-p46-10 gives the ceiling its home in the Rollout settings and its one writer.)* It is not the **Parallel ceiling** (the most Slots a Queue holds)
+   Login; task thread-skill-p46-10 gives the ceiling its home in the Rollout settings and its one writer. Built
+   2026-11-27 by thread-skill-p46-10: `rollouts.toml`'s `fable_ceiling_<role>`, seeded by `[share]`, written by
+   `tune.py`.)* It is not the **Parallel ceiling** (the most Slots a Queue holds)
    or the retired model-tier **Ceiling**. One mechanism each: pacing moves the live share, and only the Fable
    ceiling is a Tuning (decision 9; review #7). Pacing need not be exact, and allowance left over at the week's end
    is fine. Nothing is held in reserve for hand sessions. The rule takes any number of Logins. Pacing governs the
