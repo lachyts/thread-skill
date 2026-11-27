@@ -2170,7 +2170,8 @@ through time, from attention to merged PRs. Terms only — no implementation.
   drawn role's work its Fable arm may take, one per drawn role, read from the
   Rollout settings (`fable_ceiling_<role>`, a percent), seeded by the ladder's
   `[share]` table for a role they do not set, and the only part a Tuning
-  changes, its one writer the tune script. The pace is read per Login from the
+  changes, its one Tuning writer the tune script (a ruled `declare` aside).
+  The pace is read per Login from the
   quota store at each draw: half the ceiling when the two weekly windows are
   even, less when Fable is further used, more when it is behind, nothing
   when it is spent or the reading is missing or stale (every role then draws
