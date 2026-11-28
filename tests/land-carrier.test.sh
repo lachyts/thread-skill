@@ -869,25 +869,30 @@ kill "$hp"; wait "$hp" 2>/dev/null
 carrier "${RED[@]}" -- --vault "$V"
 ok "$(lines "$S19" " ${H4:0:12} (red): ")|$(fx "o/r19#$N" key)" "1|red:$H4:build" "C19h: the lock free: the next pass writes the line once"
 
-echo "== C19i. comment and blank frontmatter lines are read through; a shape _fm cannot read is never answered"
-nfm "$S19" 't = t.replace("\nlaunch: cc-x\n", "\n\n# Optional launch context (qualifying dev tasks only)\n# launch: cc-x\n# verifier:\nlaunch: cc-x\n", 1)'
-put feat THREAD.md "- f5"; H5=$C
-carrier "${RED[@]}" -- --vault "$V"
-ok "$(lines "$S19" " ${H5:0:12} (red): ")|$(nfiles landing-fix-)|$(fx "o/r19#$N" open)" "1|1|True" \
-  "C19i (i): comment and blank lines: one new noted line, no second task, still open"
+echo "== C19i. _fm reads comment and blank lines and refuses any other shape; an unreadable note is never answered"
+out=$(python3 -B - "$CARRIER" <<'PYF'
+import importlib.util, sys
+spec = importlib.util.spec_from_file_location("lc", sys.argv[1]); lc = importlib.util.module_from_spec(spec); spec.loader.exec_module(lc)
+rows = [("---\nstatus: open\n\n# Optional launch context (qualifying dev tasks only)\n  # launch: cc-x\nlaunch: cc-x\n---\n",
+         {"status": "open", "launch": "cc-x"}),
+        ("---\nstatus: open\ncontexts: []\n  nested: x\n---\n", None),
+        ("---\nstatus: open\nsummary: |\n  two lines\n---\n", None)]
+print(" ".join(str(lc._fm(t) == want) for t, want in rows))
+PYF
+)
+ok "$out" "True True True" "C19i (i): _fm reads comment and blank lines through; a nested map or a block scalar is unreadable"
 nfm "$S19" 't = t.replace("contexts: []\n", "contexts: []\n  nested: x\n", 1)'
 cp "$TK/$S19.md" "$tmp/c19i.md"; k0=$(fx "o/r19#$N" key)
-put feat THREAD.md "- f6"
-carrier "${RED[@]}" -- --vault "$V"
-ok "$(cmp -s "$TK/$S19.md" "$tmp/c19i.md" && echo same)|$(nfiles landing-fix-)" "same|1" "C19i (ii): an unreadable frontmatter: no write, no second task"
-has "$(ef "o/r19#$N" outcome)" "no fix task ([[$S19]]'s frontmatter cannot be read)" "C19i (ii): … the outcome names the note"
-ok "$(fx "o/r19#$N" open)|$(fx "o/r19#$N" key)" "None|$k0" "C19i (ii): … fix.open null, fix.key unchanged"
 CLK=$((CLK + 1440)); carrier "${RED[@]}" -- --vault "$V"
-ok "$(stk --now "$(at $CLK)" | grep -c "o/r19#$N")" 1 "C19i (iii): a day on: listed"
+ok "$(cmp -s "$TK/$S19.md" "$tmp/c19i.md" && echo same)|$(nfiles landing-fix-)" "same|1" "C19i (ii): a day on, its note unreadable: no write, no second task"
+has "$(ef "o/r19#$N" outcome)" "no fix task ([[$S19]]'s frontmatter cannot be read)" "C19i (ii): … the outcome names the note"
+ok "$(fx "o/r19#$N" open)|$(fx "o/r19#$N" key)|$(stk --now "$(at $CLK)" | grep -c "o/r19#$N")" "None|$k0|1" \
+  "C19i (ii): … fix.open null, fix.key unchanged, and listed"
 
-echo "== C19c. an own branch unqueued a day gets a review task; a failed read, a draft close-out or a hold never"
+echo "== C19c. an own branch unqueued a day, a draft too, gets a review task; a failed read, a draft close-out or a hold never"
 reset; vreset
 repo r19c; origin r19c; proj P19c "$W"; put feat THREAD.md "- c"; pr r19c feat; Nc=$N
+put wip THREAD.md "- d"; pr r19c wip 'draft=true'; Nd=$N
 repo r19c3; origin r19c3; proj P19c3 "$W"; put "$(cb r19c3)" THREAD.md "- d"; pr r19c3 "$(cb r19c3)" 'draft=true'; N3=$N
 repo r19c4; origin r19c4; proj P19c4 "$W"; put feat/h THREAD.md "- h"; pr r19c4 feat/h; N4=$N; mark r19c4 "$N4" "" "Landing held (ADR 0028 § 3)"
 carrier GH_CHECKS=pass -- --vault "$V"
@@ -896,6 +901,8 @@ CLK=$((CLK + 1440)); carrier GH_CHECKS=pass -- --vault "$V"
 t=$(note "landing-fix-o-r19c-$Nc")
 has "$t" "(review): filed: unqueued a day on (not queued: left to its session)" "C19c (i): own-unqueued a day: one review task"
 has "$t" "/fresh-review" "C19c (i): … its What to do names /fresh-review"
+has "$(note "landing-fix-o-r19c-$Nd")" "(review): filed: unqueued a day on (a draft: left to its session)" \
+  "C19c (v): an own draft a day on: its marker read then, no hold, one review task"
 ok "$(nfiles landing-fix-o-r19c3-)|$(stk --now "$(at $CLK)" | grep -c "o/r19c3#$N3")" "0|1" "C19c (iii): a draft close-out: no task, listed"
 ok "$(nfiles landing-fix-o-r19c4-)|$(stk --now "$(at $CLK)" | grep -c "o/r19c4#$N4")" "0|1" "C19c (iv): a held landing: no task, listed"
 has "$(ef "o/r19c4#$N4" outcome)" "held (ADR 0028 § 3)" "C19c (iv): … its outcome says it is held"
@@ -939,25 +946,33 @@ CARRIER=$C0
 }  # end shard_7
 
 shard_8() {
-echo "== C20. a close-out red on a red base waits a day, files a base task, then is brought current once green"
+echo "== C20. a close-out red: a pending base only waits; a red one files a base task a day after it first reads red; a green one brings it current once, never chased"
+# strict false: with no up-to-date rule GitHub reads a red head unstable, not behind, after the base moves; the carrier
+# reads compare, not mergeable_state, so the chase is the same, and the noted line carries the unstable clause
 reset; vreset; repo r20; origin r20; proj P20 "$W"
-B=$(cb r20); put "$B" THREAD.md "- r20"; H=$C; put master a.txt moved; M=$C; pr r20 "$B" "$AM"; S="landing-fix-o-r20-$N"
+B=$(cb r20); put "$B" THREAD.md "- r20"; H=$C; put master a.txt moved; M=$C; pr r20 "$B" "$AM" 'strict=false'; S="landing-fix-o-r20-$N"
+carrier GH_CHECKS=fail "GH_CHECKS_MAP=$M=pending" -- --vault "$V"
+CLK=$((CLK + 1440)); carrier GH_CHECKS=fail "GH_CHECKS_MAP=$M=pending" -- --vault "$V"
+ok "$(writes | grep -c .)|$(nfiles landing-fix-)|$(ef "o/r20#$N" baseRedSince)" "0|0|None" \
+  "C20 (i): a day-old red close-out on a pending base: no write, no task, no base clock"
+has "$(ef "o/r20#$N" outcome)" "; its base master reads pending at ${M:0:12}: waiting for it to turn green" "C20 (i): … waiting for its base"
 carrier GH_CHECKS=fail -- --vault "$V"
-ok "$(writes | grep -c .)|$(nfiles landing-fix-)" "0|0" "C20 (i): a red base under a day: no write, no task"
-has "$(ef "o/r20#$N" outcome)" "; its base master reads red at ${M:0:12}: waiting for it to turn green" "C20 (i): … waiting for its base"
+ok "$(nfiles landing-fix-)" 0 "C20 (ii): the base reads red: under a day of it, no task, though the landing is a day old"
 CLK=$((CLK + 1440)); carrier GH_CHECKS=fail -- --vault "$V"
 ok "$(nfiles landing-fix-)|$(lines "$S" '(base): filed: ')|$(stk --now "$(at $CLK)" | grep -c "o/r20#$N")" "1|1|0" \
-  "C20 (ii): a day on: one base task, and no stuck row"
-carrier GH_CHECKS=fail "GH_CHECKS_MAP=$M=pass" GH_UPDATE=merge -- --vault "$V"
-ok "$(puts | grep -c "repos/o/r20/pulls/$N/update-branch -f expected_head_sha=$H")|$(nfiles landing-fix-)" "1|1" \
-  "C20 (iii): the base green: one update-branch, still one task"
+  "C20 (iii): a day after the base first read red: one base task, and no stuck row"
+put master a.txt m3; M3=$C
+carrier GH_CHECKS=fail "GH_CHECKS_MAP=$M3=pass" GH_UPDATE=merge -- --vault "$V"
+ok "$(puts | grep -c "repos/o/r20/pulls/$N/update-branch -f expected_head_sha=$H")|$(nfiles landing-fix-)|$(lines "$S" 'no longer covers')|$(stk --now "$(at $CLK)" | grep -c "o/r20#$N")" \
+  "1|1|1|1" "C20 (iv): the base moves green: one update-branch; the base task no longer covers it (one line), so it is listed"
 H2=$(srvsha r20 "$B")
-carrier GH_CHECKS=fail "GH_CHECKS_MAP=$M=pass" -- --vault "$V"
-ok "$(lines "$S" " ${H2:0:12} (red): ")|$(nfiles landing-fix-)|$(ef "o/r20#$N" redHeld)" "1|1|$H2" \
-  "C20 (iv): red while up to date: one new (red) line on the same task, held at that head"
-has "$(grep " ${H2:0:12} (red): " "$TK/$S.md")" 'what to do now: its diff is THREAD.md and handoff docs only' "C20 (iv): … carrying the new What to do"
-has "$(grep " ${H2:0:12} (red): " "$TK/$S.md")" 'fix it on `master` or re-run it' "C20 (iv): … fix it on master or re-run it"
-has "$(grep " ${H2:0:12} (red): " "$TK/$S.md")" '`build` is not a required check' "C20 (iv): … and the unstable clause"
+put master a.txt m4; M4=$C
+carrier GH_CHECKS=fail "GH_CHECKS_MAP=$M4=pass" GH_UPDATE=merge -- --vault "$V"
+ok "$(ghlog | grep -c update-branch)|$(lines "$S" " ${H2:0:12} (red): ")|$(ef "o/r20#$N" redHeld)|$(stk --now "$(at $CLK)" | grep -c "o/r20#$N")" \
+  "0|1|$H2|0" "C20 (v): the base moves again while its CI runs: no second update-branch; one (red) line, held at that head, covered"
+has "$(grep " ${H2:0:12} (red): " "$TK/$S.md")" 'what to do now: its diff is THREAD.md and handoff docs only' "C20 (v): … carrying the new What to do"
+has "$(grep " ${H2:0:12} (red): " "$TK/$S.md")" 'fix it on `master` or re-run it' "C20 (v): … fix it on master or re-run it"
+has "$(grep " ${H2:0:12} (red): " "$TK/$S.md")" '`build` is not a required check' "C20 (v): … and the unstable clause"
 
 echo "== C20b. a held close-out is brought current only once its task closes (a carried fix counts)"
 reset; vreset; repo r20b; origin r20b; proj P20b "$W"
@@ -999,9 +1014,11 @@ reset; vreset; repo r21; origin r21; proj P21 "$W"; put feat THREAD.md "- f"; H=
 carrier "${RED[@]}" -- --vault "$V"
 nfm "$S" 't = t.replace("status: open\n", "status: done\n", 1)'
 put master a.txt moved; M2=$C
-carrier "${RED[@]}" "GH_CHECKS_MAP=$M2=pass" -- --vault "$V"
+carrier "${RED[@]}" "GH_CHECKS_MAP=$M2=pass" GH_UPDATE=merge -- --vault "$V"
 has "$out" "o/r21#$N: update-branch requested (from ${H:0:12})" "C21: the same red, its task done, the base green: update-branch"
 ok "$(nfiles landing-fix-)" 1 "C21: … no second task"
+carrier "${RED[@]}" "GH_CHECKS_MAP=$M2=pass" -- --vault "$V"
+ok "$([ -f "$TK/$S-2.md" ] && echo y)|$(nfiles landing-fix-)" "y|2" "C21: red on the new head: the next numbered task, $S-2, past the closed root note"
 
 echo "== C22. a write the carrier may not make uncovers it; a merge retires an unworked task"
 reset; vreset; repo r22; origin r22; proj P22 "$W"; put feat THREAD.md "- f"; pr r22 feat "$AM"; S="landing-fix-o-r22-$N"

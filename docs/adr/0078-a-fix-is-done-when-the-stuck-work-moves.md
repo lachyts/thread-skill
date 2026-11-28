@@ -115,12 +115,16 @@ a Leg session whose Leg has closed, never opened, or lost its chain copy is arch
    started; quality over speed)
 6. Orient and schedule list every left-out task with its reason, and never drop a cross-repo dependency silently.
    (technical)
-7. A close-out's real red is read against its base. On a red or pending base it waits, and after a day files its fix
-   task naming the base. On a green base it is brought current when behind, and gets its fix task when up to date.
-   Once read red while up to date, it is held: no update-branch and no resolver push on that head while its checks read
-   neither green nor none and its task is open. The hold lifts once the task closes (a landed fix waiting on its proof
-   counts as closed) or the head's checks read green. (technical: a THREAD.md and handoff-only diff; a base move cannot
-   show a fix landed)
+7. A close-out's real red is read against its base. On a pending base it only waits: master's CI still running after
+   a merge is no broken base. On a red base it waits too, and once the base itself has read red for a day (timed from
+   the first pass that reads it red, kept across a pending read and reset by a green one, never from the landing's own
+   clock) files its fix task naming the base. On a green base it is brought current when behind, at most once per real
+   red: the head that update-branch makes has merged a green base tip, so a real red on it counts as red while up to
+   date even when the base has moved again while its CI ran. Up to date, it gets its fix task. Once read red while up
+   to date, it is held: no update-branch and no resolver push on that head while its checks read neither green nor
+   none and its task is open. The hold lifts once the task closes (a landed fix waiting on its proof counts as closed)
+   or the head's checks read green. (technical: a THREAD.md and handoff-only diff; a base move cannot show a fix
+   landed; a busy master would otherwise spend a CI run on every pass)
 8. At most one undated fix task per PR is open at a time. It is found by name and `landing_pr:`, and filed in the live
    project whose `repos:` checkout (`~` expanded) has the PR's origin, active projects first. An unreadable task note is
    never answered with a second task: the carrier writes nothing and lists the landing after a day. The task has a
@@ -128,7 +132,8 @@ a Leg session whose Leg has closed, never opened, or lost its chain copy is arch
    when the kind changes. (technical)
 9. The stuck list leaves out a landing while its open fix task still covers its stop. Coverage runs from the pass that
    files or notes the task until a pass reads another verdict (checks green, a conflict the resolver leaves, a write
-   the carrier may not make, a draft close-out, a hold) or an author push, and is settled once per pass. The landing
+   the carrier may not make, a draft close-out, a hold, and for a task filed for a red base, that base read green) or
+   an author push, and is settled once per pass; a red the same pass files or notes still wins. The landing
    returns to the list on ADR 0070's take-out marker, a task closed with the landing unmoved, or a task that cannot be
    read. (from the ruling; the marker per ADR 0070)
 10. A red is real only when the next pass would read it the same way. A failed or cut read, a missing roll-up reader,

@@ -68,7 +68,8 @@ run, one pass:
         that differs from entry.head is a carrier change when it is entry.pushed (the carrier's resolver push) or
         gh_update_merge(head, entry.head) holds; anything else is an author change, which restarts movedAt and the
         rerun count, and is a clearing verdict (the fix task paragraph's settle rule). A failed read counts as a
-        carrier change: a failed read never restarts the clock. Any new head drops `redHeld` (6.4b's hold).
+        carrier change: a failed read never restarts the clock. Any new head drops `redHeld` (6.4b's hold), and
+        `redBrought` unless the old head is it (kept one hop, for 6.4b to read on the head its update-branch made).
      e. The checks on head.sha, land.sh LAND_CHECKS_PY's classes (`GET commits/<sha>/check-runs?per_page=100` and
         `/status`, a check run's latest id per name): red (a failure), infra (cancelled, timed_out, startup_failure,
         action_required, stale, a status error), pending, green. No check on the head reads the base tip's (the
@@ -160,20 +161,28 @@ run, one pass:
           `; no fix task (<why>)` after it.
         - redHeld is this head and its task is closed (a carried fix counts): the same key is (d); a new key files the
           next numbered task, and the hold stays.
+        - Brought current for its red: entry.redBrought (the head a red bring-current, here or (d), was asked from;
+          5d keeps it one hop) is not this head, and gh_update_merge(head, redBrought) holds. This head merged a green
+          base tip, so it is read as up to date even when the base has moved since: the red fix task (`<prev>; red on
+          the head update-branch made from a green <base_ref>: …`) and entry.redHeld = head, no base read. So a real
+          red is brought current at most once, never chased round a base that moves while its CI runs.
         - Otherwise the base tip and its checks (read_checks on it; one with no checks reads `none`). A read that fails
-          is unread: `<prev>; cannot read <base_ref>'s checks (<why>)`, no key. A base neither green nor none, the
-          landing unmoved under a day: `<prev>; its base <base_ref> reads <cls> at <tip12>: waiting for it to turn
-          green`, no write and no key; a day or more: the base fix task, key `base:<head>`. A green base: `GET
-          compare/<tip>...<head>` (a failed read is unread); behind or diverged: _bring_current (skipped while
-          mergeability is unsettled); ahead or identical: the red fix task, key `red:<head>:<the failing check names,
-          sorted>`, and entry.redHeld = head.
+          is unread: `<prev>; cannot read <base_ref>'s checks (<why>)`, no key. A pending base only waits: `<prev>;
+          its base <base_ref> reads pending at <tip12>: waiting for it to turn green`, no write and no key (master's CI
+          still running after a merge is no broken base). A red or infra base is timed from the base itself:
+          entry.baseRedSince is set by the first pass that reads it red or infra, kept across a pending read, dropped
+          by a green or none one. Under a day of it, the same waiting outcome; a day or more: the base fix task, key
+          `base:<head>`. A green base: a clearing verdict when fix.key is a base key (the settle rule), then `GET
+          compare/<tip>...<head>` (a failed read is unread); behind or diverged: _bring_current, recording redBrought
+          (skipped while mergeability is unsettled); ahead or identical: the red fix task, key `red:<head>:<the
+          failing check names, sorted>`, and entry.redHeld = head.
         The hold is head-specific (5d drops it on any new head); on its head it lifts when its task closes or its checks
         read green or none, never when the base moves, since a base move cannot show a fix landed.
      (d) The fix has landed: a real red whose fix task is closed (a carried fix counts) with the same key, a green
-        base, and a compare that reads behind or diverged is brought current once (_bring_current), its mergeability
-        settled. Otherwise the outcome gains `; its fix task [[<stem>]] is closed, and the landing has not moved (ADR
-        0078 d1)`, and the landing is listed: the task is done at Live (it carries no `clears:`), so this row is the
-        check that it did not move the landing.
+        base, and a compare that reads behind or diverged is brought current once (_bring_current, recording
+        redBrought), its mergeability settled. Otherwise the outcome gains `; its fix task [[<stem>]] is closed, and
+        the landing has not moved (ADR 0078 d1)`, and the landing is listed: the task is done at Live (it carries no
+        `clears:`), so this row is the check that it did not move the landing.
      5. behind and green or none: `PUT pulls/<n>/update-branch -f expected_head_sha=<sha>` when the slot is free;
         `updatedFrom` records the head it was asked from (named in the outcome, read by no rule). _bring_current is
         this step, shared with 6.4b and (d).
@@ -317,10 +326,11 @@ Backlog orient grades and schedules like any other; every code change stays insi
     clearing verdict sets it false, and when it was true on an open task writes one line, `- <stamp> <head12>: this
     task no longer covers the landing: <outcome>`; else it is kept. The clearing verdicts: checks green or none; the
     resolver's conflict or nowrite; a definite no-write at any other write; a draft close-out; a hold (5c's held
-    marker); an author change at 5d (which records the verdict and writes nothing itself). Kept: unread results,
-    pending checks, waiting for the base, a re-run or bring-current just asked for, the resolver's pushed, clean,
-    failed, unread and held, a no-write that is a read failure, a held close-out, an unreadable task, a refused vault
-    write.
+    marker); an author change at 5d (which records the verdict and writes nothing itself); 6.4b's green base read when
+    fix.key is a base key (`base:`), the base task's stop being gone (a red key the same pass computes still wins, and
+    a red key is never cleared by it). Kept: unread results, pending checks, waiting for the base, a re-run or
+    bring-current just asked for, the resolver's pushed, clean, failed, unread and held, a no-write that is a read
+    failure, a held close-out, an unreadable task, a refused vault write.
   - The drop rule (_drop): every drop of an entry whose fix task is open (the PR merged, at 5a or 6.6: `the PR merged:
     nothing left for this landing`; closed: `the PR was closed`; out of scope: `the PR is no longer a landing`;
     supersession's close once it succeeds: `closed as superseded: <by>`, the tombstone case then dropping its fix
@@ -357,8 +367,9 @@ landings line through --slug, any later reader) call this verb, never the file.
 State: ${XDG_STATE_HOME:-~/.local/state}/thread/landings.json (or --state), {"v": 1, "landings": {"<owner>/<name>#<n>":
 entry, "_pass": {...}}}; an entry holds url, kind, since, movedAt, head, handledAt, outcome, updatedFrom, slotAt,
 pushed, pushedFrom, rerunHead, reruns, markerId, bound, cleared, stuck, supersededBy, closedAt, checked, redHeld (6.4b's
-hold: the head a close-out was read red on while up to date) and fix ({task, key, open, marker, current, at}: the fix
-task paragraph's record; a tombstone carries none). `_pass` is no entry:
+hold: the head a close-out was read red on while up to date), redBrought (the head a real red was brought current
+from, kept one hop), baseRedSince (when 6.4b first read the base red or infra) and fix ({task, key, open, marker,
+current, at}: the fix task paragraph's record; a tombstone carries none). `_pass` is no entry:
 it is the pass record (lastPass, searchFailedSince, searchFailedWhy), in the same map only because BJ.write_state writes
 one key; an entry key always holds `#` and `_pass` never does. landings.json is the carrier's own. A corrupt file is one
 WARN and is rewritten valid; an entry with no readable since is dropped with a WARN.
@@ -1068,9 +1079,10 @@ def _entry(ctx, it, url, head):
     return {"url": url, "since": ctx.stamp, "movedAt": ctx.stamp, "head": head}
 
 
-def _day_old(ctx, e):
-    """The entry is unmoved for a day: movedAt (first sight or the last author change) 24 h or more before now."""
-    moved = _parse_iso(e.get("movedAt"))
+def _day_old(ctx, e, field="movedAt"):
+    """The entry is unmoved for a day: movedAt (first sight or the last author change) 24 h or more before now; with
+    field baseRedSince, its base has read red or infra that long (6.4b)."""
+    moved = _parse_iso(e.get(field))
     return moved is not None and moved <= ctx.now and ctx.now - moved >= STUCK_AFTER
 
 
@@ -1134,6 +1146,8 @@ def pr_pass(ctx, it, e):
     prev = e.get("head")
     if prev and prev != head:
         e.pop("redHeld", None)   # the hold is head-specific
+        if e.get("redBrought") != prev:
+            e.pop("redBrought", None)   # kept for one hop only: 6.4b reads it on the head its update-branch made
         carrier = head == e.get("pushed") or ctx.gh_update_merge(slug, head, prev, base_ref)[0] is not False
         if not carrier:
             e["movedAt"], e["reruns"], e["rerunHead"] = ctx.stamp, 0, head
@@ -1344,9 +1358,9 @@ def act(ctx, it, pr, e, kind, checks):
     return done(_wait_outcome(pr, checks, settled))
 
 
-def _bring_current(ctx, it, e, head):
+def _bring_current(ctx, it, e, head, red=False):
     """Step 6.5's bring-current, shared with 6.4b and (d): the repo's slot, then `PUT update-branch` pinned to the
-    head; its outcome."""
+    head; its outcome. red (6.4b and (d), a real red brought current): a request made records entry.redBrought."""
     slug, n, key = it.slug, it.n, it.key
     if ctx.slots.get(slug.lower()):
         return "waiting its turn to be brought current"
@@ -1360,6 +1374,8 @@ def _bring_current(ctx, it, e, head):
         return f"update-branch not requested: {why}"
     if not ctx.dry:
         e["updatedFrom"] = head
+        if red:
+            e["redBrought"] = head
         ctx.say(f"{key}: update-branch requested (from {head[:12]})")
     return f"update-branch requested (from {head[:12]})"
 
@@ -1418,7 +1434,7 @@ def _rule_d(ctx, it, pr, e, prev, stem):
         tip = ctx.base_tip(it.slug, base_ref)
         if read_checks(ctx, it.slug, tip, base_ref)["cls"] in ("green", "none") \
                 and _compare(ctx, it, tip, head) in ("behind", "diverged") and pr.get("mergeable_state") != "unknown":
-            return f"{prev}; its fix task [[{stem}]] is closed: {_bring_current(ctx, it, e, head)}"
+            return f"{prev}; its fix task [[{stem}]] is closed: {_bring_current(ctx, it, e, head, red=True)}"
     except GhError:
         pass
     return f"{prev}; {_closed_text(stem)}"
@@ -1444,6 +1460,13 @@ def _closeout_red(ctx, it, pr, e, checks, prev):
     if e.get("redHeld") == head and fx and fx.get("open") is False:
         state, text = _file_fix(ctx, it, pr, e, "red", rkey, rwhy, checks)
         return _rule_d(ctx, it, pr, e, prev, text) if state == "closed" else f"{prev}; {text}"
+    brought = e.get("redBrought")
+    if brought and brought != head and ctx.gh_update_merge(slug, head, brought, base_ref)[0] is True:
+        # the head this red's bring-current made: it merged a green base tip, so it is read as up to date
+        e["redHeld"] = head
+        made = f"on the head update-branch made from a green {base_ref}"
+        state, text = _file_fix(ctx, it, pr, e, "red", rkey, f"{prev}, {made}", checks)
+        return f"{prev}; {_closed_text(text)}" if state == "closed" else f"{prev}; red {made}: {text}"
     try:
         tip = ctx.base_tip(slug, base_ref)
         bchecks = read_checks(ctx, slug, tip, base_ref)
@@ -1451,10 +1474,15 @@ def _closeout_red(ctx, it, pr, e, checks, prev):
         return f"{prev}; cannot read {base_ref}'s checks ({ex})"
     bcls, at = bchecks["cls"], f"its base {base_ref} reads {bchecks['cls']} at {tip[:12]}"
     if bcls not in ("green", "none"):
-        if not _day_old(ctx, e):
+        if bcls != "pending":
+            e.setdefault("baseRedSince", ctx.stamp)   # timed from the base's first red read, kept across pending
+        if bcls == "pending" or not _day_old(ctx, e, "baseRedSince"):
             return f"{prev}; {at}: waiting for it to turn green"
         state, text = _file_fix(ctx, it, pr, e, "base", f"base:{head}", f"{at}, a day on", bchecks)
         return f"{prev}; {at}; {_closed_text(text)}" if state == "closed" else f"{prev}; {at}: {text}"
+    e.pop("baseRedSince", None)
+    if fx and str(fx.get("key") or "").startswith("base:"):
+        ctx.fx["clear"] = at   # the base task's stop is gone; a key this pass computes still wins
     try:
         status = _compare(ctx, it, tip, head)
     except GhError as ex:
@@ -1462,7 +1490,7 @@ def _closeout_red(ctx, it, pr, e, checks, prev):
     if status in ("behind", "diverged"):
         if pr.get("mergeable_state") == "unknown":
             return f"{prev}; GitHub has not settled its mergeability"
-        return f"{prev}; {_bring_current(ctx, it, e, head)}"
+        return f"{prev}; {_bring_current(ctx, it, e, head, red=True)}"
     if status not in ("ahead", "identical"):
         return f"{prev}; cannot read how {head[:12]} compares with {base_ref} (status {status})"
     e["redHeld"] = head
