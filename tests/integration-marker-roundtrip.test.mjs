@@ -5,8 +5,9 @@
 // engine's diagnosis as the latest `### Run` after any agent-written text, and whose `status` reads
 // `setAsideAt` (any latest run starting `integration:` → integration) and `blockerSummary` (that latest run).
 // p14-2: x13–x15 carry the approved plan from the plan-gate to Integration and a seeded revise through the note's
-// `## Approved plan` (reconcile writes it from the own call's row; `lead-integrate.py plan` reads it back for the
-// seeded revise, and the integrator reads it from the note itself, p27-1: the integrate args carry no plan).
+// `## Approved plan` (reconcile writes it from the own call's row; the integrator reads it from the note itself,
+// p27-1: the integrate args carry no plan, and so does the seeded reviser, p47-17: the resume args carry none;
+// `lead-integrate.py plan` stays a read-only readback of the section).
 // p12-16: reconcile also writes the Integration log — one `## Integration log` line per integrate row and the
 // `ready:` stamp the lead passes back as integration.readyAt. x7–x12 read both back from engine-built rows.
 //
@@ -71,7 +72,7 @@ const setAside = () => row({ ...base, mode: 'integrate', task: mkTask(), integra
   [`integrate:${SLUG}`]: { ...merged, blocked: true, mergeState: 'none', mergeLog: '', blockerDiagnosis: 'conflict in a.js cannot be resolved' },
 })
 const seededStop = () => row({
-  ...base, task: mkTask({ resume: { stage: 'revise', prUrl: PR, branch: BR, worktreePath: WT, reviewHistory: HIST2, reviewRoundsUsed: 2, plan: 'PLAN' } }),
+  ...base, task: mkTask({ resume: { stage: 'revise', prUrl: PR, branch: BR, worktreePath: WT, reviewHistory: HIST2, reviewRoundsUsed: 2 } }),
 }, { [`revise:${SLUG} r3`]: { verified: false, blocked: true, escalate: false, prUrl: PR, branch: BR, worktreePath: WT, blockerDiagnosis: 'red after three iterations', summary: '' } })
 
 // A temp tasks dir: the rollout note and one in-progress task linked to it (optionally carrying an
@@ -119,7 +120,7 @@ test('x1: a rejection reconciled over an agent paragraph reads back as setAsideA
     assert.equal(parsed.stage, 'revise')
     assert.deepEqual(JSON.parse(JSON.stringify(parsed.history)), r.reviewHistory)
     const last = parsed.history[parsed.history.length - 1]
-    const resume = { stage: 'revise', prUrl: PR, branch: BR, worktreePath: WT, reviewHistory: parsed.history, reviewRoundsUsed: last.round, plan: 'PLAN' }
+    const resume = { stage: 'revise', prUrl: PR, branch: BR, worktreePath: WT, reviewHistory: parsed.history, reviewRoundsUsed: last.round }
     assert.equal(T.resumeArgsError({ ...base, task: mkTask({ resume }) }), '')
   } finally { fs.rmSync(d, { recursive: true, force: true }) }
 })
@@ -201,7 +202,7 @@ test('x6: a rejection on the last round reads back as review-blocked, its histor
     assert.ok(!run.includes('(Integration)'), 'reconcile writes plain Round N: groups (the stage is dropped)')
     const parsed = T.parseIntegrationMarker(run)
     assert.deepEqual(JSON.parse(JSON.stringify(parsed.history)), r.reviewHistory.map(({ round, feedback }) => ({ round, feedback })))
-    const resume = { stage: 'revise', prUrl: PR, branch: BR, worktreePath: WT, reviewHistory: parsed.history, reviewRoundsUsed: 2, plan: 'PLAN' }
+    const resume = { stage: 'revise', prUrl: PR, branch: BR, worktreePath: WT, reviewHistory: parsed.history, reviewRoundsUsed: 2 }
     assert.equal(T.resumeArgsError({ ...base, task: mkTask({ resume }) }), '')
   } finally { fs.rmSync(d, { recursive: true, force: true }) }
 })
@@ -356,7 +357,7 @@ test('x13: a plan-gated own call carries its plan into the note, and the integra
     assert.ok(planSection(d).startsWith(`## Approved plan\n\n${LEAD_IN}\n\n> ---\n> ### Files to modify\n`), planSection(d))
     const out = planOf(d)
     assert.deepEqual(Object.keys(out).sort(), ['plan', 'slug'])
-    assert.equal(out.plan, PLAN, 'lead-integrate.py plan reads back the exact plan (the seeded revise still takes it)')
+    assert.equal(out.plan, PLAN, 'lead-integrate.py plan reads back the exact plan (a read-only readback: no launch takes it, p47-17)')
     const section = planSection(d)
     const I = mkI()
     const r = await runTask({ ...base, mode: 'integrate', task: mkTask(), integration: I }, async (prompt, o) => {
@@ -425,23 +426,31 @@ test('x13b: a plan over 60k characters reaches its integrate call without the le
   } finally { fs.rmSync(d, { recursive: true, force: true }) }
 })
 
-test('x14: a seeded revise takes resume.plan from the note; its step-back renders it; its row leaves it', async (t) => {
+// p47-17: in chorus-rollout-2026-10-31 a 57 KB plan could not go into a seeded revise's args verbatim, and the
+// lead waited 5.3 h for word to run it with an empty plan. The resume args now carry no plan: the seeded
+// reviser's step-back sends it to the note's `## Approved plan`, as the integrator is sent since p27-1.
+test('x14b: a plan over 60k characters reaches its seeded revise without the lead transcribing anything', async (t) => {
   if (!PRESENT) return t.skip(SKIP)
   const d = vault('')
   try {
-    reconcile(d, await ownCall())
+    const steps = Array.from({ length: 1500 }, (_, i) => `- step ${i}: ` + 'x'.repeat(40))
+    const BIG = 'Planned on: abc\n### Files to modify\n' + steps.join('\n') + '\n### Gated inputs\nNone'
+    assert.ok(BIG.length > 60000, `the plan is over 60k characters (${BIG.length})`)
+    reconcile(d, await ownCall({}, { [`plan:${SLUG}`]: { ready: true, blocked: false, blockerCause: '', plan: BIG } }))
     reconcile(d, await rejected())
+    assert.ok(planSection(d).includes('> - step 1499: '), 'the whole plan is in the note')
     const section = planSection(d)
-    assert.ok(section && section.includes('> ## Not a section'))
-    const inputs = leadJson(['inputs', '--note', path.join(d, `${SLUG}.md`), '--repo', '/repo'])
+    const NOTE = path.join(d, `${SLUG}.md`)
+    const inputs = leadJson(['inputs', '--note', NOTE, '--repo', '/repo'])
     const resume = {
       stage: 'revise', prUrl: inputs.prUrl, branch: inputs.branch, worktreePath: inputs.worktreePath,
-      reviewHistory: inputs.history, reviewRoundsUsed: inputs.lastRound, plan: planOf(d).plan,
+      reviewHistory: inputs.history, reviewRoundsUsed: inputs.lastRound,
     }
-    assert.equal(resume.plan, PLAN)
-    assert.equal(T.resumeArgsError({ ...base, task: mkTask({ resume }) }), '')
     assert.ok(resume.reviewRoundsUsed >= 2, 'the revise runs at round >= 3: the step-back round')
-    const r = await runTask({ ...base, task: mkTask({ resume }) }, async (prompt, o) => {
+    const args = { ...base, task: mkTask({ taskPath: NOTE, resume }) }
+    assert.equal(T.resumeArgsError(args), '', 'a resume with no plan launches')
+    assert.ok(JSON.stringify(args).length < 10000, `the seeded revise's args stay small (${JSON.stringify(args).length})`)
+    const r = await runTask(args, async (prompt, o) => {
       if (o.label === `revise:${SLUG} r3`) return implOk
       if (o.label === `review:${SLUG} r3`) return { verdict: 'approve', feedback: [] }
       throw new Error('stub: unknown agent label ' + o.label)
@@ -449,7 +458,43 @@ test('x14: a seeded revise takes resume.plan from the note; its step-back render
     assert.equal(r.error, undefined, String(r.error))
     const p = r.calls.find((c) => c.label === `revise:${SLUG} r3`).prompt
     assert.ok(p.includes('STEP-BACK ROUND'))
-    assert.ok(p.includes(`The ORIGINAL APPROVED PLAN, for reference:\n---\n${PLAN}\n---`), 'the step-back carries the plan')
+    assert.ok(p.includes('the `## Approved plan` section of the task note (' + NOTE + ')'), "the step-back sends the reviser to the note's plan")
+    assert.ok(!p.includes('- step 0: ') && !p.includes('x'.repeat(40)), 'the prompt carries none of the plan')
+    assert.ok(p.length < BIG.length, `the reviser prompt is smaller than the plan (${p.length})`)
+    const res = JSON.parse(JSON.stringify(r.result))
+    assert.equal(res.tasks[0].plan, null)
+    reconcile(d, res)
+    assert.equal(planSection(d), section, 'a seeded-revise row leaves the section byte-identical')
+  } finally { fs.rmSync(d, { recursive: true, force: true }) }
+})
+
+test('x14: a seeded revise carries no plan; its step-back points at the note; its row leaves it', async (t) => {
+  if (!PRESENT) return t.skip(SKIP)
+  const d = vault('')
+  try {
+    reconcile(d, await ownCall())
+    reconcile(d, await rejected())
+    const section = planSection(d)
+    assert.ok(section && section.includes('> ## Not a section'))
+    const NOTE = path.join(d, `${SLUG}.md`)
+    const inputs = leadJson(['inputs', '--note', NOTE, '--repo', '/repo'])
+    const resume = {
+      stage: 'revise', prUrl: inputs.prUrl, branch: inputs.branch, worktreePath: inputs.worktreePath,
+      reviewHistory: inputs.history, reviewRoundsUsed: inputs.lastRound,
+    }
+    assert.equal(T.resumeArgsError({ ...base, task: mkTask({ taskPath: NOTE, resume }) }), '')
+    assert.ok(resume.reviewRoundsUsed >= 2, 'the revise runs at round >= 3: the step-back round')
+    const r = await runTask({ ...base, task: mkTask({ taskPath: NOTE, resume }) }, async (prompt, o) => {
+      if (o.label === `revise:${SLUG} r3`) return implOk
+      if (o.label === `review:${SLUG} r3`) return { verdict: 'approve', feedback: [] }
+      throw new Error('stub: unknown agent label ' + o.label)
+    })
+    assert.equal(r.error, undefined, String(r.error))
+    const p = r.calls.find((c) => c.label === `revise:${SLUG} r3`).prompt
+    assert.ok(p.includes('STEP-BACK ROUND'))
+    assert.ok(p.includes('the `## Approved plan` section of the task note (' + NOTE + ')'), "the step-back points at the note's plan")
+    assert.ok(!p.includes('## Not a section') && !p.includes('### Run 9 (x)'), 'the step-back never renders the plan')
+    assert.ok(!p.includes('The ORIGINAL APPROVED PLAN, for reference:'), 'not the in-run embedded plan')
     const res = JSON.parse(JSON.stringify(r.result))
     assert.equal(res.tasks[0].status, 'review')
     assert.equal(res.tasks[0].plan, null)
