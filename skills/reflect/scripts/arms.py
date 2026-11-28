@@ -10,7 +10,7 @@ verdict_key, arms_key, ARM_ROLES, ARMS_ROLES, ARMS_COUNT_KEYS), as grades.py doe
 is span's, passed in as a value or a memoised callable:
 
     reading(records, since, until, *, read, arm_stamp, lead_stamp, hands_off, escapes, breaches, ceiling,
-            ceiling_error, bounds, bounds_error, earlier, canon, built_in) -> block
+            ceiling_error, bounds, bounds_error, earlier, canon, built_in, footing, footing_error) -> block
     holds_row(block) -> bool                line(block, rid, since, until) -> the `arms` line's fields
 
 records is span's whole read ({slug: [(ms, n, line)]}, every record's lines in time then file order, a --fold's role-call
@@ -24,7 +24,10 @@ fable_ceiling_<role>, else ladder.toml's [share] seed, p46-10; a role with none 
 rollouts.toml is refused, whose reason is ceiling_error; bounds the [guardrails] bounds (score.py's guardrail_bounds of rollout-settings.py's resolve with no repo; bounds_error
 names a refused settings file, read as the built-ins); earlier the `arms` lines of closed Reflections in file order,
 never this Reflection's own; canon the slug rule every join goes through (escapes.py's _canon); built_in the built-in
-ladder's rung names (ladder.py's BUILT_IN), bottom first.
+ladder's rung names (ladder.py's BUILT_IN), bottom first; footing the lines of Chorus's footing log (its state dir's
+`stage/footing.jsonl`, docs/footing-log.md there) span read whole and parsed, only those on the lead's words (it may pass
+only the lines that name `the lead`), or None when the log could not be read, whose reason is footing_error (an absent
+log is no lines, never an error).
 
 The roles. ARMS_ROLES: the drawn roles (master-review, builder, investigator: run_record's ARM_ROLES) and a rollout's
 lead. A task has a drawn role when its stamp names it or a role-call line of it carries it; a task with neither (begun
@@ -60,8 +63,17 @@ Attributes, read wider. They place no row and add nothing to any other window's 
   else a first-reviewer line (a doubled master review, p52-2, ADR 0081 d2) leaves it out of the master review only, as
   unreachable: that review sat outside the draw, so its stamp is never set against its record; else fellBack on a line
   leaves it out of that line's role only (roles draw on their own: ADR 0079 decision 3);
-- a rollout's lead arm: its note's `arms: lead=` stamp (none without one). A landed task and an Escape are credited to
-  the lead arm of the task's landing rollout, a review and a call to that of the record that holds the line;
+- a rollout's lead arm: its note's `arms: lead=` stamp (none without one), and for a `lead=fable` stamp its lead's
+  footing (p46-11, Chorus ADR 0119 § As built: the lead's arm): the rollout's lead sessions are the `session` of every
+  lead-entry line of its record up to until, and its lead is on its Fable arm only when Chorus's footing log, up to until
+  (a line's `at`, epoch seconds), carries under one of those sessions a `fable: the lead` pin (a `dial` line whose `why`
+  is LEAD_PIN, or a claim, a `dial` whose `why` is `claim` and whose `pins.model.why` is LEAD_PIN) and, under none of
+  them, LEAD_FALLBACK (a `dial` on that word, or a claim whose model pin is it). Any other `lead=fable` rollout (it fell
+  back for want of Fable room, or never ran on Fable: `footing.fable` off, his Model pin, a CLI that cannot run Fable, a
+  Codex lead, a lead that ended inside the first open's window, or a log not read, flagged) leaves the lead's comparison
+  as `fellBack` (ADR 0079 d7: a fallen-back task leaves the comparison). A line of another kind (a `turn` carrying the
+  word in its set_by), or under a session that never entered the rollout, adds nothing. A landed task and an Escape are
+  credited to the lead arm of the task's landing rollout, a review and a call to that of the record that holds the line;
 - a landed task's Hands-off: its acts in its landing rollout's score.json `handsOff.tasks` (score.py's rule: no act
   from the run's start to its first merge in the score's window, read whole). A missing score, or one that does not
   list the task, counts in handsOffUnknown, out of the rate;
@@ -156,7 +168,8 @@ Fable calls by kind: the in-window calls, each counted once, in this order: fabl
 the Fable rung), plans (a planner or plan-judge call that asked fable), each drawn role (a call whose arm is fable),
 other (any other call that asked fable: an integrator on fable, a role on its own [role] model); then firstReviewer (a
 doubled master review's first reviewer, p52-2, ADR 0081 d2, that asked fable off the Fable rung: never `other`, never
-the master review's), and leads (the read rollouts stamped lead=fable). A call that fell back counts only in fellBack
+the master review's), and leads (the read rollouts whose lead is on its Fable arm: stamped lead=fable and its footing
+read as above). A call that fell back counts only in fellBack
 {calls, byKind, line}, by the kind it would have counted under (a first reviewer's rerun on the rung under
 firstReviewer); line is FELL_BACK_LINE, written only when calls is above 0.
 
@@ -215,6 +228,9 @@ TOKENS_BOUND_BUILT_IN = 25      # score.py's GUARDRAILS_BUILT_IN value, read whe
 READY_HELD = "agreed by 3 Reflections (ADR 0037 d5): tune.py --ceilings lands it at step 14"
 PLANS_NOTE = "planning has no Opus arm: a before and after, not a comparison"
 FELL_BACK_LINE = "%d Fable call(s) fell back to Opus: another Login with Fable room would have carried them"
+LEAD_PIN = "fable: the lead"            # Chorus's pin word for a lead on its Fable arm (conductor.gear_why(LEAD))
+LEAD_FALLBACK = "no fable room: the lead"   # Chorus's word for a lead that fell back to Opus at xhigh
+CLAIM = "claim"                         # the `stage` dial that binds the pins made before the CLI id was known
 STAT_KEYS = ("landed", "handsOff", "handsOffUnknown", "handsOffRate", "firstApprove", "firstChanges", "reviewRounds",
              "reviewedTasks", "escapes", "escapesPerLanded", "climbs", "calls", "tokens", "roleTokens", "tokenTasks",
              "tokensLeftOut", "tokensPerMerge")
@@ -225,8 +241,8 @@ NOTES = (
     "the same tasks",
 )
 CANNOT_SHOW = (
-    "arms: the lead's own tokens and fall-backs are in no Run record line (the lead's model is Chorus's to record): the "
-    "lead arm reads its tasks' calls and tokens",
+    "arms: the lead's own tokens are in no Run record line (the lead's model is Chorus's to record): the lead arm reads "
+    "its tasks' calls and tokens, and whether its lead ran on Fable from Chorus's footing log",
     "arms: whether another Login had Fable room is no Run record line: the fell-back line counts the calls it would have "
     "carried, never the Login that would have",
 )
@@ -389,7 +405,7 @@ def propose(role, o, f, frm, earlier, breaches, bound):
 
 def reading(records, since, until, *, read=(), arm_stamp=None, lead_stamp=None, hands_off=None, escapes=(),
             breaches=(), ceiling=None, ceiling_error=None, bounds=None, bounds_error=None, earlier=(), canon=None,
-            built_in=()):
+            built_in=(), footing=None, footing_error=None):
     """The arms block (the docstring's Output) over span's records and the values span passes in."""
     canon = canon or _lower
     arm_stamp = arm_stamp or (lambda _t: None)
@@ -401,17 +417,26 @@ def reading(records, since, until, *, read=(), arm_stamp=None, lead_stamp=None, 
         flags.append("arms: no Fable ceiling is read (%s)" % ceiling_error)
     if bounds_error:
         flags.append("arms: rollout-settings refused (%s): the built-in Guardrail bounds are read" % bounds_error)
+    if footing is None and footing_error:
+        flags.append("arms: Chorus's footing log is not read (%s): every lead=fable rollout leaves the lead's comparison"
+                     % footing_error)
     bound = (bounds or {}).get(TOKENS_BOUND, TOKENS_BOUND_BUILT_IN)
     if isinstance(bound, bool) or not isinstance(bound, (int, float)):
         bound = TOKENS_BOUND_BUILT_IN
 
     # one pass over every record up to until: role-call by its startTime, everything else by its ts
     calls, merges, first_slot, verdicts, rejections, segs_seen = {}, {}, {}, {}, [], set()
+    lead_sessions = {}   # rollout -> the sessions its lead-entry lines name up to until
     for slug in sorted(records):
         for t, n, d in records[slug]:
             if not isinstance(d, dict):
                 continue
             kind, task = d.get("kind"), d.get("task")
+            if kind == "lead-entry":
+                sid = d.get("session")
+                if t <= until and isinstance(sid, str) and sid:
+                    lead_sessions.setdefault(slug, set()).add(sid)
+                continue
             if not isinstance(task, str) or not task:
                 continue
             key = canon(task)
@@ -479,14 +504,38 @@ def reading(records, since, until, *, read=(), arm_stamp=None, lead_stamp=None, 
         arm_memo[(task, role)] = arm
         return arm
 
+    pinned, fell_back_leads = set(), set()   # the sessions with a LEAD_PIN, and with a LEAD_FALLBACK, up to until
+    for d in footing or ():
+        if not isinstance(d, dict) or d.get("kind") != "dial":
+            continue
+        sid, at = d.get("session"), d.get("at")
+        if not isinstance(sid, str) or not sid or isinstance(at, bool) or not isinstance(at, (int, float)) \
+                or at * 1000 > until:
+            continue
+        why = d.get("why")
+        if why == CLAIM:
+            pins = d.get("pins")
+            model = pins.get("model") if isinstance(pins, dict) else None
+            why = model.get("why") if isinstance(model, dict) else None
+        if why == LEAD_PIN:
+            pinned.add(sid)
+        elif why == LEAD_FALLBACK:
+            fell_back_leads.add(sid)
+
     lead_memo = {}
 
     def lead_arm(rollout):
+        """The rollout's lead arm: its stamp, or fellBack for a lead=fable one whose lead is not on its Fable arm."""
         if rollout is None:
             return "none"
         if rollout not in lead_memo:
             a = lead_stamp(rollout)
-            lead_memo[rollout] = a if a in ARMS else "none"
+            a = a if a in ARMS else "none"
+            if a == "fable":
+                mine = lead_sessions.get(rollout, set())
+                if not (mine & pinned) or mine & fell_back_leads:
+                    a = "fellBack"
+            lead_memo[rollout] = a
         return lead_memo[rollout]
 
     def exclusion(task, role):
@@ -515,6 +564,9 @@ def reading(records, since, until, *, read=(), arm_stamp=None, lead_stamp=None, 
             excluded[role][why].add(task)
             return None
         arm = lead_arm(rollout) if role == LEAD else arm_of(task, role)
+        if arm == "fellBack":
+            excluded[role]["fellBack"].add(task)
+            return None
         if arm not in ARMS:
             excluded[role]["none"].add(task)
             return None
@@ -543,8 +595,9 @@ def reading(records, since, until, *, read=(), arm_stamp=None, lead_stamp=None, 
                "tokens": tok[0] if tok else None, "arms": {}}
         for role in ROLES:
             arm = place(role, task, slug)
-            row["arms"][role] = arm if arm else (exclusion(task, role) or ("none" if role == LEAD or role in roles_of(task)
-                                                                           else None))
+            row["arms"][role] = arm if arm else (exclusion(task, role) or
+                                                 (("fellBack" if lead_arm(slug) == "fellBack" else "none") if role == LEAD
+                                                  else "none" if role in roles_of(task) else None))
             if arm is None:
                 continue
             s = stats[role][arm]

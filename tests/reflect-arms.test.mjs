@@ -94,7 +94,8 @@ const HARNESS = ['import importlib.util, json, sys',
   '        lead_stamp=lambda r: leads.get(r), hands_off=a.get("handsOff") or {}, escapes=a.get("escapes") or [],',
   '        breaches=[tuple(x) for x in a.get("breaches") or []], ceiling=a.get("ceiling"), ceiling_error=a.get("ceilingError"),',
   '        bounds=a.get("bounds") or {"tokens_per_merge_pct": 25}, bounds_error=None, earlier=a.get("earlier") or [],',
-  '        canon=lambda v: v.lower() if isinstance(v, str) else "", built_in=a.get("builtIn") or ["opus-high", "opus-xhigh"])',
+  '        canon=lambda v: v.lower() if isinstance(v, str) else "", built_in=a.get("builtIn") or ["opus-high", "opus-xhigh"],',
+  '        footing=a.get("footing", []), footing_error=a.get("footingError"))',
   '    return {"block": block, "holds": m.holds_row(block), "line": m.line(block, a.get("rid", "r-20261109T130000Z-aaaaaa"), a["sinceZ"], a["untilZ"])}',
   'a = json.load(sys.stdin)',
   'print(json.dumps([one(x) for x in a] if isinstance(a, list) else one(a)))',
@@ -110,6 +111,13 @@ function reading(h, a) {
 const handsOff = (byRollout, acts = {}) => Object.fromEntries(Object.entries(byRollout).map(([r, ts]) =>
   [r, Object.fromEntries(ts.map((t) => [t, acts[t] ?? []]))]))
 const pick = (arm, keys) => Object.fromEntries(keys.map((k) => [k, arm[k]]))
+// A lead's entry in its rollout's record (run_record's lead-entry: its CLAUDE_CODE_SESSION_ID), and the Chorus footing
+// lines span reads whole: a `dial` on a word (`fable: the lead`, `no fable room: the lead`) and a claim whose model pin
+// is it, `at` in epoch seconds.
+const entry = (ts, session) => [ts, 'lead-entry', null, { by: 'stage', session }]
+const dial = (session, why, ts = W(3, '00:30')) => ({ v: 1, kind: 'dial', at: Date.parse(ts) / 1000, session, by: 'companion', why })
+const claim = (session, why, ts = W(3, '00:30')) => ({ v: 1, kind: 'dial', at: Date.parse(ts) / 1000, session, by: 'stage', why: 'claim',
+  pins: { model: { by: 'companion', why } } })
 
 // ---- the arms per drawn role ----------------------------------------------------------------------------------
 
@@ -125,10 +133,11 @@ test('both arms per drawn role and the lead, each figure with its count; a plant
     ...build('b3', 6, { arm: 'fable', tokens: 3000 }),
     // an investigator task on each arm (scope: read-only lands read-only)
     slot(W(6, '01:00'), 'i1'), rc(W(6, '04:00'), 'i1', 'investigator', W(6, '01:05'), { arm: 'fable', tokens: 500 }), merged(W(6, '03:00'), 'i1', null, { readOnly: true }),
-    slot(W(7, '01:00'), 'i2'), rc(W(7, '04:00'), 'i2', 'investigator', W(7, '01:05'), { arm: 'opus', tokens: 400 }), merged(W(7, '03:00'), 'i2', null, { readOnly: true })])
+    slot(W(7, '01:00'), 'i2'), rc(W(7, '04:00'), 'i2', 'investigator', W(7, '01:05'), { arm: 'opus', tokens: 400 }), merged(W(7, '03:00'), 'i2', null, { readOnly: true }),
+    entry(W(3, '00:10'), 's-rb')])
   const stamps = { a1: stampOf('opus'), a2: stampOf('opus'), a3: stampOf('opus'), b1: stampOf('fable'), b2: stampOf('fable'), b3: stampOf('fable'),
     i1: { investigator: 'fable' }, i2: { investigator: 'opus' }, old: stampOf('opus'), late: stampOf('opus') }
-  const { block, holds } = reading(h, { records: { ra: a, rb: b }, stamps, leads: { ra: 'opus', rb: 'fable' },
+  const { block, holds } = reading(h, { records: { ra: a, rb: b }, stamps, leads: { ra: 'opus', rb: 'fable' }, footing: [dial('s-rb', 'fable: the lead')],
     handsOff: handsOff({ ra: ['a1', 'a2', 'a3'], rb: ['b1', 'b2', 'b3', 'i1', 'i2'] }, { a2: [{ kind: 'answer' }] }),
     escapes: [{ kind: 'escape', rollout: 'ra', task: 'a3', source: 'fixes', at: '2026-11-06', inWindow: true },
       { kind: 'escape', rollout: 'ra', task: 'a1', source: 'fixes', at: '2026-10-20', inWindow: false }] })
@@ -203,6 +212,33 @@ test('exclusions: fellBack leaves one role, fableRung every role; tokensPartial 
   assert.deepEqual([mr.opus.tokenTasks, mr.opus.tokensLeftOut, mr.opus.tokens], [1, 2, 2000], 't1 (tokensPartial) and s1 (no role-call) are left out')
   assert.ok(block.flags.includes('arms: a stamp the record overrides: [[d1]] master-review: stamp fable, record opus'), JSON.stringify(block.flags))
   assert.equal(block.tasks.find((x) => x.task === 'g1').arms.builder, 'fableRung')
+})
+
+// p46-11 (Chorus ADR 0119 § As built: the lead's arm, ADR 0079 d7): a lead=fable rollout is in the lead's Fable arm only
+// when one of its lead sessions (its record's lead-entry lines) carries a `fable: the lead` pin in Chorus's footing log
+// (a dial on the word, or a claim whose model pin is it) and none carries `no fable room: the lead`; any other leaves the
+// comparison as fellBack. A footing line after until, and a pin under a session that never led the rollout, add nothing.
+test('a lead=fable rollout counts in the lead\'s Fable arm only on its footing log\'s `fable: the lead` pin and no `no fable room: the lead`', (t) => {
+  const h = setup(t)
+  const lead = (slug, task, session) => rec(slug, [entry(W(3, '00:10'), session), ...build(task, 4, { arm: 'opus', builder: 'none' })])
+  const records = { rd: lead('rd', 'd1', 's-d'), rc: lead('rc', 'c1', 's-c'), rn: lead('rn', 'n1', 's-n'), rr: lead('rr', 'r1', 's-r'), rx: lead('rx', 'x1', 's-x') }
+  const footing = [
+    dial('s-d', 'fable: the lead'), dial('s-d', 'no fable room: the lead', AFTER('01:00')),     // rd: its fall-back after until
+    claim('s-c', 'fable: the lead'),                                                           // rc: the door's claim
+    dial('s-n', 'fable: the lead'), dial('s-n', 'no fable room: the lead', W(5, '00:00')),      // rn: fell back
+    claim('s-r', 'no fable room: the lead'), dial('s-other', 'fable: the lead'),               // rr: opened on Opus; rx: no line
+    { v: 1, kind: 'turn', at: Date.parse(W(4, '00:00')) / 1000, session: 's-x', set_by: { by: 'companion', why: 'fable: the lead' } }]
+  const leads = Object.fromEntries(Object.keys(records).map((r) => [r, 'fable']))
+  const stamps = Object.fromEntries(['d1', 'c1', 'n1', 'r1', 'x1'].map((x) => [x, stampOf('opus', 'none')]))
+  const { block } = reading(h, { records, stamps, leads, footing, handsOff: handsOff(Object.fromEntries(Object.entries(records).map(([r]) => [r, [`${r[1]}1`]]))) })
+  const l = block.roles.lead
+  assert.deepEqual([l.fable.landed, l.opus.landed, l.excluded.fellBack], [2, 0, 3], 'rd and rc in the Fable arm; rn, rr and rx left out')
+  assert.deepEqual(l.rollouts, ['rc', 'rd'])
+  assert.deepEqual(block.tasks.map((x) => [x.task, x.arms.lead]), [['c1', 'fable'], ['d1', 'fable'], ['n1', 'fellBack'], ['r1', 'fellBack'], ['x1', 'fellBack']])
+  assert.equal(block.fableCalls.leads, 2, 'only a lead on its Fable arm is a Fable lead')
+  const [unread] = reading(h, [{ records: { rd: records.rd }, leads: { rd: 'fable' }, footing: null, footingError: 'permission denied' }])
+  assert.deepEqual([unread.block.roles.lead.fable.landed, unread.block.roles.lead.excluded.fellBack], [0, 1])
+  assert.ok(unread.block.flags.some((f) => f.startsWith('arms: Chorus\'s footing log is not read (permission denied)')), JSON.stringify(unread.block.flags))
 })
 
 // One week where `fableArm` wins (or loses, or trades) on the master review: three tasks per arm, the builder in no arm.
@@ -359,7 +395,8 @@ test('Fable calls by kind, each call once; a fell-back call only on its own line
     rc(W(4, '04:00'), 'b1', 'integrator', W(4, '02:00'), { model: 'fable', call: 'integrate' }),
     rc(W(5, '04:00'), 'b2', 'master-review', W(5, '01:00'), { arm: 'fable', fellBack: true }),
     rc(W(5, '04:00'), 'b2', 'builder', W(5, '01:10'), { arm: 'opus' })])
-  const [fb, none] = reading(h, [{ records: { rf: r }, leads: { rf: 'fable' } }, { records: { rf: rec('rf', [rc(W(4, '04:00'), 'b1', 'master-review', W(4, '01:00'), { arm: 'fable' })]) } }])
+  const [fb, none] = reading(h, [{ records: { rf: [...r, ...rec('rf', [entry(W(3, '00:10'), 's-rf')])] }, leads: { rf: 'fable' },
+    footing: [claim('s-rf', 'fable: the lead')] }, { records: { rf: rec('rf', [rc(W(4, '04:00'), 'b1', 'master-review', W(4, '01:00'), { arm: 'fable' })]) } }])
   assert.deepEqual(fb.block.fableCalls, { fableRung: 1, plans: 2, 'master-review': 1, builder: 0, investigator: 0, other: 1, firstReviewer: 0, leads: 1 })
   assert.deepEqual(fb.block.fellBack, { calls: 1, byKind: { fableRung: 0, plans: 0, 'master-review': 1, builder: 0, investigator: 0, other: 0, firstReviewer: 0 },
     line: '1 Fable call(s) fell back to Opus: another Login with Fable room would have carried them' })
@@ -508,7 +545,12 @@ test('span reads the arms end to end: the stamps from the notes, Hands-off from 
   const { records, stamps } = week()
   // every line through run_record.emit, so each is a line the record would hold; o2's act is a Recorded answer
   const rows = records.rw.map(([_ms, _n, d]) => { const { v, ts, host, rollout, task, kind, ...f } = d; return [ts, kind, task, f, rollout] })
-  rows.push([W(4, '02:15'), 'answer-recorded', 'o2', { answerKind: 'decision' }, 'rw'])
+  rows.push([W(4, '02:15'), 'answer-recorded', 'o2', { answerKind: 'decision' }, 'rw'], [W(3, '00:10'), 'lead-entry', null, { by: 'stage', session: 's-rw' }, 'rw'])
+  // the lead's Fable pin in Chorus's footing log, under the scratch HOME's state dir (a line not on the lead's word is skipped)
+  const stage = path.join(h.home, '.local', 'state', 'chorus', 'stage')
+  fs.mkdirSync(stage, { recursive: true })
+  fs.writeFileSync(path.join(stage, 'footing.jsonl'), [JSON.stringify({ v: 1, kind: 'turn', at: 1, session: 's-rw' }), 'not json the lead',
+    JSON.stringify(claim('s-rw', 'fable: the lead'))].join('\n') + '\n')
   const emit = spawnSync('python3', ['-B', '-c', ['import importlib.util, json, sys', 'spec = importlib.util.spec_from_file_location("rr", sys.argv[1])',
     'm = importlib.util.module_from_spec(spec); spec.loader.exec_module(m)',
     'for ts, kind, task, fields, r in json.load(sys.stdin):', '    assert m.emit(r, kind, task, fields, ts=ts, strict=True), (kind, task)'].join('\n'), RUN_RECORD],
@@ -518,7 +560,7 @@ test('span reads the arms end to end: the stamps from the notes, Hands-off from 
     fs.writeFileSync(path.join(h.tasks, `${task}.md`), ['---', 'tags: [task, ai]', 'status: done', 'rollout: "[[rw]]"',
       `arms: master-review=${s['master-review']} builder=${s.builder}`, '---', '', `# ${task}`, ''].join('\n'))
   }
-  fs.writeFileSync(path.join(h.tasks, 'rw.md'), ['---', 'tags: [rollout]', 'status: in_progress', 'protocol_version: 5', 'arms: lead=opus', '---', '', '# rw', ''].join('\n'))
+  fs.writeFileSync(path.join(h.tasks, 'rw.md'), ['---', 'tags: [rollout]', 'status: in_progress', 'protocol_version: 5', 'arms: lead=fable', '---', '', '# rw', ''].join('\n'))
   // two closed Reflections agreed; a newer arms line whose Reflection never closed is no agreement and no break
   const old = (rid, signal, ts) => [{ v: 1, ts, host: 'h', rollout: null, task: null, kind: 'arms', ...earlierLine(rid, signal, signal) },
     { v: 1, ts, host: 'h', rollout: null, task: null, kind: 'reflection', id: rid }]
@@ -533,7 +575,7 @@ test('span reads the arms end to end: the stamps from the notes, Hands-off from 
   assert.deepEqual([mr.opus.landed, mr.opus.handsOff, mr.fable.landed, mr.fable.handsOff], [3, 2, 3, 3], 'score.py\'s acts, read whole')
   assert.deepEqual(pick(mr, ['verdict', 'from', 'to', 'agreement', 'agreedWith', 'ready', 'item']),
     { verdict: 'win', from: 50, to: 60, agreement: 3, agreedWith: [R(2), R(1)], ready: true, item: null }, 'rollouts.toml\'s 50 over the seed\'s 30')
-  assert.deepEqual([s.arms.roles.lead.opus.landed, s.arms.roles.builder.excluded.none], [6, 6])
+  assert.deepEqual([s.arms.roles.lead.fable.landed, s.arms.roles.builder.excluded.none], [6, 6], 'the lead\'s claim in the footing log')
   assert.deepEqual(s.ceilings, { now: { 'master-review': 50, builder: null, investigator: null, lead: 20 },
     land: [{ role: 'master-review', from: 50, to: 60, kid: mr.kid, signal: 'win', agreement: 3 }], revert: [], held: [] })
   assert.ok(s.cannotShow.some((c) => c.startsWith('arms: ')), 'a block that holds a row brings its cannotShow')

@@ -1089,8 +1089,10 @@ keeps the task open.
 - A rollout note with no record is judged by its status now, so one closed after until is never W2's for that week.
 - The ask behind a wait to start is known only to the day: a `captured:` date.
 - A decided circling item never returns on its rule, and a later cycle's first reading leaves the week quiet.
-- The arms read no lead's own tokens or fall-backs: the model a lead ran on is Chorus's to record, so the lead's arm
-  reads its tasks' calls and tokens, never its own.
+- The arms read no lead's own tokens: the model a lead ran on is Chorus's to record, so the lead's arm reads its tasks'
+  calls and tokens, never its own. Whether a `lead=fable` lead ran on Fable is read from Chorus's footing log (p46-11):
+  only a lead whose sessions carry a `fable: the lead` pin and no `no fable room: the lead` is in the Fable arm, so a
+  lead on Fable that Chorus never logged (a Stage older than chorus-p104-10) leaves the comparison too.
 - Whether another Login had Fable room is in no Run record line: the fell-back line counts the Fable calls that fell
   back to Opus, never the Login that would have carried them.
 - A task whose first Slot came before the first Fable planner call sits on the plans' before side, so the task that
