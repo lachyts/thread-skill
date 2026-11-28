@@ -219,7 +219,7 @@ function check(files, consts) {
   const items = answers.split('\n').filter((l) => /^ {3}\d+\. /.test(l)).map((l) => Number(l.trim().split('.')[0]))
   if (JSON.stringify(items) !== JSON.stringify(Array.from({ length: 16 }, (_, i) => i + 1))) flag('o6', `the answers are numbered ${JSON.stringify(items)}`)
   need('o6', "§ 6's answers", C(answers), ['routes nothing', '`none`', 'Advance', 'kebab', '`projectSlug`', '`plan_approval: required`',
-    "§ 0's clone question (exit 4)", 'the fork takes the No'])
+    "§ 0's clone question (exit 4)", 'the fork takes the No', 'a non-null `stop` stops the fork before writing'])
   const schedule = files[SCHEDULE] ?? ''
   const under = C(schedule.split(/\n\s*\n/).find((p) => p.startsWith('**Under orient-all.**')) ?? '')
   need('o6', "schedule's **Under orient-all.**", under, ['orient-all § 6', 'routes nothing', 'the slug its prompt gives'])
