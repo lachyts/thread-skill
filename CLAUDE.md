@@ -64,6 +64,7 @@ check, is another thing).
      by the sweep's evidence date (credited, for the lead, to the task's landing rollout), a plan task by its first
      slot-taken, a rejection by its ts. It reads wider, as attributes and up to until: a landed task's Hands-off acts
      and its tokens over its whole life, a task's arm and exclusion from its stamp and every role-call line of it, a
+     rollout's lead arm from its stamp, its record's lead-entry sessions and their lines in Chorus's footing log, a
      plan task's side and model, and the plans' `toDate`.
    A reader that reads wider says so in its docstring, the one copy of its rule, and is named here.
 2. A test pins it: for each windowed reader, plant one row outside the window and assert it is absent, or adds

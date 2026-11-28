@@ -336,8 +336,10 @@ parallel with no note). For each:
   fable_ceilings() over one resolve(repo=None, path=--config) and ladder.py's load(), rollouts.toml's
   fable_ceiling_<role> over the ladder's [share] seed; or None with a refused ladder's or rollouts.toml's reason, its
   ceiling_error), bounds (score.py's guardrail_bounds of that same resolve, else the built-ins, flagged),
-  earlier (the `arms` lines of closed Reflections, never this one's), canon (escapes.py's _canon) and built_in
-  (ladder.py's BUILT_IN names). Its flags and cannotShow join span's only when the block holds a row (ARMS.holds_row); a
+  earlier (the `arms` lines of closed Reflections, never this one's), canon (escapes.py's _canon), built_in
+  (ladder.py's BUILT_IN names) and footing (p46-11: chorus_footing(), the lines of Chorus's footing log,
+  `$CHORUS_STATE_DIR` else ~/.local/state/chorus, then stage/footing.jsonl, that name `the lead`, read whole; an absent
+  log is no lines, an unreadable one None with its reason, footing_error). Its flags and cannotShow join span's only when the block holds a row (ARMS.holds_row); a
   fault is the flag `arms: read failed (...)` and a null block, never a stop.
 - ceilings (p46-10, ADR 0079 d6 and d9): what step 14's tune.py ceiling verbs will do, read through tune.py's own pure
   checks over tune.py's load_ceilings() (tunings.jsonl's `ceiling` lines, read whole, as attributes), the arms block,
@@ -1054,6 +1056,31 @@ class Vault:
 def status_of(path):
     rec = RP.Rec(Path(path), "")
     return rec.status if rec.fm is not None else "unreadable"
+
+
+def chorus_footing():
+    """(lines, error): the lines of Chorus's footing log (`$CHORUS_STATE_DIR`, else ~/.local/state/chorus, then
+    `stage/footing.jsonl`) that name `the lead`, parsed, read whole for arms.py's lead footing (p46-11); a line that does
+    not parse is skipped. An absent log is ([], None); one that cannot be read is (None, its reason)."""
+    state = os.environ.get("CHORUS_STATE_DIR") or "~/.local/state/chorus"
+    path = os.path.join(expand(state), "stage", "footing.jsonl")
+    out = []
+    try:
+        with open(path, encoding="utf-8", errors="replace") as f:
+            for raw in f:
+                if "the lead" not in raw:
+                    continue
+                try:
+                    d = json.loads(raw)
+                except ValueError:
+                    continue
+                if isinstance(d, dict):
+                    out.append(d)
+    except FileNotFoundError:
+        return [], None
+    except OSError as e:
+        return None, "%s: %s" % (path, e.strerror or e)
+    return out, None
 
 
 def read_note(path):
@@ -2311,7 +2338,8 @@ class Span:
         read rollouts' score.json Hands-off, the Escape items of every entry, the Guardrail breaches close counts,
         each role's resolved Fable ceiling (rollout-settings.py's fable_ceilings(): rollouts.toml's fable_ceiling_<role>,
         else ladder.toml's [share] seed, p46-10; kept as self.ceiling_now for `ceilings`), the [guardrails] bounds (one
-        resolve(repo=None, path=--config) feeds both) and the closed Reflections' earlier `arms` lines. Its flags and
+        resolve(repo=None, path=--config) feeds both), the closed Reflections' earlier `arms` lines and Chorus's footing
+        log's lead lines (chorus_footing(), p46-11). Its flags and
         cannotShow join span's only when the block holds a row (ARMS.holds_row); a fault in the reading is a flag and a
         null block, never a stop."""
         aflags, stamps, leads = [], {}, {}
@@ -2361,11 +2389,13 @@ class Span:
         done_ids = {d.get("id") for d in reflections if d.get("kind") == "reflection"}
         earlier = [d for d in reflections if d.get("kind") == "arms" and d.get("reflection") != rid
                    and d.get("reflection") in done_ids]
+        footing, footing_error = chorus_footing()
         try:
             block = ARMS.reading(self.whole(ev, records), since, until, read=sorted(read), arm_stamp=arm_stamp,
                                  lead_stamp=lead_stamp, hands_off=hands_off, escapes=escapes, breaches=breaches,
                                  ceiling=ceiling, ceiling_error=ceiling_error, bounds=bounds, bounds_error=bounds_error,
-                                 earlier=earlier, canon=ESC._canon, built_in=[r["name"] for r in LADDER.BUILT_IN])
+                                 earlier=earlier, canon=ESC._canon, built_in=[r["name"] for r in LADDER.BUILT_IN],
+                                 footing=footing, footing_error=footing_error)
         except Stop:
             raise
         except Exception as e:
