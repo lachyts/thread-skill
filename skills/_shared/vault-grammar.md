@@ -419,8 +419,14 @@ neither: a hold blocks starts, and an approved queue's verdict has outcomes a tr
   that decides is not a directory, keeps the row waiting and `fire` exits 1 with nothing written, so `fired:` is never
   spent on a command the Stage cannot place. No fall-through past a dead path, which could place a Session in the wrong
   repo. A `script` row needs none.
-- **`reset-primary`** runs one `skills/_shared/scripts/primary-refresh.py run` pass in place (ADR 0078 Decided 3: a second
-  reset path would bypass its rule). `run` exits 0 whatever it finds, so `fire` reads the pass's outcome line, and records
+- **`reset-primary`** runs one Primary refresh `run` pass in place (ADR 0078 Decided 3: a second reset path would bypass
+  its rule). On a machine with an install (p47-19), it runs the installed copy,
+  `~/.local/state/thread/bin/primary-refresh.py` (the copy that self-updates), with the launchd job's own
+  ProgramArguments, while the `primary-refresh.installed` marker stands beside that copy and the job's plist runs it:
+  the fired pass is then the job's full pass, the self-update, the prove step, the landing carrier and the job check,
+  with the job's `--also` checkouts. Without an install it runs the checkout's
+  `skills/_shared/scripts/primary-refresh.py run`. `--refresh-bin` (tests) runs `<it> run` instead. `run` exits 0
+  whatever it finds, so `fire` reads the pass's outcome line, and records
   only an outcome that read the checkout to a standing verdict (`current`, `ahead`, `moved`, `repaired:`, `diverged`,
   `held:`, `refused:`, `past`, `no move:`; RESET_PRIMARY_RECORDED). In a repo that publishes a Green tip (ADR 0084 d1)
   the pass moves the Primary to it and never past it, so `current` and `moved` have Green-tip forms, `current at the

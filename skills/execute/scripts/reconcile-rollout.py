@@ -952,7 +952,10 @@ Subcommands:
               [--gh-bin G] [--refresh-bin B] [--now T]` runs one trigger and records it, idempotently, as `fired:` on its
               entry, and prints the row plus {fired, fresh, ran} (and `outcome` on a script step): exit 0 fresh or already
               fired, 1 an unknown id, an unreadable entry, not due, a script outcome not recorded or a save failure. Only
-              `fresh: true` tells a caller to act on `command`.
+              `fresh: true` tells a caller to act on `command`. A script step with no --refresh-bin runs the installed
+              Primary refresh (~/.local/state/thread/bin, the copy that self-updates) with its launchd job's own argv
+              while its primary-refresh.installed marker stands and the job runs that copy, else primary-refresh.py
+              beside this plugin's scripts (p47-19).
 
   verify-timeout  Read-only, for /thread:execute § 3's once-per-entry check (p14-2, p23-4): given a rollout
               note, print one JSON line {"verifyTimeout": N, "harnessTimeoutMs": 7200000, "slotWait":
@@ -2416,6 +2419,7 @@ import io
 import json
 import math
 import os
+import plistlib
 import re
 import shlex
 import signal
@@ -18016,6 +18020,15 @@ WHEN_DASH_RE = re.compile(r"^([ \t]*)-(?:[ \t]+(.*))?$")
 WHEN_LINK_RE = re.compile(r"^\[\[[^\[\]]+\]\]$")
 TRIGGER_LOCK = "trigger.lock"   # machine-wide, beside the note locks (_note_lock_dir), the note locks inside it
 PRIMARY_REFRESH_PY = Path(__file__).resolve().parent.parent.parent / "_shared" / "scripts" / "primary-refresh.py"
+# The installed Primary refresh (ADR 0066 d4, p47-19): `primary-refresh.py install` writes its bundle into DEFAULT_BIN with
+# MARKER beside the copy (the copy that self-updates; a checkout's own copy can freeze, the 2026-11-07 incident) and the
+# launchd job into the plist of its DEFAULT_LABEL. Literal copies of primary-refresh.py's DEFAULT_BIN, COPY, MARKER and
+# install's default --plist, pinned to them by skills/execute/tests/reconcile-rollout-triggers.test.sh T12, which loads
+# both scripts; _installed_refresh_argv reads them.
+INSTALLED_REFRESH_BIN = "~/.local/state/thread/bin"
+INSTALLED_REFRESH_COPY = "primary-refresh.py"
+INSTALLED_REFRESH_MARKER = "primary-refresh.installed"
+INSTALLED_REFRESH_PLIST = "~/Library/LaunchAgents/com.thread.primary-refresh.plist"
 # A pass's outcome that read the checkout to a standing verdict: recorded. `repaired: ` is the repair of a diverged
 # Primary (ADR 0078 d4), which ends the stuck spell as `current` does; on the Primary every other `diverged (…): …`
 # line is that repair's (repair waits, repair held, repair refused, carried, not carried), the job's to retry. The
@@ -18473,11 +18486,40 @@ def _primary_outcome(out):
     return None
 
 
+def _installed_refresh_argv():
+    """The launchd job's own ProgramArguments, when install's copy stands (INSTALLED_REFRESH_MARKER and the copy in
+    INSTALLED_REFRESH_BIN) and the job's plist (INSTALLED_REFRESH_PLIST) runs that copy's `run`; else None. Only the
+    job's argv makes the installed copy's pass the job's own: its --primary and --also, and its --job-shape, without
+    which the copy's job check would open a stale-job spell. A plist that is absent, does not parse or names another
+    copy reads as None."""
+    copy = Path(os.path.expanduser(INSTALLED_REFRESH_BIN)) / INSTALLED_REFRESH_COPY
+    if not (copy.is_file() and (copy.parent / INSTALLED_REFRESH_MARKER).is_file()):
+        return None
+    try:
+        with open(os.path.expanduser(INSTALLED_REFRESH_PLIST), "rb") as f:
+            job = plistlib.load(f).get("ProgramArguments")
+    except Exception:  # noqa: BLE001 — a plist that will not read (OSError, a parse error, no dict) is no job
+        return None
+    if (not isinstance(job, list) or len(job) < 3 or not all(isinstance(a, str) for a in job) or job[2] != "run"
+            or os.path.realpath(os.path.expanduser(job[1])) != os.path.realpath(copy)):
+        return None
+    return list(job)
+
+
+def _refresh_argv(refresh_bin):
+    """The argv of one Primary refresh pass: `<refresh_bin> run` when given (tests); else the installed copy with its
+    launchd job's argv (_installed_refresh_argv), the copy that self-updates, so no caller passes --refresh-bin; else
+    primary-refresh.py beside this plugin's scripts (PRIMARY_REFRESH_PY: no install on this machine)."""
+    if refresh_bin:
+        return [refresh_bin, "run"]
+    return _installed_refresh_argv() or [sys.executable, "-B", str(PRIMARY_REFRESH_PY), "run"]
+
+
 def _run_primary_refresh(refresh_bin):
     """(exit code, stdout) of one Primary refresh pass (primary-refresh.py run; ADR 0078 Decided 3: the one rule for
-    moving the Primary). A step that cannot start reads as a failed pass. The pass bounds itself, so no timeout here:
-    stopping it from outside could leave a merge half done."""
-    argv = [refresh_bin, "run"] if refresh_bin else [sys.executable, "-B", str(PRIMARY_REFRESH_PY), "run"]
+    moving the Primary), run as _refresh_argv says. A step that cannot start reads as a failed pass. The pass bounds
+    itself, so no timeout here: stopping it from outside could leave a merge half done."""
+    argv = _refresh_argv(refresh_bin)
     try:
         p = subprocess.run(argv, capture_output=True, text=True)
     except OSError:
@@ -24542,7 +24584,9 @@ def _parser():
     tf.add_argument("--tasks-dir", default=str(DEFAULT_TASKS_DIR), help=tasks_dir_help)
     tf.add_argument("--gh-bin", default="gh", help="the gh executable a merged PR is read through (tests pass a stub)")
     tf.add_argument("--refresh-bin", default=None, help="the Primary refresh's executable, run as `<it> run` (tests pass a "
-                                                        "stub; default primary-refresh.py beside this plugin's scripts)")
+                                                        "stub; default the installed copy with its launchd job's argv "
+                                                        "while its marker stands, else primary-refresh.py beside this "
+                                                        "plugin's scripts)")
     tf.add_argument("--now", type=_iso_arg, default=None, help=now_help + " (the fired: stamp)")
     tf.set_defaults(func=cmd_triggers_fire)
 
