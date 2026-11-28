@@ -487,7 +487,7 @@ The JSON's `line` prints verbatim, on a line of its own, when it is not null, an
 landings.json, and no landing unmoved for a day). A non-zero exit prints `Landings: not read (<its last stderr line>)`.
 The line is the carrier's last recorded state, a point-in-time read with no freshness check. In plain words, it names
 each landing PR the carrier has not moved for a day (and a superseded one whose reopen failed, or a search failing for a
-day), its last outcome and since when. A landing still moving is never shown. This section never quotes the line, nor
+day), its last outcome and since when. A landing still moving is never shown. Nor is one whose open fix task still covers it: that task is ordinary backlog work. This section never quotes the line, nor
 any part of it, in a code span or a fenced block, and shows no example line: status's read-only rule reads every span
 as a command status runs.
 

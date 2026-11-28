@@ -211,6 +211,15 @@ ok "$out" "True" "lock: two notes in one directory share one lock file"
 out=$(cd "$TMP" && THREAD_NOTE_LOCK_DIR=rel XDG_STATE_HOME=rel2 N="$TMP/ro.md" py 'print(str(rr._note_lock_path(p)).startswith("/"))')
 ok "$out" "True" "lock: a relative lock dir is never used, so two cwds never take two locks"
 
+# ── the landing carrier's fix-task writes take this same lock, through land-carrier.py's mirror (p47-20) ─────────
+LC="$HERE/../../_shared/scripts/land-carrier.py"
+lcsame='spec = importlib.util.spec_from_file_location("lc", sys.argv[-1]); lc = importlib.util.module_from_spec(spec); spec.loader.exec_module(lc)
+print(lc._note_lock_path(p) == rr._note_lock_path(p))'
+out=$(N="$TMP/ro.md" py "$lcsame" "$LC")
+ok "$out" "True" "lock: the landing carrier's note lock is the engine's (THREAD_NOTE_LOCK_DIR)"
+out=$(unset THREAD_NOTE_LOCK_DIR; export XDG_STATE_HOME="$TMP/xdg"; N="$TMP/ro.md" py "$lcsame" "$LC")
+ok "$out" "True" "lock: … and with only an absolute XDG_STATE_HOME"
+
 # ── leg: a save that fails is leg's own exit 5 (Refuse), never a traceback past its main ────────────────────
 N="$TMP/ro11.md"; mknote "$N"; chmod 444 "$N"
 out=$(pyleg '
