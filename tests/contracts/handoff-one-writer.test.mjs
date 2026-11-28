@@ -4,7 +4,8 @@
 // records the deletion as an amendment (its body stays as history, ADR 0015). The same task lets `next`
 // recommend compacting within *keep going* in Claude Code: at a phase boundary with a heavy context whose
 // history is worth keeping, one `/compact <focus>` line Lachy types, printed once before the turn ends,
-// never run by `next`, never a route, and never for a correction loop. Reads files only; a missing file or section is a
+// never run by `next`, never a route, and never for a correction loop; it is printed under the cue line
+// Chorus's Stage reads, so on the Stage the compact is sent for him (p48-6). Reads files only; a missing file or section is a
 // named assertion failure, never a crash at load.
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
@@ -125,6 +126,10 @@ test('next SKILL.md: keep going may carry a /compact line next never runs', () =
     'work resumes after Lachy compacts',
   ])
   assert.ok(!/carry on/i.test(step5), `${NEXT} step 5 still carries on after the compact line`)
+  // The line is printed in the form Chorus's reader sends for him (p48-6, chorus-p96-12 `typed_command`):
+  // the exact cue line, with nothing else on it, directly above a fence whose one line is the command.
+  assert.match(step5, /^[ \t]*Type this line yourself; I can't run it:\n[ \t]*```\n[ \t]*\/compact <focus>\n[ \t]*```\n/m,
+    `${NEXT} step 5 lost the Stage's cue form for the compact line`)
   // § Don't: never run the commands, never work on past the line, never offer compact as a route.
   const dont = lineOf(body, "- Don't run `/compact`")
   assertHas(dont, `${NEXT} § Don't compact bullet`, [
