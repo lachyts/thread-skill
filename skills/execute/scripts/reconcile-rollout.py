@@ -18023,7 +18023,8 @@ PRIMARY_REFRESH_PY = Path(__file__).resolve().parent.parent.parent / "_shared" /
 # The installed Primary refresh (ADR 0066 d4, p47-19): `primary-refresh.py install` writes its bundle into DEFAULT_BIN with
 # MARKER beside the copy (the copy that self-updates; a checkout's own copy can freeze, the 2026-11-07 incident) and the
 # launchd job into the plist of its DEFAULT_LABEL. Literal copies of primary-refresh.py's DEFAULT_BIN, COPY, MARKER and
-# install's default --plist; _installed_refresh_argv reads them.
+# install's default --plist, pinned to them by skills/execute/tests/reconcile-rollout-triggers.test.sh T12, which loads
+# both scripts; _installed_refresh_argv reads them.
 INSTALLED_REFRESH_BIN = "~/.local/state/thread/bin"
 INSTALLED_REFRESH_COPY = "primary-refresh.py"
 INSTALLED_REFRESH_MARKER = "primary-refresh.installed"

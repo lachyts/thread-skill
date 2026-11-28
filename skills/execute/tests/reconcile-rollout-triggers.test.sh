@@ -537,8 +537,8 @@ if [ "$(id -u)" -ne 0 ]; then
 fi
 
 # ---- T12: the installed copy (p47-19): with no --refresh-bin, fire runs install's bundle copy, with its launchd job's
-# own argv, while the marker stands and the job runs that copy; else its own copy. The rule as a table, in process; then
-# one fire on a fixture bundle under a temp HOME --------------------------------------------------------------------------
+# own argv, while the marker stands and the job runs that copy; else its own copy. The pin of its four literal copies to
+# primary-refresh.py's and the rule as a table, in process; then one fire on a fixture bundle under a temp HOME ----------
 scen installed; prj 1 MERGED
 H="$D/home"; BIN="$H/.local/state/thread/bin"; mkdir -p "$BIN" "$H/Library/LaunchAgents"
 python3 - "$SCRIPT" "$H" <<'PY' || fail=1
@@ -546,6 +546,17 @@ import importlib.util, os, plistlib, sys
 sys.dont_write_bytecode = True
 script, home = sys.argv[1], sys.argv[2]
 spec = importlib.util.spec_from_file_location("rr", script); rr = importlib.util.module_from_spec(spec); spec.loader.exec_module(rr)
+spec = importlib.util.spec_from_file_location("pr", rr.PRIMARY_REFRESH_PY); pr = importlib.util.module_from_spec(spec); spec.loader.exec_module(pr)
+bad = 0
+# The pin: the four literal copies equal primary-refresh.py's own, so a rename there fails here, never sends fire back
+# to the checkout's copy unseen.
+for name, got, want in (("INSTALLED_REFRESH_BIN", rr.INSTALLED_REFRESH_BIN, pr.DEFAULT_BIN),
+                        ("INSTALLED_REFRESH_COPY", rr.INSTALLED_REFRESH_COPY, pr.COPY),
+                        ("INSTALLED_REFRESH_MARKER", rr.INSTALLED_REFRESH_MARKER, pr.MARKER),
+                        ("INSTALLED_REFRESH_PLIST", rr.INSTALLED_REFRESH_PLIST,
+                         f"~/Library/LaunchAgents/{pr.DEFAULT_LABEL}.plist")):
+    print(("ok   - " if got == want else "FAIL - ") + f"{name} is primary-refresh.py's" + ("" if got == want else f": {got} != {want}"))
+    bad |= got != want
 os.environ["HOME"] = home
 bin_dir = os.path.join(home, ".local/state/thread/bin"); copy = os.path.join(bin_dir, "primary-refresh.py")
 marker = os.path.join(bin_dir, "primary-refresh.installed")
@@ -572,7 +583,6 @@ ROWS = [
     ("marker, a plist that is no dict", True, True, plistlib.dumps(["x"]), None, own),
     ("--refresh-bin wins", True, True, job_plist(job), "/stub", ["/stub", "run"]),
 ]
-bad = 0
 for name, has_marker, has_copy, data, refresh_bin, want in ROWS:
     put(marker, b"installed\n" if has_marker else None)
     put(copy, b"# copy\n" if has_copy else None)
