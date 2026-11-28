@@ -42,6 +42,8 @@
 //                the `## Approved gates` bullet and joins the round, and **A gate left** writes nothing, decides
 //                nothing, takes no wait line, and lists a typed answer under Held by his answer but no answer under
 //                Questions waiting; reshuffle R3 points at it;
+//   red-main     B6 answer 10 stops the fork on a non-null `stop`, and schedule § 2.6 stops the run on it at step 6's
+//                wait, before the note is written, under § 0's **Put back** (p47-18);
 //   wording      only B9's unit asks; no exemption phrase, no retired word; every outside § B<n> names the file.
 // One pure function, check(files), over { relPath: text }. Reads files only.
 import { test } from 'node:test'
@@ -183,6 +185,11 @@ function check(F) {
   need('answers', 'B6', b6, ['A fork asks nothing', 'Yes, without the question (ADR 0071)', '`timeout: 600000`', 'the fork routes nothing',
     "Step 2.6's baseline: captured as written", '`plan_approval: required`', "the prompt's `projectSlug`", 'because B8 owns the start',
     "its own read-only grading agents", 'there is no round and no `record`'])
+
+  // red-main
+  need('red-main', 'B6', b6, ['a non-null `stop` stops the fork before writing'])
+  need('red-main', 'schedule § 2.6', sec(F[SCHED], /^### 2\.6\. /), ['**`unnamed`**',
+    "stops the run at step 6's wait, before the note is written", "§ 0's **Put back**"])
 
   // write-back
   need('write-back', 'B7', b7, ["backlog-orient.py trigger --area <note> --write --reason <B2's reason> --record <path>",
@@ -380,6 +387,7 @@ const CONTROLS = [
   ['batches', [BACK, "urgent\n  members' forks go in batch 1", "urgent\n  members' forks go in batch 2"]],
   ['batches', [BACK, '**A batch with no root gets\n  no fork**', '**A batch with no root forks\n  anyway**']],
   ['answers', [BACK, "18. Step 4.7's rungs: none, with the hard tasks named.\n", '']],
+  ['red-main', [BACK, '; a non-null `stop` stops the fork before writing', '']],
   ['write-back', [BACK, '4. A second exit 4, or guard 3', '4. Each exit 4, or guard 3']],
   ['write-back', [SCRIPT, 'restamp = args.restamp', 'restamp = rec.front["last_orient_at"] is not None']],
   ['write-back', [BACK, '--write --restamp --reason <reason> --record <path>`.', '--write --reason <reason> --record <path>`.']],

@@ -54,24 +54,29 @@ rows = [  # (name, rc file text, log, the stop this script passed on, (status, r
      None, ("noverdict", 143, "stopped by signal 15")),
     ("no rc", None, V + "started\n", None, ("noverdict", None, "no rc: the verify did not finish")),
     ("an unreadable rc", "1x\n", V + RED + "== verifier rc 1\n", None, ("noverdict", "1x", "an unreadable rc '1x'")),
+    ("unnamed", "3\n", V + "boom\n== verifier rc 3\n", None, ("unnamed", 3, "")),
 ]
 bad = []
 for name, rc, log, stopped, want in rows:
     v = bc.verdict(rc, log, "master", "abcdef0123", "2026-11-18", stopped)
     got = (v["status"], v["rc"], v["failing"] or v["why"])
-    if got != want or (v["status"] != "red") != (v["block"] == "none"):
-        bad.append(f"{name}: {got} {v['block']!r}")
+    # p47-18: only a red no baseline can hold stops schedule; every other verdict carries a null stop.
+    stop_ok = (v["stop"] is None) if v["status"] != "unnamed" else (
+        "red at abcdef0 (rc 3)" in (v["stop"] or "") and "names no failing test" in v["stop"])
+    if got != want or (v["status"] != "red") != (v["block"] == "none") or not stop_ok:
+        bad.append(f"{name}: {got} {v['block']!r} {v['stop']!r}")
 print(bad or f"all {len(rows)} rows")
 PY
-)" "all 10 rows" "B0: the verdict reads verify's own lines: a row per branch the fixture cases never reach"
+)" "all 11 rows" "B0: the verdict reads verify's own lines: a row per branch the fixture cases never reach, and only unnamed stops"
 ok "$(bc <<'PY'
 n = bc.rr.FAILING_IDS_MAX
 log = "== verifier: x\n" + "".join(f"not ok {i} - t{i}\n" for i in range(1, n + 2)) + "== verifier rc 1\n"
 v = bc.verdict("1\n", log, "master", "abcdef0123", "2026-11-18")
 print(v["status"], len(v["failing"]) == n, v["truncated"], v["block"].count("\n") + 1 == n, v["line"][:94])
+print(v["stop"].startswith("stop: clean master has 50 or more reds at abcdef0"))
 PY
-)" "red True True True Baseline: 50 red on clean master at abcdef0 (cut at the parser's cap: more may be red): t1, t2" \
-  "B0: at the parser's cap the list is truncated, and the line says so"
+)" "red True True True Baseline: 50 red on clean master at abcdef0 (cut at the parser's cap: more may be red): t1, t2
+True" "B0: at the parser's cap the list is truncated, the line says so, and it stops schedule (p47-18)"
 
 # ---- B6: a stop before the verify is spawned ----
 ok "$(bc "$tmp" <<'PY'
@@ -143,6 +148,7 @@ ok "$(j block)" "- tests/a.test.sh — red on clean master at ${sha:0:7} before 
 ok "$(j block | sed -e 's/^- //' -e 's/ — .*//' | paste -sd, -)" "tests/a.test.sh,tests/b.test.sh" \
   "B1: … each line splits back to its test id, the form a task's verify ignores"
 ok "$(j line)" "Baseline: 2 red on clean master at ${sha:0:7}: tests/a.test.sh, tests/b.test.sh" "B1: … step 8's line names them"
+ok "$(j stop)" "null" "B1: … a named, uncut red is a baseline, never a stop"
 log=$(j log)
 has "$(cat "$log")" "== verify slot 1 of 1 after" "B1: … the run held one of the machine's verify slots"
 ok "$(ls "$tmp/repo/.claude/baseline" | grep -c '^tree-')" 0 "B1: … and its clean tree is removed"
@@ -154,6 +160,7 @@ cap
 sha=$(git --git-dir "$tmp/srv.git" rev-parse master)
 ok "$rc|$(j status)|$(j block)|$(j failing)" "0|green|none|[]" "B2: a green main records none"
 ok "$(j line)" "Baseline: none (clean master green at ${sha:0:7})" "B2: … and step 8's line says main is green"
+ok "$(j stop)" "null" "B2: … and no stop"
 ok "$([ -e "$tmp/repo/.claude/baseline/main-1.log" ] && echo kept || echo gone)|$([ -e "$log" ] && echo kept || echo gone)" \
   "gone|kept" "B2: … its capture pruned an earlier one's old log, and kept B1's"
 
@@ -162,10 +169,13 @@ main 'echo boom; exit 3'
 cap
 ok "$rc|$(j status)|$(j rc)|$(j block)" "0|unnamed|3|none" "B3: a red main naming no test records none"
 has "$(j line)" "red at" "B3: … and its line still says main is red"
+sha=$(git --git-dir "$tmp/srv.git" rev-parse master)
+has "$(j stop)" "red at ${sha:0:7} (rc 3)" "B3: … and it stops schedule, naming main's rc (p47-18)"
 main 'exit 0'
 cap --bootstrap 'exit 4'
 ok "$rc|$(j status)|$(j block)" "0|noverdict|none" "B3: a failed bootstrap is no verdict, none recorded"
 has "$(j line)" "not captured: env_bootstrap failed (rc 4)" "B3: … its line names why"
+ok "$(j stop)" "null" "B3: … and no stop: main's state is unknown"
 cap --no-fetch
 ok "$rc|$(j fetched)" "0|null" "B3: --no-fetch runs on the origin/master the repo holds"
 out=$(python3 "$BC" --repo "$tmp/repo" --default nope --verifier true --timeout 60 2>"$tmp/err"); rc=$?

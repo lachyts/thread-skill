@@ -175,7 +175,8 @@ orient.** paragraph cites this list. A `## Decided for you` bullet is an agent's
    note never words leaves as `unsigned` the same way, its `gate` question returned in `asks[]` and `index[]`.
 9. Step 2.5's verifier and merge gate: stated, never asked. With no verifier, the fork stops before writing.
 10. Step 2.6's baseline: captured as written (it asks nothing, and the fork waits for it inside its turn): its
-    `block`, or `none`, and its `line` in the summary.
+    `block`, or `none`, and its `line` in the summary; a non-null `stop` stops the fork before writing, and its line
+    (and `log:`) is the fork's stop line.
 11. Step 2.7's env bootstrap: CLAUDE.md detection only, else unset.
 12. Step 2.8's settings: as written. A non-zero exit stops the fork.
 13. Step 2.9's Inert paths: `drop` runs; a `proposed` entry is named and never recorded.

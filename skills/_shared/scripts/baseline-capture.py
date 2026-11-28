@@ -56,13 +56,19 @@ The run, in order:
        _failing_ids, the lead's own reader: pytest's FAILED/ERROR, unittest, TAP and node --test, jest, go, cargo):
        red. One block line per id, `- <id> — red on clean <B> at <sha7> before the first dispatch (<date>)`, so
        execute's `<test_id> — <reason>` form splits back to the id. At FAILING_IDS_MAX ids the list may be cut:
-       `truncated`, and the line says so.
+       `truncated`, and the line says so. A truncated red is also a `stop` (below): no baseline can hold main's reds.
      - Any other integer naming no test: unnamed. Block `none` (a baseline is test ids; a red the engine cannot
-       match by name is no baseline), and the line says main is red.
+       match by name is no baseline), the line says main is red, and it is a `stop` (below).
      No verdict is block `none`, `why` the cause.
+   The stop (p47-18). A red no baseline can hold, `unnamed` or a `truncated` red, would write a note whose every task's
+   verify is red with nothing to subtract, so its `stop` is the line schedule step 2.6 stops on: `stop: clean B is red
+   at <sha7> (rc N) and its output names no failing test, …` or `stop: clean B has <n> or more reds at <sha7>, past the
+   parser's cap, …`. Every other verdict's `stop` is null: a named, uncut red is the baseline, and no verdict leaves
+   main's state unknown. The stop is the one verdict schedule stops on; the exit stays 0.
 Output: one JSON line on stdout, {status: green | red | unnamed | noverdict, sha, default, fetched, rc, failing,
-truncated, why, block, line, log}: `block` the text for schedule's {{KNOWN_BASELINE_FAILURES}}, `line` step 8's
-`Baseline:` line, `sha` and `log` null when a stop came before them. Exit 0 for every verdict above (a capture is a fact, never a stop) but a stop's 128+n; 2 for a usage
+truncated, why, block, line, stop, log}: `block` the text for schedule's {{KNOWN_BASELINE_FAILURES}}, `line` step 8's
+`Baseline:` line, `stop` the stop line or null, `sha` and `log` null when a stop came before them. Exit 0 for every
+verdict above (a capture is a fact, never a stop: only its `stop` stops schedule) but a stop's 128+n; 2 for a usage
 error, a --repo that is no git work tree, no origin/B, or lead-integrate's own exit 2, with one `baseline-capture: …`
 line on stderr.
 """
@@ -169,8 +175,8 @@ def _verify_ends(log):
 
 def verdict(rc_text, log_text, branch, sha, day, stopped=None):
     """The capture's verdict from the verify's rc file text (None: no rc), its log text and the stop signal this script
-    passed on (None: none): {status, rc, failing, truncated, why, block, line}. Pure: the header's step 4, read from
-    lead-integrate verify's own log lines only (_verify_ends)."""
+    passed on (None: none): {status, rc, failing, truncated, why, block, line, stop}. Pure: the header's step 4, read
+    from lead-integrate verify's own log lines only (_verify_ends), and its stop (p47-18)."""
     short = (sha or "")[:7]
     out = {"rc": None, "failing": [], "truncated": False, "why": ""}
     rc = (rc_text or "").strip()
@@ -209,6 +215,13 @@ def verdict(rc_text, log_text, branch, sha, day, stopped=None):
             "green": f"Baseline: none (clean {branch} green at {short})",
             "unnamed": f"Baseline: none (clean {branch} red at {short}, rc {out['rc']}, but no failing test named)",
         }.get(out["status"], f"Baseline: none (not captured: {out['why']})")
+    out["stop"] = None
+    if out["status"] == "unnamed":
+        out["stop"] = (f"stop: clean {branch} is red at {short} (rc {out['rc']}) and its output names no failing test, "
+                       f"so no task's verify could pass; fix {branch}, then re-run")
+    elif out["status"] == "red" and out["truncated"]:
+        out["stop"] = (f"stop: clean {branch} has {len(out['failing'])} or more reds at {short}, past the parser's cap, "
+                       f"so no baseline can hold them and no task's verify could pass; fix {branch}, then re-run")
     return out
 
 
