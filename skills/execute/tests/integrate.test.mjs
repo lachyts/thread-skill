@@ -13,7 +13,7 @@ import { runTask, loadEngine, enginePath, VERIFY_SLOT } from '../../../tests/lib
 const T = loadEngine([
   'parseIntegrationMarker', 'REVISE_MARKER', 'INTEGRATION_PREFIX', 'ANCHOR_RECIPE', 'TRANSIENT_DIAGNOSIS',
   'resumeArgsError', 'integrationArgsError', 'isoMinutes', 'integratorPrompt', 'integrationReviewPrompt',
-  'reviserPrompt', 'coldEntryBlock', 'branchTreeSetup', 'integrationMergeStep', 'integrationJudgeCheck',
+  'reviserPrompt', 'coldEntryBlock', 'stepBackBlock', 'branchTreeSetup', 'integrationMergeStep', 'integrationJudgeCheck',
   'integrationVerify', 'markerHistory', 'GIT_ENV_SCRUB', 'ralphLoop', 'integrationMergeReads',
   'integrationBlockOf', 'INTEGRATE_RESULT', 'INTEGRATION_PRIOR_NOTE', 'INTEGRATION_CONFLICT_MARK', 'INTEGRATION_RED_MARK',
   'INTEGRATION_PREFLIGHTS', 'INTEGRATE_RESULT_SECURED', 'INTEGRATION_REVIEW', 'INTEGRATION_REVIEW_SECURED',
@@ -255,13 +255,17 @@ test("b4: the integrator prompt carries the landed PRs, the note's plan pointer,
 
 test('b4b: the step-back reviser and the integrator agree — the plan is reference, the brief the contract', () => {
   const P = 'PLAN P: rename foo to bar'
-  const resume = { stage: 'revise', prUrl: PR, branch: BR, worktreePath: WT, reviewHistory: HIST2, reviewRoundsUsed: 2, plan: P }
+  const resume = { stage: 'revise', prUrl: PR, branch: BR, worktreePath: WT, reviewHistory: HIST2, reviewRoundsUsed: 2 }
   const a = { rolloutSlug: 'r', repoPath: '/repo', verifier: 'make test', date: '2026-10-01', verifySlot: VERIFY_SLOT, task: mkTask({ resume }) }
-  const reviser = T.reviserPrompt(a.task, { prUrl: PR, branch: BR, worktreePath: WT }, HIST2, 3, a, P, { history: HIST2, roundsUsed: 2 })
+  const prev = { prUrl: PR, branch: BR, worktreePath: WT }
+  const seed = { history: HIST2, roundsUsed: 2 }
+  const reviser = T.reviserPrompt(a.task, prev, HIST2, 3, a, P, seed)
   const I = mkI()
   const integrator = T.integratorPrompt(mkTask(), mkArgs(I), I)
-  assert.ok(reviser.includes(P), 'the reviser renders the plan')
-  // p27-1: the integrator reads the plan from the note, never its prompt.
+  // p47-17: the seeded reviser reads the plan from the note, as the integrator does since p27-1; planText is ignored.
+  assert.equal(reviser, T.reviserPrompt(a.task, prev, HIST2, 3, a, '', seed), 'the seeded reviser ignores planText')
+  assert.ok(!reviser.includes(P) && reviser.includes(`the \`## Approved plan\` section of the task note (/vault/Tasks/${SLUG}.md)`),
+    "the seeded reviser points at the note's plan")
   assert.ok(!integrator.includes(P) && integrator.includes('`## Approved plan`'), "the integrator points at the note's plan")
   for (const p of [reviser, integrator]) {
     const flat = p.replace(/\s+/g, ' ')
@@ -478,7 +482,7 @@ test('d4: a task.resume built only from d1\'s diagnosis passes validation and di
   assert.ok(d1Diag, 'd1 ran')
   const parsed = T.parseIntegrationMarker(d1Diag)
   const resume = {
-    stage: 'revise', prUrl: PR, branch: BR, worktreePath: WT, plan: 'THE APPROVED PLAN',
+    stage: 'revise', prUrl: PR, branch: BR, worktreePath: WT, 
     reviewHistory: parsed.history, reviewRoundsUsed: parsed.history[parsed.history.length - 1].round,
   }
   const args = { rolloutSlug: 'r', repoPath: '/repo', verifier: 'make test', date: '2026-10-01', verifySlot: VERIFY_SLOT, task: mkTask({ resume }) }
@@ -1032,7 +1036,7 @@ test('rung: Integration runs on the Integration rung whatever rung the task reac
 
 // ---- seeded revise (task.resume) -----------------------------------------------------------------
 
-const mkResume = (over = {}) => ({ stage: 'revise', prUrl: PR, branch: BR, worktreePath: WT, reviewHistory: HIST2, reviewRoundsUsed: 2, plan: 'THE APPROVED PLAN', ...over })
+const mkResume = (over = {}) => ({ stage: 'revise', prUrl: PR, branch: BR, worktreePath: WT, reviewHistory: HIST2, reviewRoundsUsed: 2, ...over })
 const resumeArgs = (resume, taskOver = {}, over = {}) => ({ rolloutSlug: 'r', repoPath: '/repo', verifier: 'make test', date: '2026-10-01', verifySlot: VERIFY_SLOT, task: mkTask({ resume, ...taskOver }), ...over })
 const implOk = { verified: true, blocked: false, escalate: false, prUrl: PR, branch: BR, worktreePath: WT, blockerDiagnosis: '', summary: 'revised' }
 
@@ -1077,7 +1081,11 @@ test('S2: the seeded prompt re-enters the tree; the unseeded prompt is byte-unch
   assert.equal(T.reviserPrompt(a.task, prev, HIST2, 3, a, 'THE APPROVED PLAN', null), unseeded)
   const block = T.coldEntryBlock(a, a.task, HIST2)
   assert.ok(block.startsWith('\n\nCOLD ENTRY'))
-  assert.equal(seeded.replace(block, ''), unseeded)
+  // p47-17: past the COLD ENTRY block, the seeded prompt differs only in its step-back, which points at the note's plan.
+  const seededStep = T.stepBackBlock(HIST2, '', a.task.taskPath)
+  const unseededStep = T.stepBackBlock(HIST2, 'THE APPROVED PLAN')
+  assert.ok(seeded.includes(seededStep) && unseeded.includes(unseededStep) && seededStep !== unseededStep)
+  assert.equal(seeded.replace(block, '').replace(seededStep, ''), unseeded.replace(unseededStep, ''))
 })
 
 test('S3: no review round left → review-blocked with the full history and zero dispatches', async () => {
@@ -1104,7 +1112,7 @@ test('S5: bad resume args throw before any dispatch', async () => {
     [mkResume({ worktreePath: '/x' }), /worktreePath must be/], [mkResume({ prUrl: 'nope' }), /prUrl/],
     [mkResume({ reviewHistory: [], reviewRoundsUsed: 0 }), /must be non-empty/],
     [mkResume({ reviewHistory: [{ round: 2, feedback: ['a'] }, { round: 2, feedback: ['b'] }] }), /strictly ascending/],
-    [mkResume({ reviewRoundsUsed: 3 }), /must equal the history's last round/], [mkResume({ plan: undefined }), /plan must be a string/],
+    [mkResume({ reviewRoundsUsed: 3 }), /must equal the history's last round/],
     ['not an object', /must be one object/],
   ]
   for (const [resume, re] of bad) {
@@ -1115,6 +1123,22 @@ test('S5: bad resume args throw before any dispatch', async () => {
   }
   const ro = await run(resumeArgs(mkResume(), { scope: 'read-only' }))
   assert.match(String(ro.error && ro.error.message), /read-only/)
+})
+
+// p47-17: the resume args carry no plan; a stray one (an old lead habit, a hand-built Lost-call relaunch) is tolerated
+// and ignored, never rendered: refusing it would be an *Args refusal*, a Lead error the lead redoes.
+test('p47-17: a stray resume.plan is ignored and never rendered', async () => {
+  const STRAY = 'STRAY ' + 'y'.repeat(61000)
+  for (const plan of [STRAY, 42, null]) assert.equal(T.resumeArgsError(resumeArgs(mkResume({ plan }))), '', `plan ${JSON.stringify(plan).slice(0, 12)}`)
+  assert.equal(T.resumeArgsError(resumeArgs(mkResume())), '', 'no plan')
+  const r = await run(resumeArgs(mkResume({ plan: STRAY })), { [`revise:${SLUG} r3`]: implOk, [`review:${SLUG} r3`]: { verdict: 'approve', feedback: [] } })
+  clean(r)
+  for (const label of [`revise:${SLUG} r3`, `review:${SLUG} r3`]) {
+    const p = promptOf(r, label)
+    assert.ok(p.length > 0, `${label}: dispatched`)
+    assert.ok(!p.includes('STRAY') && !p.includes('y'.repeat(100)), `${label}: the stray plan is never rendered`)
+  }
+  assert.ok(promptOf(r, `revise:${SLUG} r3`).includes('`## Approved plan`'), "the step-back points at the note's plan instead")
 })
 
 test('S6: a seeded call that stops resumes at revise — the marker first, a revise stopped: line, the history; a gate is gate-pending', async () => {
@@ -1208,7 +1232,7 @@ test('h1: a live own-run history with an empty round passes verbatim into args.i
 
 test('h2: a seeded revise whose live history ends in an empty round passes and revises the latest real round', async () => {
   const hist = [...HIST2, { round: 3, feedback: [] }]
-  const resume = { stage: 'revise', prUrl: PR, branch: BR, worktreePath: WT, reviewHistory: hist, reviewRoundsUsed: 3, plan: 'P' }
+  const resume = { stage: 'revise', prUrl: PR, branch: BR, worktreePath: WT, reviewHistory: hist, reviewRoundsUsed: 3 }
   const args = { rolloutSlug: 'r', repoPath: '/repo', verifier: 'make test', date: '2026-10-01', verifySlot: VERIFY_SLOT, task: mkTask({ resume, maxReviewRounds: 5 }) }
   assert.equal(T.resumeArgsError(args), '')
   const r = await run(args, {
@@ -1239,7 +1263,7 @@ test('h3: a review-blocked run (`Round N:` from its first line) parses whole, fo
   const p = T.parseIntegrationMarker(run)
   assert.equal(p.stage, 'own')
   assert.deepEqual(JSON.parse(JSON.stringify(p.history)), [{ round: 1, feedback: ['own fix'] }, { round: 2, feedback: ['keep their rename', 'restore b.js'] }])
-  const resume = { stage: 'revise', prUrl: PR, branch: BR, worktreePath: WT, reviewHistory: p.history, reviewRoundsUsed: 2, plan: '' }
+  const resume = { stage: 'revise', prUrl: PR, branch: BR, worktreePath: WT, reviewHistory: p.history, reviewRoundsUsed: 2 }
   assert.equal(T.resumeArgsError({ rolloutSlug: 'r', repoPath: '/repo', task: mkTask({ resume }) }), '')
 })
 

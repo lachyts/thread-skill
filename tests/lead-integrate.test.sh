@@ -15,7 +15,7 @@
 #   revise-stopped rows   C14 a rejection frees the lane while another integrates   C15 the verify line under bash
 #   and zsh -f ($, $(…), backticks, \ and ' single-quoted)   C16 stamp, usage, an unreachable origin   C17 timeouts, signals,
 #   the bootstrap, the race tree   C18 no relaunch loop   C19 an Integration set-aside re-enters   C20 the last
-#   task rejected   C21 plan, the approved plan for the seeded revise   C22 inputs --row, the integrate call's record
+#   task rejected   C21 plan, the note's approved plan, a read-only readback   C22 inputs --row, the integrate call's record
 #   checked against the note and its fallback prUrl a PR URL the engine takes, a bare #N built (p17-1)   C23 a
 #   signal while a step starts, and the step's and verify's own signal mask (p22-2). C10 is the landed list with
 #   a commit pushed without a PR (`unlisted`), and C11 also pins inputs --row's ports of historyError,
@@ -60,8 +60,8 @@
 #   C66–C67 (p55-2, ADR 0085 d7) one command builds a launch's whole args: C66 `call` prints the integrate call's whole
 #   args after an own run merged main (headSha is ANCHOR_RECIPE's anchor, never the PR head), the engine dispatches it
 #   as printed, a trailing / on --repo, a record with no `default` (origin answers, or exit 2); C67 `call --revise`
-#   prints a seeded revise's whole args (task.resume from inputs and the note's plan, the note's arms and unreachable
-#   stamps, touched, unreachable_paths) and the engine takes it. What needs no real prepare, origin or engine (the
+#   prints a seeded revise's whole args (task.resume from inputs, no plan however big the note's (p47-17), the note's
+#   arms and unreachable stamps, touched, unreachable_paths) and the engine takes it. What needs no real prepare, origin or engine (the
 #   launch args' fields, the baseline block, round budgets by level, the other exit 2s, prUrlError, --revise's own
 #   stops) is skills/execute/tests/lead-integrate-call.test.sh's, in the Fast tier.
 #   The Run record (p29-10, ADR 0051): S1–S8 verify --rollout's suite lines (green, red, timeout, race, completion,
@@ -739,7 +739,7 @@ ok "$(j "$I" '[d["markerStage"], d["markerReason"], d["history"]]')" "$(j "$EP" 
 ok "$(j "$I" '[d["source"], d["lastRound"], d["reviewRoundsUsed"], d["readyAt"], d["rung"], d["resumeAt"]]')" \
   '["blocker",2,2,"2026-10-02T11:00+00:00",{"startRung":"","rung":"opus-xhigh","climbs":[]},"revise"]' "C12: source, rounds, readyAt, the rung record from the note's rung:, resumeAt revise"
 ok "$(j "$I" '[k for k in ("model", "tierCapped", "tierCappedAt") if k in d]')" '[]' "C12: inputs carries no tier keys"
-ok "$(j "$I" '"plan" in d')" false "C12: inputs carries no plan key (lead-integrate.py plan reads it, at the seeded revise only)"
+ok "$(j "$I" '"plan" in d')" false "C12: inputs carries no plan key (lead-integrate.py plan reads it; no launch takes it, p47-17)"
 ok "$(j "$I" 'd["lastIntegration"]["outcome"]')|$(j "$I" 'd["lastIntegration"]["path"]')" "rejected|judge-only" "C12: lastIntegration is the log's last line, as fields"
 # the integrate call's rung fallback (SKILL.md § 4.5 step 3): inputs' rung record passes the engine's args check
 # as it is, from a note with a rung: and from one with only stale tier stamps (the neutral record); a raw rung:
@@ -868,18 +868,18 @@ I=$(inp proj-a --max-review-rounds 3)
 ok "$(j "$I" 'd["autoRevise"]')" true "C14: inputs → autoRevise true"
 setkey "$V/proj-a.md" status in_progress; setkey "$V/proj-a.md" owner execute-c14
 python3 "$RR" mark-started --tasks proj-a --tasks-dir "$V" >/dev/null
-# resume.plan is `lead-integrate.py plan`'s plan (p14-2): the note's "## Approved plan", unquoted
+# `lead-integrate.py plan` reads the note's "## Approved plan", unquoted (p14-2); the resume carries none (p47-17)
 printf '\n## Approved plan\n\nThe last approved plan, kept as a record for Integration.\n\n> C14 PLAN\n> - step one\n' >> "$V/proj-a.md"
 PL=$(python3 "$LI" plan --note "$V/proj-a.md")
 ok "$(j "$PL" 'd["plan"]')" "$(printf 'C14 PLAN\n- step one')" "C14: lead-integrate.py plan reads the note's approved plan"
 RES=$(node --input-type=module -e "
   import { loadEngine } from './tests/lib/engine.mjs'
   const T = loadEngine(['resumeArgsError'])
-  const [i, pl] = [JSON.parse(process.argv[1]), JSON.parse(process.argv[2])]
-  const resume = { stage: 'revise', prUrl: i.pr, branch: i.branch, worktreePath: '/repo/.claude/worktrees/proj-a', reviewHistory: i.history, reviewRoundsUsed: i.lastRound, plan: pl.plan }
-  process.stdout.write(JSON.stringify([T.resumeArgsError({ repoPath: '/repo', task: { slug: 'proj-a', scope: 'cross-cutting', resume } }), resume.plan]))
-" "$I" "$PL")
-ok "$RES" '["","C14 PLAN\n- step one"]' "C14: the seeded revise's task.resume, built from inputs and plan, passes resumeArgsError"
+  const i = JSON.parse(process.argv[1])
+  const resume = { stage: 'revise', prUrl: i.pr, branch: i.branch, worktreePath: '/repo/.claude/worktrees/proj-a', reviewHistory: i.history, reviewRoundsUsed: i.lastRound }
+  process.stdout.write(JSON.stringify([T.resumeArgsError({ repoPath: '/repo', task: { slug: 'proj-a', scope: 'cross-cutting', resume } })]))
+" "$I")
+ok "$RES" '[""]' "C14: the seeded revise's task.resume, built from inputs with no plan, passes resumeArgsError"
 python3 "$RR" mark-integrating --tasks proj-b --tasks-dir "$V" >/dev/null
 NX=$(nxt proj-a)
 ok "$(j "$NX" '[d["running"], d["integrating"], d["slotsInUse"], d["start"]]')" '[["proj-a"],["proj-b"],1,["proj-c"]]' "C14: A revises in a slot while B integrates; C starts"
@@ -1004,7 +1004,7 @@ print(json.dumps({"rolloutSlug": "ro", "repoPath": "/repo", "verifier": "true", 
   "verifySlot": json.loads(os.environ["VERIFY_SLOT_JSON"]),
   "task": {"slug": "proj-a", "taskPath": "", "scope": "cross-cutting", "planGate": False, "maxIterations": 3, "maxReviewRounds": 3,
            "maxPlanRounds": 3, "rung": "opus-xhigh", "resume": {"stage": "revise", "prUrl": sys.argv[2], "branch": i["branch"],
-           "worktreePath": "/repo/.claude/worktrees/proj-a", "reviewHistory": i["history"], "reviewRoundsUsed": i["lastRound"], "plan": ""}}}))
+           "worktreePath": "/repo/.claude/worktrees/proj-a", "reviewHistory": i["history"], "reviewRoundsUsed": i["lastRound"]}}}))
 PY
 )
 STUB=$(printf '{"revise:proj-a r3":{"verified":false,"blocked":true,"escalate":false,"prUrl":"%s","branch":"audit-fix/a","worktreePath":"/repo/.claude/worktrees/proj-a","blockerDiagnosis":"red after 3 iterations","summary":""}}' "$(p1pr proj-a)")
@@ -1056,7 +1056,7 @@ python3 "$RR" mark-started --tasks proj-a --tasks-dir "$V" >/dev/null
 NX=$(nxt proj-a)
 ok "$(j "$NX" '[d["halt"], d["running"], d["slotsInUse"]]')" '[null,["proj-a"],1]' "C20: after the seeded revise launches, next --running A: no halt, A running, 1 slot"
 
-# ======== C21: plan — the approved plan for the seeded revise (p14-2) ======================================
+# ======== C21: plan — the note's approved plan, a read-only readback (p14-2) =================================
 nfx c21 2
 ntask proj-a in_progress 'owner: execute-c21'
 PL=$(python3 "$LI" plan --note "$V/proj-a.md")
@@ -2862,19 +2862,27 @@ git -C "$R" remote set-url origin "$MT_SRV"
 
 # ======== C67 (p55-2, ADR 0085 d7): call --revise builds a seeded revise's whole args ================================
 # The seeded revise had the same gap: the lead built task.resume from inputs and plan by hand. `call --revise` prints the
-# whole args from the note (inputs' read and its ## Approved plan) with no prepare record. ifx's GitHub origin lets the
-# repo table of a rollouts.toml name this repo.
+# whole args from the note (inputs' read) with no prepare record, and no plan however big the note's (p47-17: the
+# seeded reviser reads the note's ## Approved plan itself). ifx's GitHub origin lets the repo table of a rollouts.toml
+# name this repo.
 ifx c67
 setkey "$V/$SLUG.md" pr "$(p1pr "$SLUG")"
 rec "$(erow "$(p1args "$SLUG" 3)" "$(judge_changes "$SLUG" 2)")"
-printf '\n## Approved plan\n\nThe last approved plan, kept as a record for Integration.\n\n> C67 PLAN\n> - step one\n' >> "$V/$SLUG.md"
+python3 - "$V/$SLUG.md" <<'PY'
+import sys
+steps = "\n".join("> - step %d: %s" % (i, "x" * 40) for i in range(1500))
+with open(sys.argv[1], "a") as f:
+    f.write("\n## Approved plan\n\nThe last approved plan, kept as a record for Integration.\n\n> C67 PLAN\n" + steps + "\n")
+PY
+ok "$(j "$(python3 "$LI" plan --note "$V/$SLUG.md")" 'len(d["plan"]) > 60000')" true "C67: the note holds a plan over 60k characters"
 I=$(inp "$SLUG" --repo "$R")
 ok "$(j "$I" '[d["resumeAt"], d["lastRound"] > 0]')" '["revise",true]' "C67: a rejected Integration → resumeAt revise"
 call --revise
 A=$(j "$CJ" 'd["args"]')
 ok "$crc|$(j "$A" 'd["task"]["resume"]')" \
-  "0|$(j "$I" '{"stage": "revise", "prUrl": d["prUrl"], "branch": d["branch"], "worktreePath": "'"$WT"'", "reviewHistory": d["history"], "reviewRoundsUsed": d["lastRound"], "plan": "C67 PLAN\n- step one"}')" \
-  "C67: task.resume is inputs' PR, branch and history, the computed tree, the last round and the note's plan"
+  "0|$(j "$I" '{"stage": "revise", "prUrl": d["prUrl"], "branch": d["branch"], "worktreePath": "'"$WT"'", "reviewHistory": d["history"], "reviewRoundsUsed": d["lastRound"]}')" \
+  "C67: task.resume is inputs' PR, branch and history, the computed tree and the last round"
+ok "$(j "$A" '["plan" in d["task"]["resume"], len(json.dumps(d)) < 10000]')" '[false,true]' "C67: no plan in task.resume, and the args stay small beside the note's 60k plan"
 ok "$(j "$A" '["mode" in d, d["defaultBranch"], [k for k in ("touched", "unreachablePaths") if k in d], [k for k in ("arms", "unreachable") if k in d["task"]]]')" \
   '[false,"master",[],[]]' "C67: no mode; defaultBranch from origin; no touched, unreachablePaths, arms or unreachable without their stamps"
 ok "$(node --input-type=module -e "

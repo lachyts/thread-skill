@@ -102,9 +102,9 @@ Subcommands:
       when empty), unreachablePaths (rollout-settings.py resolve()'s `unreachable_paths` for the Project root, omitted
       when []), task.arms (the note's `arms:` when it parses), task.unreachable (true only when the note stamps
       `unreachable: true`, never false or null) and task.resume = {stage: revise, prUrl, branch (inputs'), worktreePath
-      (worktree_dir(R, S)), reviewHistory (inputs' history), reviewRoundsUsed (its last round), plan (the note's
-      `## Approved plan`, reconcile-rollout.py approved_plan, the reader `plan` prints)}; no mode. The note must read
-      `resumeAt: revise` with a history the engine's historyError takes.
+      (worktree_dir(R, S)), reviewHistory (inputs' history), reviewRoundsUsed (its last round)}; no mode, and no plan
+      (p47-17): the seeded reviser reads the note's `## Approved plan` itself, as the integrator does, through the
+      args' task.taskPath. The note must read `resumeAt: revise` with a history the engine's historyError takes.
       The launch args, both forms, are read from disk only (_launch_args): rolloutSlug (the rollout note beside N that its
       `rollout:` names), repoPath (R, which must be that note's `Project root:` by realpath), defaultBranch (the prepare
       record's `default`, else default-branch.sh asked of origin, always so for --revise; omitted when `main`), verifier
@@ -401,13 +401,11 @@ Subcommands:
       read against (default: now).
 
   plan --note N
-      The task's approved plan, for the one launch that passes it (execute § 4.5 step 1.2's seeded revise,
-      as `resume.plan`): {slug, plan}, where plan is the note's `## Approved plan` quote unquoted
-      (reconcile-rollout.py approved_plan), or "" when the note has none (its last own call was not
-      plan-gated, or it predates p14-2). `call --revise` reads the plan through the same reader into the
-      seeded revise's task.resume.plan, so the lead copies none. Step 3's integrate call passes no plan: its
-      integrator reads the same `## Approved plan` from the note itself (p27-1). Kept out of `inputs`, which
-      every status and repair read prints. Read-only.
+      The note's approved plan as reconcile wrote it, read-only: {slug, plan}, where plan is the note's
+      `## Approved plan` quote unquoted (reconcile-rollout.py approved_plan), or "" when the note has none (its
+      last own call was not plan-gated, or it predates p14-2). No launch passes it since p47-17: the seeded
+      reviser (execute § 4.5 step 1.2) and the integrator (step 3, p27-1) read the section from the note. Kept
+      out of `inputs`, which every status and repair read prints.
 
   set-aside --note N (--kind integration|revise-stopped|own | --repo R --merge-task F)     (--kind: the reason on stdin)
       Exactly one mode: --kind with the reason on stdin (every lead-written set-aside but merge-task's), or --repo and
@@ -3032,7 +3030,9 @@ def cmd_call(args):
 
 def _call_revise(args):
     """`call --revise`: a seeded revise's whole args (execute § 4.5 step 1.2), with no prepare record: the launch args with
-    revise's own keys and task.resume, built from `inputs`' read of the note and the note's approved plan."""
+    revise's own keys and task.resume, built from `inputs`' read of the note. task.resume carries no plan (p47-17): the
+    note's approved plan as reconcile wrote it is read-only here; the seeded reviser and the integrator read the
+    section from the note (task.taskPath), so a plan of any size never enters the args."""
     repo = _call_repo(args.repo)
     path, note = _load_note(args.note)
     if path.stem != args.slug:
@@ -3050,7 +3050,7 @@ def _call_revise(args):
     launch = _launch_args(repo, args.slug, path, note, _default_branch(repo), revise=True)
     launch["task"]["resume"] = {"stage": "revise", "prUrl": inp["prUrl"], "branch": inp["branch"],
                                 "worktreePath": worktree_dir(repo, args.slug), "reviewHistory": inp["history"],
-                                "reviewRoundsUsed": inp["lastRound"], "plan": rr.approved_plan(note)}
+                                "reviewRoundsUsed": inp["lastRound"]}
     out["args"] = launch
     return out
 
@@ -4115,7 +4115,8 @@ def main(argv=None):
     cl.add_argument("--after", default=None, choices=["shared-green", "red", "push-refused"],
                     help="the verify or skip route's end that launches the call (none on the trouble route)")
 
-    pl = sub.add_parser("plan", help="the task note's approved plan, for a seeded revise's resume.plan")
+    pl = sub.add_parser("plan", help="the note's approved plan as reconcile wrote it, read-only; no launch passes "
+                        "it since p47-17: the seeded reviser and the integrator read the section from the note")
     pl.add_argument("--note", required=True)
 
     sa = sub.add_parser("set-aside", help="the lead's own set-aside row for reconcile --result -: --kind with the reason "

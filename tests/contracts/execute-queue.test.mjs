@@ -125,8 +125,8 @@ const CALL_ARGS = [
   { at: 'st3', must: "`call` prints `args: null` beside a non-empty `prUrlError` or `budgetError`; with both, the row's reason is `prUrlError`.", gone: [] },
   { at: 's12', must: "a launch runs `python3 ${CLAUDE_PLUGIN_ROOT}/skills/execute/scripts/lead-integrate.py call --revise --repo <repoPath> --slug <slug> --note <task note>`: its `args` object, verbatim and whole, is the Workflow call's args",
     gone: ["§ 4's task object plus"] },
-  { at: 's12', must: "`call --revise`'s `args`: § 4's args and task object plus `task.resume: {stage: 'revise', prUrl, branch, worktreePath, reviewHistory, reviewRoundsUsed, plan}`",
-    gone: ['prUrl: <inputs.', '<plan.plan>'] },
+  { at: 's12', must: "`call --revise`'s `args`: § 4's args and task object plus `task.resume: {stage: 'revise', prUrl, branch, worktreePath, reviewHistory, reviewRoundsUsed}`",
+    gone: ['prUrl: <inputs.', '<plan.plan>', 'reviewRoundsUsed, plan}'] },
   { at: 's12', must: "A non-empty `budgetError` launches nothing: the lead's own *Set aside* row (`--kind revise-stopped`) with `budgetError` as the reason, and the loop goes on.", gone: [] },
   { at: 's13', must: "For a task's own call (a start, or a restart's own call) mark-started's `progress:` line becomes the args `progress`",
     gone: ["a restart's seeded revise or own call) mark-started's"] },
@@ -563,25 +563,21 @@ function checkExecute({ skill, hooksJson, exists, template, driver, away }) {
     }
   }
 
-  // approved-plan (p14-2, L2; p27-1; p55-2): the seeded revise (step 1.2) takes the approved plan through the reader
-  // `lead-integrate.py plan` prints, which `call --revise` runs at that launch only (Restart routing's revise reuses step
-  // 1.2's), passed verbatim. The integrate
-  // call (step 3) carries no `plan`: its integrator reads the note's `## Approved plan` itself (p27-1), so § 4.5 names
-  // `lead-integrate.py plan` once. No empty-plan literal is left; § 6 lists the row's `plan` (then p21-3's
-  // `reviewVerdicts`, p29-9's `flakes` and p52-1's `unreachable`, the row's last key), reconcile's three outcomes and
-  // who reads the section back.
+  // approved-plan (p14-2, L2; p27-1; p55-2; p47-17): neither launch carries the approved plan. The seeded revise (step
+  // 1.2) carries no `plan`: its reviser reads the note's `## Approved plan` itself (p47-17), as the integrate call's
+  // (step 3) integrator does (p27-1), so § 4.5 names `lead-integrate.py plan` nowhere. No empty-plan literal is left;
+  // § 6 lists the row's `plan` (then p21-3's `reviewVerdicts`, p29-9's `flakes` and p52-1's `unreachable`, the row's
+  // last key), reconcile's three outcomes and who reads the section back.
   const planHits = (section(skill, S45) ?? '').split('lead-integrate.py plan').length - 1
   const s6 = S(skill, S6)
-  const VERBATIM = 'passed verbatim as the same JSON string, never retyped, summarised or truncated'
   if (!s2sub || !s2sub.text.includes("then the Workflow call with `call --revise`'s `args`") ||
-    !s2sub.text.includes("where `plan` is the note's `## Approved plan`, read by the reader `lead-integrate.py plan` prints") ||
-    !s2sub.text.includes(VERBATIM) ||
+    !s2sub.text.includes("It carries no `plan` (p47-17): the reviser reads the task note's `## Approved plan` itself") ||
     !st3.includes('trouble, landed, reviewHistory') || st3.includes('landed, plan') ||
     !st3.includes("It carries no `plan` (p27-1): the integrator reads the task note's `## Approved plan` itself") ||
-    planHits !== 1 || /plan: ''|plan: ""|`plan` is `""`/.test(s45) ||
+    planHits !== 0 || /plan: ''|plan: ""|`plan` is `""`/.test(s45) ||
     !s6.includes('gatedInputs, plan, reviewVerdicts, flakes, unreachable }] }') || !s6.includes('upserts it, quoted, under `## Approved plan`') ||
     !s6.includes('`""` removes that section') || !s6.includes('`null` or absent leaves it') ||
-    !s6.includes("`lead-integrate.py call --revise` reads it back for §4.5 step 1.2's seeded revise")) {
+    !s6.includes('the seeded reviser (§4.5 step 1.2) and the integrator (§4.5 step 3) read the section from the note themselves; no launch carries it')) {
     fails.push('approved-plan')
   }
 
@@ -1455,7 +1451,7 @@ test('control: § 7 without the verify_timeout halt fails verify-timeout', () =>
 
 // approved-plan (p14-2)
 test("control: step 1.2 back on plan: '' fails approved-plan", () => {
-  only(sk("where `plan` is the note's `## Approved plan`, read by the reader `lead-integrate.py plan` prints", 'where `plan` is `""`'),
+  only(sk("It carries no `plan` (p47-17): the reviser reads the task note's `## Approved plan` itself", 'Its `plan` is `""`'),
     'approved-plan', "plan ''")
 })
 
@@ -1463,9 +1459,13 @@ test('control: step 3 passing plan again fails approved-plan', () => {
   only(sk('trouble, landed, reviewHistory', 'trouble, landed, plan, reviewHistory'), 'approved-plan', 'step 3 plan')
 })
 
-test('control: step 1.2 without verbatim fails approved-plan', () => {
-  only(sk("read by the reader `lead-integrate.py plan` prints, passed verbatim as the same JSON string, never retyped, summarised or truncated.",
-    'read by the reader `lead-integrate.py plan` prints.'), 'approved-plan', 'no verbatim')
+test('control: step 1.2 without the note pointer fails approved-plan', () => {
+  only(sk("the reviser reads the task note's `## Approved plan` itself", 'the reviser works from the brief alone'), 'approved-plan', 'no step 1.2 pointer')
+})
+
+test('control: step 1.2 reading lead-integrate.py plan again fails approved-plan', () => {
+  only(sk('so a plan of any size never enters the call.', 'so the lead runs `lead-integrate.py plan --note <task note>` and copies no plan.'),
+    'approved-plan', 'step 1.2 read')
 })
 
 test('control: step 3 without the note pointer fails approved-plan', () => {
@@ -1477,12 +1477,14 @@ test('control: step 3 re-reading lead-integrate.py plan fails approved-plan', ()
     'approved-plan', 'step 3 read')
 })
 
-test('control: a second lead-integrate.py plan read in Restart routing fails approved-plan', () => {
-  only(sk("- else the task's own call.", "- else `lead-integrate.py plan --note <task note>`, then the task's own call."), 'approved-plan', 'second read')
+test('control: a lead-integrate.py plan read in Restart routing fails approved-plan', () => {
+  only(sk("- else the task's own call.", "- else `lead-integrate.py plan --note <task note>`, then the task's own call."), 'approved-plan', 'restart read')
 })
 
-test('control: § 6 back on steps 1.2 and 3 fails approved-plan', () => {
-  only(sk("for §4.5 step 1.2's seeded revise", 'for §4.5 steps 1.2 and 3'), 'approved-plan', '§ 6 steps 1.2 and 3')
+test('control: § 6 back on call --revise reading the plan fails approved-plan', () => {
+  only(sk('the seeded reviser (§4.5 step 1.2) and the integrator (§4.5 step 3) read the section from the note themselves; no launch carries it',
+    "`lead-integrate.py call --revise` reads it back for §4.5 step 1.2's seeded revise; the integrator reads the section from the note itself (§4.5 step 3)"),
+    'approved-plan', '§ 6 call --revise')
 })
 
 test("control: § 6 without the '' removal fails approved-plan", () => {
@@ -1865,7 +1867,7 @@ test('control: each CALL_ARGS sentence restored to its old text, or removed, fai
     [" A task-level round-budget stamp that is not an integer >= 1 is that task's alone (ADR 0048), so it is no exit 2: `call` exits 0 with a non-empty `budgetError`, and the lead writes its own *Set aside* row at Integration (`--kind integration`) with `budgetError` as the reason; the loop goes on and the task's `humanFix` reads H12.", ''],
     [" `call` prints `args: null` beside a non-empty `prUrlError` or `budgetError`; with both, the row's reason is `prUrlError`.", ''],
     [" Right after § 3's config, and before § 4's check, a launch runs `python3 ${CLAUDE_PLUGIN_ROOT}/skills/execute/scripts/lead-integrate.py call --revise --repo <repoPath> --slug <slug> --note <task note>`: its `args` object, verbatim and whole, is the Workflow call's args (ADR 0085 d7), so the lead builds, retypes, trims and adds to none of it.", ''],
-    ["`task.resume: {stage: 'revise', prUrl, branch, worktreePath, reviewHistory, reviewRoundsUsed, plan}`", "`resume: {stage: 'revise', prUrl: <inputs.prUrl>, branch: <inputs.branch>, plan}`"],
+    ["`task.resume: {stage: 'revise', prUrl, branch, worktreePath, reviewHistory, reviewRoundsUsed}`", "`task.resume: {stage: 'revise', prUrl, branch, worktreePath, reviewHistory, reviewRoundsUsed, plan}`"],
     [" A non-empty `budgetError` launches nothing: the lead's own *Set aside* row (`--kind revise-stopped`) with `budgetError` as the reason, and the loop goes on.", ''],
     ["For a task's own call (a start, or a restart's own call) mark-started's", "For a fresh call (a start, or a restart's seeded revise or own call) mark-started's"],
     [" A restart's seeded revise takes step 1.2's `call --revise` args whole (run once routing has chosen it, before the check) and passes none of the three lines.", ''],

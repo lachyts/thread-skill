@@ -177,10 +177,11 @@ export const meta = {
 //                                    //   SIGNED_GATES_RESUME).
 //       resume          : object,    // optional (p12-6); the SEEDED REVISE after an Integration rejection:
 //                                    //   { stage: 'revise', prUrl, branch, worktreePath, reviewHistory,
-//                                    //   reviewRoundsUsed, plan }. plan is the approved plan:
-//                                    //   `lead-integrate.py plan`'s `plan` (the note's "## Approved plan");
-//                                    //   '' when the last own call was not plan-gated; reference for the
-//                                    //   reviser, never the contract. Plan and implement are skipped; the
+//                                    //   reviewRoundsUsed }. No plan (p47-17): the reviser reads the task
+//                                    //   note's "## Approved plan" itself (task.taskPath), as the integrator
+//                                    //   does since p27-1. A stray `plan` is tolerated and ignored, never
+//                                    //   rendered (refusing it would be an Args refusal, a Lead error).
+//                                    //   Plan and implement are skipped; the
 //                                    //   review loop starts at round reviewRoundsUsed + 1 with one seeded
 //                                    //   `revise:<slug> r<R+1>` (COLD ENTRY: it re-enters the tree with
 //                                    //   branchTreeSetup, fast-forwards it to origin/<branch> and writes no
@@ -1643,8 +1644,23 @@ const STEP_BACK_AFTER = 2
 // licence then runs against the task brief alone). The brief stays the contract; the plan is reference,
 // not law — deviations must be DECLARED so the reviewer (who sees the same history) judges them open-eyed.
 // p46-5 (G-owner): the licence to restructure stays inside the task's scope (TASK_SCOPE, rendered above it).
-function stepBackBlock(priorFeedback, planText) {
+// notePath (p47-17): null (the default) renders the bytes above; a string (the seeded reviser's task note,
+// '' when the task has none) renders the pointer variant instead: the reviser reads the note's
+// "## Approved plan" itself, as the integrator does (p27-1), and planText is ignored.
+function stepBackBlock(priorFeedback, planText, notePath = null) {
   if (!priorFeedback || priorFeedback.length < STEP_BACK_AFTER) return ''
+  if (notePath !== null) {
+    return `
+
+STEP-BACK ROUND: ${priorFeedback.length} review rounds have not converged — stop patching, step back.
+Re-read the task brief and the original approved plan: the \`## Approved plan\` section of the task note${notePath ? ` (${notePath})` : ''},
+the \`> \` quote under its lead-in, even though your prompt carries no plan. No such section: the task's last own call
+was not plan-gated, and the licence runs against the brief alone. You are LICENSED to
+restructure the approach — including deviating from the approved plan — where the
+accumulated feedback demands it, inside the task's scope (the Scope rule above), rather than only applying this round's bullets. The brief remains your
+contract; the plan is reference, not law. State every deviation from the plan
+explicitly in the PR body and your summary so the reviewer judges it with eyes open.`
+  }
   const plan = planText ? `
 
 The ORIGINAL APPROVED PLAN, for reference:
@@ -2007,7 +2023,10 @@ ${ROUTINE_STEPS}${reviewHistoryBlock(priorFeedback)}${baselineManifest(a)}${NEED
 // committed on the branch; "fix B, regress A" is the failure this guards). planText: original approved
 // plan for the step-back round ('' otherwise). seeded (p12-6): set only on a `task.resume` revise call
 // (its own Workflow call after an Integration rejection) — it adds the COLD ENTRY block after the PR:
-// line; unset, the bytes are the pre-p12-6 reviser's (pinned in prompt-invariants).
+// line; unset, the bytes are the pre-p12-6 reviser's (pinned in prompt-invariants). A seeded reviser never
+// renders a plan (p47-17): planText is ignored and its step-back points at the task note's
+// "## Approved plan" (task.taskPath) instead; that holds for the later revises of a seeded call's judge
+// loop too (they are seeded as well).
 function reviserPrompt(task, prevImpl, priorFeedback, round, a, planText, seeded) {
   const latest = priorFeedback[priorFeedback.length - 1]
   const earlier = priorFeedback.slice(0, -1)
@@ -2040,7 +2059,7 @@ ${ROUTINE_STEPS}
 ${PR_STEPS_UPDATE}
 
 Review feedback — ROUND ${latest.round} (your work order; apply every bullet, verbatim below):
-${latest.feedback.map((f) => '- ' + f).join('\n')}${guard}${stepBackBlock(priorFeedback, planText)}
+${latest.feedback.map((f) => '- ' + f).join('\n')}${guard}${stepBackBlock(priorFeedback, seeded ? '' : planText, seeded ? (task.taskPath || '') : null)}
 
 Push new commits to the existing branch (the PR auto-updates) — do NOT open a new PR.
 
@@ -3427,7 +3446,9 @@ async function converge(task, a, st = rungState(task, a)) {
     const R = task.resume
     const pr = { prUrl: R.prUrl, branch: R.branch, worktreePath: R.worktreePath, verified: true, blocked: false, blockerDiagnosis: '', summary: '' }
     // A seeded revise never settles the plan (p14-2): its row carries plan null, so the note keeps it.
-    return wrap({ ...(await reviewLoop(task, st, pr, a, R.plan, { history: R.reviewHistory, roundsUsed: R.reviewRoundsUsed })), plan: null })
+    // Nor does it take one (p47-17): its reviser reads the note's "## Approved plan" itself, so a stray
+    // R.plan is never read.
+    return wrap({ ...(await reviewLoop(task, st, pr, a, '', { history: R.reviewHistory, roundsUsed: R.reviewRoundsUsed })), plan: null })
   }
   const planned = task.planGate ? await planLoop(task, st, a) : { task, plan: null, blocked: false }
   const impl = await implement(task, st, planned, a)
@@ -3882,7 +3903,8 @@ function resumeArgsError(a) {
   if (he) return 'reviewHistory ' + he
   const last = R.reviewHistory[R.reviewHistory.length - 1].round
   if (R.reviewRoundsUsed !== last) return `reviewRoundsUsed must equal the history's last round (${last}), got ${refusedEcho(R.reviewRoundsUsed)}`
-  if (typeof R.plan !== 'string') return 'plan must be a string'
+  // No plan check (p47-17): the args carry none, and a stray `plan` of any type is tolerated and never
+  // read, so a hand-built relaunch or an older lead's args never meet an Args refusal over it.
   return ''
 }
 
