@@ -6,6 +6,7 @@
 #   T4 regenerate's gate      T5 where a command runs      T6 no lead: due writes nothing      T7 fire
 #   T8 reset-primary, one row per outcome      T9 the forms and the record, read back through PyYAML
 #   T10 unreadable, and a good sibling kept      T11 the scan: dropped, archived, the root copy
+#   T12 the installed copy: fire runs install's bundle copy with its job's argv, else its own
 # Usage: bash reconcile-rollout-triggers.test.sh   (exit 0 = pass)
 set -uo pipefail
 export TZ=UTC PYTHONDONTWRITEBYTECODE=1
@@ -534,6 +535,70 @@ if [ "$(id -u)" -ne 0 ]; then
   out="$(due 2>&1 >/dev/null)"; ok "$?" 0 "due reads on past a note it cannot read"
   has "$out" "WARN: triggers: cannot read" "with one stderr WARN"
 fi
+
+# ---- T12: the installed copy (p47-19): with no --refresh-bin, fire runs install's bundle copy, with its launchd job's
+# own argv, while the marker stands and the job runs that copy; else its own copy. The rule as a table, in process; then
+# one fire on a fixture bundle under a temp HOME --------------------------------------------------------------------------
+scen installed; prj 1 MERGED
+H="$D/home"; BIN="$H/.local/state/thread/bin"; mkdir -p "$BIN" "$H/Library/LaunchAgents"
+python3 - "$SCRIPT" "$H" <<'PY' || fail=1
+import importlib.util, os, plistlib, sys
+sys.dont_write_bytecode = True
+script, home = sys.argv[1], sys.argv[2]
+spec = importlib.util.spec_from_file_location("rr", script); rr = importlib.util.module_from_spec(spec); spec.loader.exec_module(rr)
+os.environ["HOME"] = home
+bin_dir = os.path.join(home, ".local/state/thread/bin"); copy = os.path.join(bin_dir, "primary-refresh.py")
+marker = os.path.join(bin_dir, "primary-refresh.installed")
+plist = os.path.join(home, "Library/LaunchAgents/com.thread.primary-refresh.plist")
+job = ["/usr/bin/python3", copy, "run", "--primary", "/p", "--also", "/a", "--job-shape", "1"]
+own = [sys.executable, "-B", str(rr.PRIMARY_REFRESH_PY), "run"]
+def put(path, data):
+    if os.path.exists(path):
+        os.remove(path)
+    if data is not None:
+        with open(path, "wb") as f:
+            f.write(data)
+def job_plist(argv):
+    return plistlib.dumps({"Label": "com.thread.primary-refresh", "ProgramArguments": argv})
+# name, marker, copy, plist bytes, --refresh-bin, the argv fire runs
+ROWS = [
+    ("marker and its job", True, True, job_plist(job), None, job),
+    ("no marker", False, True, job_plist(job), None, own),
+    ("marker, no copy", True, False, job_plist(job), None, own),
+    ("marker, no job", True, True, None, None, own),
+    ("marker, a job running another copy", True, True, job_plist(["/usr/bin/python3", "/elsewhere/primary-refresh.py", "run"]), None, own),
+    ("marker, a job not running run", True, True, job_plist(["/usr/bin/python3", copy, "stuck"]), None, own),
+    ("marker, a plist that does not parse", True, True, b"<plist><dict>", None, own),
+    ("marker, a plist that is no dict", True, True, plistlib.dumps(["x"]), None, own),
+    ("--refresh-bin wins", True, True, job_plist(job), "/stub", ["/stub", "run"]),
+]
+bad = 0
+for name, has_marker, has_copy, data, refresh_bin, want in ROWS:
+    put(marker, b"installed\n" if has_marker else None)
+    put(copy, b"# copy\n" if has_copy else None)
+    put(plist, data)
+    got = rr._refresh_argv(refresh_bin)
+    print(("ok   - " if got == want else "FAIL - ") + f"refresh argv: {name}" + ("" if got == want else f": {got}"))
+    bad |= got != want
+for p in (marker, copy, plist):
+    put(p, None)
+sys.exit(bad)
+PY
+cat > "$BIN/primary-refresh.py" <<'EOF'
+import os, sys
+with open(os.environ["REFRESHLOG"], "a") as f:
+    f.write("installed " + " ".join(sys.argv[1:]) + "\n")
+print(os.environ.get("REFRESH_OUT", ""))
+EOF
+echo "installed by primary-refresh.py install for /p" > "$BIN/primary-refresh.installed"
+python3 -c 'import plistlib, sys; open(sys.argv[1], "wb").write(plistlib.dumps({"ProgramArguments": [sys.executable, sys.argv[2], "run", "--primary", "/p", "--job-shape", "1"]}))' \
+  "$H/Library/LaunchAgents/com.thread.primary-refresh.plist" "$BIN/primary-refresh.py"
+tk s - open "$(wh "$GOOD_ON" reset-primary)"
+rows; export REFRESH_OUT="2026-10-02T14:05:00+00:00 primary-refresh /p: current"
+out="$(HOME="$H" python3 "$SCRIPT" triggers fire "$(idof s)" --tasks-dir "$T" --gh-bin "$D/bin/gh" --now "$NOW")"
+ok "$?" 0 "a fire with no --refresh-bin exits 0 on the installed copy's pass"
+ok "$(cat "$REFRESHLOG")" "installed run --primary /p --job-shape 1" "it ran the installed copy with its job's argv"
+has "$(grep '^when:' "$T/s.md")" "fired: \"$STAMP\"" "and recorded the copy's outcome"
 
 echo
 if [ "$fail" -eq 0 ]; then echo "reconcile-rollout-triggers: ALL PASS"; else echo "reconcile-rollout-triggers: FAILED"; fi
