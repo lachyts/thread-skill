@@ -1,7 +1,7 @@
 # 0080 — a stuck rollout changes its repo's merge settings
 
 Date: 2026-11-12
-Status: accepted, built in part 2026-11-12 (p47-9, below; grilled with Lachy 2026-11-12, the "rollouts resolve themselves" grill; builds in
+Status: accepted, built in part 2026-11-12 (p47-9) and 2026-11-28 (p47-15), below (p47-9 grilled with Lachy 2026-11-12, the "rollouts resolve themselves" grill; builds in
 Phase 47). Amends ADR 0025's by-hand lift of a protection rule, for a rule that cannot be met, and reopens on his
 word the no-bypass ADR 0025 kept because agents act as him; extends ADR 0069 as amended 2026-11-11 (the `no-runner`
 set-aside), ADR 0075 and ADR 0078.
@@ -31,7 +31,7 @@ re-entry writes consumes that, so a change that did not free it reads H10. merge
 renamed job aside, a bounded wait while the renamed job still runs, one re-watch after it, and a re-poll of a BLOCKED PR
 whose every required context is reported, so GitHub's lazy fold of a changed setting merges instead of stopping at the
 NON-check gate. A rule naming a gone reviewer or app, a stuck infrastructure run, and the contexts this build leaves for
-him (an expression or include matrix, a reusable workflow's `a / b`, a dropped matrix combination) are follow-up p47-15;
+him (an expression or include matrix, a reusable workflow's `a / b`, a dropped matrix combination) are p47-15's, below;
 the needs-you list's and decision 6's repo check's read of the rows is p47-16.*
 
 *Decision 6's repo check built 2026-11-13 (p51-5): `merge-settings.py check`, run by schedule step 6 on the rollout note
@@ -51,6 +51,43 @@ check (decision 2), so only a runner that is gone frees it. Second, decision 5 a
 task's block was freed, so the row lives on the rollout note it ran for. It still outlives the rollout (review #10):
 `rows --tasks-dir` reads the rollout notes in `Archive/Rollouts/` too, where a finished rollout's note moves, and
 `rows --rollout` lists it and `restore` and `dismiss` record it in that rollout's Run record, as for a task's row.*
+
+*Built 2026-11-28 (p47-15), for one more of the kinds and contexts p47-9 left: **a matrix combination a commit in
+master's history dropped.** A required context `build (macos-14)` whose job is still there, but whose matrix no longer
+holds `macos-14` on master, can never report again, so it is a rule that cannot be met, as a job that commit deleted
+is. `free` removes it on the deletion's evidence and guards: the context is not met at that commit's parent or at the
+commit itself, and the commit adds no job identity; and one guard more, since a combination moved into another job's
+matrix would otherwise read as a drop: the commit adds no exact job name anywhere. Anything else, a new job or a new
+name in the same commit included, is left as a move. A combination the task's own PR drops is left, as a required job
+its own PR deletes is: dropping a required job is his call (ADR 0025, decision 2). The rest stay his, each for its
+reason:*
+
+- *A gone reviewer. merge-task never merges past a review gate: it stops there with no set-aside, so no settings block
+  and no Run record line ever names a reviewer, and `free`'s guard (decision 4) has nothing to point at. A code-owner
+  rule's reviewers live in CODEOWNERS, which is code, out of scope under the Decided list. And no read tells a reviewer
+  who left from one who has not reviewed yet.*
+- *A gone app. The token gh holds cannot read whether an app is installed: probed read-only on 2026-11-28, the repo's
+  `installation` endpoint answers 401 (it wants an app's JSON web token) and `user/installations` 403 (it wants an app's
+  user token), and the token's scopes hold no admin:org for an organisation's installations. merge-task's probe reads
+  another app's context as one it cannot tell (the non-check gate), with no settings block. And a check that has only
+  gone quiet may belong to an app that reports on some changes only, which decision 2 keeps. If he grants admin:org, or
+  the engine gains an app token, the organisation's installations read becomes possible; that is his to choose.*
+- *A stuck infrastructure run. Its remedy is not a merge setting: the required check can still be met by a new run, so
+  removing it would loosen a rule that can be met (decision 2), and what frees it, a force-cancel and then a re-run, has
+  no before, after or one-command undo, so it fits neither the write table nor the rows (the Decided list: "none has a
+  one-line undo"). It belongs to merge-task's infrastructure retry, which already re-runs a cancelled required check
+  once as ci-timeout (ADR 0073 d4) and whose watch is bounded today only by GitHub's own job timeouts. A stuck-run
+  detection there, a force-cancel and one re-run under ADR 0069's infrastructure class, is the follow-up's shape, his
+  to schedule.*
+- *A job identity the expansion cannot resolve: an expression or fromJSON matrix has no static value; for `include`
+  rows nothing here pins GitHub's merge rules or the name suffix it gives an include-added key; a reusable workflow's
+  `a / b` needs the callee's jobs expanded under the caller's inputs; and PyYAML reads YAML 1.1, so a bool or float
+  value (`on`, `yes`, 3.10) may not be GitHub's. A wrong expansion is caught on a rename by the rename gate, but a
+  deletion has no gate, so a wrong name could read a path-filtered job as gone and loosen a rule that can be met
+  (decision 2). These stay unresolvable, read only to leave.*
+- *A required job, or a matrix combination, the task's own PR drops: his call (ADR 0025, decision 2; the task's Decided
+  for you, 2026-11-24). Whether a deletion the PR's own approval confirms may go too is his question, listed for him and
+  not built.*
 
 ## Context
 

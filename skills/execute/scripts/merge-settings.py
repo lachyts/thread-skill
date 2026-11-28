@@ -100,8 +100,8 @@ a `setting-changed` line for this repo and branch that removed or replaced one o
       expanded`): _match is read only over U and only to leave, so its suffix strip and wildcard never decide that a
       resolvable job still reports C.
     * C in E(Hb): the task's own PR dropped it. Its identity is paired Hb -> H: a rename replaces C with C' (through the
-      rename gate); a deletion is `left` (dropping a required job is his call, ADR 0025, ADR 0080 d2); anything else
-      is `left` (ambiguous).
+      rename gate); a deletion or a dropped matrix combination is `left` (dropping a required job is his call, ADR
+      0025, ADR 0080 d2); anything else is `left` (ambiguous).
     * Else C in E(B): origin/<b> names C since the integration, so the re-entry's `prepare` re-integrates on B and
       that head reports it: `cleared`, no write (with other contexts changed, nothing for this one).
     * Else C left master's workflows. A `setting-changed` line of this rollout on this repo and branch whose
@@ -109,13 +109,16 @@ a `setting-changed` line for this repo and branch that removed or replaced one o
       `git log --first-parent -n HISTORY_MAX --find-renames B -- .github/workflows/`, newest first, to the newest
       commit X with C in E(X^) and C not in E(X): a rename pairs X^ -> X and follows C' forward through each later
       walked commit, by the same pairing, to its name at B (a step that loses it is `left`), then the rename gate; a
-      deletion (the identity gone at X, and X adds no job identity anywhere) removes C. No such X, or anything else (a
-      dropped matrix combination included), is `left`.
+      deletion (the identity gone at X, and X adds no job identity anywhere) removes C; so does a dropped matrix
+      combination (C's identity kept, its combination gone at X), when X adds no job identity and no exact name
+      anywhere (a name X adds may be C's combination moved into another job: a move, not a drop, `left`). No such X,
+      or anything else, is `left`.
     * Pairing, Hb -> H and X^ -> X alike: an identity follows a file rename (`git diff -M --name-status`) and a job id
       rename (the change removes exactly one job id from that file and adds exactly one). With the same combination
       set at both revs, C' is the later name of C's combinations, which must all share one name; with the sets
-      differing, C' is defined only when exactly one combination left (C's only) and exactly one arrived. Anything
-      else is ambiguous.
+      differing, C' is defined only when exactly one combination left (C's only) and exactly one arrived; C's
+      combinations all among those that left, with none arriving, is a dropped combination. Anything else is
+      ambiguous.
     * The rename gate, for every rename-derived edit: commits/<H>/check-runs?check_name=<C'> must hold a run by
       ACTIONS_APP_ID whose latest concluded `success`; else `left` (`<C'> has not passed on the PR's head`). So an
       expansion that named C' wrongly finds no run under that exact name and is never written.
@@ -657,7 +660,8 @@ class Decider:
         return out_map
 
     def pair(self, c, a, b):
-        """('rename', C') | ('deleted', None) | ('ambiguous', why) for context C named at rev a, paired to rev b."""
+        """('rename', C') | ('deleted', None) | ('dropped', None) | ('ambiguous', why) for context C named at rev a,
+        paired to rev b."""
         ra, rb = self.rev(a), self.rev(b)
         owners = ra.names.get(c) or []
         if len(set(owners)) != 1:
@@ -693,7 +697,7 @@ class Decider:
             combo = arrived.pop()
             return "rename", next(n for cb, n in after if cb == combo)
         if mine and set(mine) <= left and not arrived:
-            return "ambiguous", "a dropped matrix combination of job %s in %s" % (jid, f)
+            return "dropped", None
         return "ambiguous", "job %s in %s: %d combinations left and %d arrived" % (jid, f, len(left), len(arrived))
 
     def adds_identity(self, a, b):
@@ -701,6 +705,10 @@ class Decider:
         moved = self.renames(a, b)
         had = {(moved.get(f, f), j) for f, js in self.rev(a).files.items() for j in js}
         return any((f, j) not in had for f, js in self.rev(b).files.items() for j in js)
+
+    def adds_name(self, a, b):
+        """Whether rev b names any exact name rev a does not (a combination moved into another job's matrix)."""
+        return any(not self.rev(a).has(n) for n in self.rev(b).names)
 
     def gate(self, new):
         """The rename gate: C' passed on H by GitHub Actions, or Leave."""
@@ -735,9 +743,9 @@ class Decider:
             if kind == "rename":
                 self.gate(val)
                 return "replace", val
-            if kind == "deleted":
-                raise Leave("no-change", "deleted by this task's own PR: dropping a required job is his call (ADR 0025, "
-                                         "ADR 0080 d2)")
+            if kind in ("deleted", "dropped"):
+                raise Leave("no-change", "%s by this task's own PR: dropping a required job is his call (ADR 0025, "
+                                         "ADR 0080 d2)" % kind)
             raise Leave("no-change", "the task's own PR dropped it: %s" % val)
         if self.rev(self.b).has(c):
             return "cleared", "origin/%s names it since the integration" % self.branch
@@ -757,6 +765,11 @@ class Decider:
             if kind == "deleted":
                 if self.adds_identity(xp, x):
                     raise Leave("no-change", "its job went at %s, which adds another job: a move, not a deletion" % x[:12])
+                return "remove", None
+            if kind == "dropped":
+                if self.adds_identity(xp, x) or self.adds_name(xp, x):
+                    raise Leave("no-change", "its combination went at %s, which adds another job or name: a move, not "
+                                             "a drop" % x[:12])
                 return "remove", None
             if kind != "rename":
                 raise Leave("no-change", "it left the workflows at %s: %s" % (x[:12], val))

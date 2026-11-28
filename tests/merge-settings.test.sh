@@ -8,7 +8,7 @@
 #   M0      before the settings point: not due, no gh call
 #   M1-M2b  a no-runner block: the classic PATCH and its undo; a ruleset PUT that keeps every rule; a last ruleset check
 #   M3*     an unreported-context block: renames in master's history and in the task's own PR, the rename gate, matrix
-#           expansion, deletions, clears and every `left`
+#           expansion, deletions, dropped matrix combinations, clears and every `left`
 #   M4-M9   a red check, ownership, rights, the Run record, the lock, transient reads, gh missing, idempotence
 #   M10-M17 restore, dismiss and rows; quoting; the fake's 422s; an over-long line; a dangling change; a context two
 #           tasks share; the block boundary; two identical rows
@@ -252,6 +252,21 @@ put .github/workflows/ci.yml "$(ci "$(job lint)")"; HB=$(cm drop); pushm; branch
 ur_case ur build ''; free
 ok "$rc|$(nwrites)|$(sed -n 's/^PATCH [^ ]* //p' "$MT_STATE/writes.log")" '0|1|{"checks":[{"app_id":-1,"context":"ci"}],"strict":true}' \
   "M3d: a job deleted by a commit that adds none: removed"
+# M3dc: a matrix combination dropped in master's history, by a commit that adds no job and no name: removed
+newrepo; put .github/workflows/ci.yml "$(ci "$(job build '    strategy:\n      matrix:\n        os: [ubuntu, macos-14]\n')")"; cm c0 >/dev/null
+put .github/workflows/ci.yml "$(ci "$(job build '    strategy:\n      matrix:\n        os: [ubuntu]\n')")"; HB=$(cm drop); pushm; branch_pr "$HB"
+ur_case ur-matrix 'build (macos-14)' ''; free
+ok "$rc|$(nwrites)|$(sed -n 's/^PATCH [^ ]* //p' "$MT_STATE/writes.log")" '0|1|{"checks":[{"app_id":-1,"context":"ci"}],"strict":true}' \
+  "M3dc: a matrix combination dropped by a commit that adds no job or name: removed"
+has "$(rows)" "removed \"build (macos-14)\"" "M3dc: the row names the removal"
+# M3dcm: the same drop while another job gains that value (a name added, no job): a move, left
+newrepo
+put .github/workflows/ci.yml "$(ci "$(job build '    strategy:\n      matrix:\n        os: [ubuntu, macos-14]\n')" "$(job test '    strategy:\n      matrix:\n        os: [ubuntu]\n')")"
+cm c0 >/dev/null
+put .github/workflows/ci.yml "$(ci "$(job build '    strategy:\n      matrix:\n        os: [ubuntu]\n')" "$(job test '    strategy:\n      matrix:\n        os: [ubuntu, macos-14]\n')")"
+HB=$(cm move); pushm; branch_pr "$HB"
+ur_case ur-matrix 'build (macos-14)' ''; free
+leftw M3dcm "which adds another job or name: a move, not a drop"
 # M3x: an ambiguous move (two combinations left, two arrived)
 newrepo; put .github/workflows/ci.yml "$(ci "$(job build '    strategy:\n      matrix:\n        os: [a, b]\n')")"; cm c0 >/dev/null
 put .github/workflows/ci.yml "$(ci "$(job build '    strategy:\n      matrix:\n        os: [c, d]\n')")"; HB=$(cm move); pushm; branch_pr "$HB"
@@ -322,6 +337,11 @@ newrepo; put .github/workflows/ci.yml "$(ci "$(job build)" "$(job lint)")"; HB=$
 branch_pr "$HB" .github/workflows/ci.yml "$(ci "$(job lint)")"
 ur_case ur build ''; free
 leftw M3od "deleted by this task's own PR: dropping a required job is his call"
+# M3odc: the task's own PR drops C's matrix combination: left, his call as a deletion is
+newrepo; put .github/workflows/ci.yml "$(ci "$(job build '    strategy:\n      matrix:\n        os: [ubuntu, macos-14]\n')")"; HB=$(cm c0); pushm
+branch_pr "$HB" .github/workflows/ci.yml "$(ci "$(job build '    strategy:\n      matrix:\n        os: [ubuntu]\n')")"
+ur_case ur-matrix 'build (macos-14)' ''; free
+leftw M3odc "dropped by this task's own PR: dropping a required job is his call"
 # M3o2: another task's own rename required build-and-test before its PR merged: left, naming that task
 newrepo; put .github/workflows/ci.yml "$(ci "$(job build)")"; HB=$(cm c0); pushm; branch_pr "$HB"
 ur_case ur-bt build-and-test ''
