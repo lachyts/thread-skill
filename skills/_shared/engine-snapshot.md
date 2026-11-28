@@ -292,7 +292,7 @@ contract:
   start (attention.py);
 - the `- <slug>: a, b` `## File-sets` line (FILESET_RE);
 - the task's `rollout: "[[<slug>]]"` stamp (`_scan`'s backlink);
-- and the note lock it takes (`_note_lock_path`).
+- and the note lock it takes (`_note_lock_path`) (the landing carrier's fix-task writes take it too, through land-carrier.py's mirror).
 
 They change only by migration.
 

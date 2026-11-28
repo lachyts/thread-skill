@@ -1,7 +1,7 @@
 # 0078 — A fix is done when the stuck work moves, and nothing it needs rests on one session
 
 Date: 2026-11-09
-Status: proposed; d6 built by p45-6. Grilled with Lachy on 2026-11-09 (`/grill-with-docs`, thread-skill session), after an audit of why
+Status: proposed; d6 built by p45-6; d2 amended 2026-11-29 by p47-20. Grilled with Lachy on 2026-11-09 (`/grill-with-docs`, thread-skill session), after an audit of why
 the Waiting list work (ADR 0076) and its fixes did not turn out as he expected. Sharpens the **Landing** ADR 0028 promises
 ("agents own it end to end"), amends ADR 0066 (a diverged Primary checkout is repaired, not only recorded) and ADR 0067
 d7 (a second schedule for a running rollout joins its queue).
@@ -45,6 +45,16 @@ that keeps it moving: brought current whenever it is behind and its checks are g
 conflicts resolved mechanically (THREAD.md's Session log and learnings only grow, so both sides are kept, newest first),
 its CI retried as ADR 0069 retries a GitHub stop, and an earlier landing that a later one carries closed as superseded.
 One that cannot be moved within a day is a stop the Companion leads him to.
+
+*(Amended 2026-11-29 by p47-20, from Lachy's ruling of 2026-11-24 at the Thread Skill orient grill: asked what should
+happen, unattended, when a landing's CI fails for real or an own branch's review never finished, he picked "File a fix
+task". The first sentence's "brought current whenever it is behind and its checks are green" now also reads a
+close-out's real red against its base: on a green base it is brought current, and once up to date its red gets a fix
+task (Decided 7). The last sentence's stop gives way to a fix task for a real red, or for an own branch's unfinished
+review that is not held: the carrier files one undated task in the landing's project, the Backlog orient grades and
+schedules it like any other, every code change stays inside a scheduled, reviewed rollout, and the landing reaches him
+only when its fix task has itself been taken out (ADR 0070's marker). The day stop stays for what no fix task covers
+(Decided 11). The carrier's docstring, `skills/_shared/scripts/land-carrier.py`, holds the rules.)*
 
 **d3. Nothing commits on the Primary checkout.** `land.sh` commits a close-out on a `close/…` branch cut from origin's
 default branch in a scratch worktree, never on the Primary's default branch, and the Primary only ever fast-forwards. A
@@ -105,3 +115,41 @@ a Leg session whose Leg has closed, never opened, or lost its chain copy is arch
    started; quality over speed)
 6. Orient and schedule list every left-out task with its reason, and never drop a cross-repo dependency silently.
    (technical)
+7. A close-out's real red is read against its base. On a pending base it only waits: master's CI still running after
+   a merge is no broken base. On a red base it waits too, and once the base itself has read red for a day (timed from
+   the first pass that reads it red, kept across a pending read and reset by a green one, never from the landing's own
+   clock) files its fix task naming the base. On a green base it is brought current when behind, at most once per real
+   red: the head that update-branch makes has merged a green base tip, so a real red on it counts as red while up to
+   date even when the base has moved again while its CI ran. Up to date, it gets its fix task. Once read red while up
+   to date, it is held: no update-branch and no resolver push on that head while its checks read neither green nor
+   none and its task is open. The hold lifts once the task closes (a landed fix waiting on its proof counts as closed)
+   or the head's checks read green. (technical: a THREAD.md and handoff-only diff; a base move cannot show a fix
+   landed; a busy master would otherwise spend a CI run on every pass)
+8. At most one undated fix task per PR is open at a time. It is found by name and `landing_pr:`, and filed in the live
+   project whose `repos:` checkout (`~` expanded) has the PR's origin, active projects first. An unreadable task note is
+   never answered with a second task: the carrier writes nothing and lists the landing after a day. The task has a
+   **Repo:** line and is written under the engine's note lock. A new failure adds one line, with the new What to do
+   when the kind changes. (technical)
+9. The stuck list leaves out a landing while its open fix task still covers its stop. Coverage runs from the pass that
+   files or notes the task until a pass reads another verdict (checks green, a conflict the resolver leaves, a write
+   the carrier may not make, a draft close-out, a hold, and for a task filed for a red base, that base read green) or
+   an author push, and is settled once per pass; a red the same pass files or notes still wins. The landing
+   returns to the list on ADR 0070's take-out marker, a task closed with the landing unmoved, or a task that cannot be
+   read. (from the ruling; the marker per ADR 0070)
+10. A red is real only when the next pass would read it the same way. A failed or cut read, a missing roll-up reader,
+    or a re-run in flight files nothing. (technical)
+11. The day stop stays for what no fix task covers: a read failing for a day; a roll-up red while the bundle lacks
+    lead-integrate.py; a conflict the resolver leaves; no push permission, or a register hold, at any write; a
+    mergeability GitHub never settles on a green head; a draft close-out; no declaring project; a fix task whose
+    frontmatter the carrier cannot read; a held landing, whose one close follow-up task carries it (ADR 0070 d5).
+    (technical; the held landing per ADR 0070's one unsolicited task per landing)
+12. The carrier's fix task carries no `clears:`, so it is done at Live (vault-grammar § Proven) whether or not its
+    landing moved. The carrier is the check: once the task closes, it brings the landing current once; a landing that
+    still does not move goes back on the stuck list naming the closed task; and its next real red files the next
+    numbered task. The task names what it clears in its **Verify:** line. (technical: a `clears:` line item moves only
+    by a seen line stamped after the fix is Live, which the carrier, dropping a landing at its merge, could write only
+    for a fix already Live; a fix still being worked when its landing moved would wait on Lachy's word for ever)
+13. When a landing merges, is closed, leaves the carrier's scope or is superseded while its fix task is still `open`
+    with no `rollout:`, the carrier sets the task to `dropped`, with a Carrier log line saying why. A task already
+    scheduled or in progress is left to land. (technical: nothing else retires it, and orient would otherwise spend a
+    rollout on it)

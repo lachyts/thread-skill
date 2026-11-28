@@ -26,6 +26,9 @@ Behaviour per call is chosen by environment variables (default in brackets):
   GH_RERUN   [ok]    ok | fail                                       POST …/actions/runs/<run>/rerun-failed-jobs
   GH_PUTMERGE [ok]   ok | fail                                       PUT  …/pulls/<n>/merge
   GH_PATCH   [ok]    ok | fail                                       PATCH …/pulls/<n>
+  GH_LOGS    [ok]    ok | fail (a 502)                               GET  …/actions/jobs/<id>/logs
+  GH_LOG             the job log that serves (default: a timestamped `##[group]Run tests`, two plain lines, then
+                     `##[error]boom: 2 tests failed`)
   GH_JOBS            "<run>:<conclusion>:<failed steps, |-separated>[;…]", the checks kind `jobs`
   GH_JOB_NAMES       "<name>[;…]", GH_JOBS' job names in its order (an empty or missing one: job<i>)
   GH_WORKFLOW        the `workflow_name` each GH_JOBS job carries in `actions/runs/<run>/jobs` (unset: none)
@@ -372,6 +375,15 @@ if method == "GET" and rest[:2] == ["actions", "runs"] and rest[3:] == ["jobs"]:
                          "steps": [{"name": "Set up job", "conclusion": "success"}]
                          + [{"name": x, "conclusion": "failure"} for x in steps]})
     print(json.dumps({"total_count": len(jobs), "jobs": jobs}))
+    sys.exit(0)
+
+if method == "GET" and rest[:2] == ["actions", "jobs"] and rest[3:] == ["logs"]:
+    if E("GH_LOGS", "ok") == "fail":
+        die("gh: Server Error (HTTP 502)")
+    print(E("GH_LOG", "2026-11-10T09:59:58.1234567Z ##[group]Run tests\n2026-11-10T09:59:59.0000000Z ok 1 - parses\n"
+                      "2026-11-10T09:59:59.5000000Z not ok 2 - adds\n"
+                      "2026-11-10T10:00:00.0000000Z ##[error]boom: 2 tests failed\n"
+                      "2026-11-10T10:00:00.1000000Z ##[group]Post job cleanup."))
     sys.exit(0)
 
 if method == "POST" and rest[:2] == ["actions", "runs"] and rest[3:] == ["rerun-failed-jobs"]:

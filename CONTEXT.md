@@ -335,7 +335,9 @@ through time, from attention to merged PRs. Terms only — no implementation.
   merges at the queued head once green and clean. A PR unmoved for a day is
   listed as stuck (`land-carrier.py stuck`), which the Stage's quiet line,
   /thread:status's Landings line and open's briefing of a thread in that repo
-  read. It runs from the **Primary refresh**'s job every 15 minutes. _Avoid_:
+  read. A real CI failure, or an own branch unqueued for a day and not held,
+  gets one undated fix task in the landing's project instead, and the stuck
+  list leaves out a landing while its open fix task still covers it. It runs from the **Primary refresh**'s job every 15 minutes. _Avoid_:
   daily lander, nightly lander.
 - **Own branch** — the feature branch whose work this session did. Close may
   push, review and merge it; a branch close can't prove is its own is only

@@ -3,7 +3,7 @@
 `close/` branch, keeps moving until it merges, with no one touching it.
 
     python3 ${CLAUDE_PLUGIN_ROOT}/skills/_shared/scripts/land-carrier.py run [--state F] [--now ISO] [--every MIN]
-        [--deadline S] [--settle-wait S] [--dry-run]
+        [--deadline S] [--settle-wait S] [--dry-run] [--vault DIR]
     python3 ${CLAUDE_PLUGIN_ROOT}/skills/_shared/scripts/land-carrier.py stuck [--state F] [--now ISO]
         [--slug OWNER/NAME]
     python3 ${CLAUDE_PLUGIN_ROOT}/skills/_shared/scripts/land-carrier.py marker --login L < comments.json
@@ -18,9 +18,11 @@ state_path, read_state, write_state and kill_group. When it cannot be loaded the
 broken BJ never breaks land.sh's withdrawal read. Every child gets one environment: the repo-local GIT_* variables
 scrubbed (the two config channels kept), GIT_TERMINAL_PROMPT=0 GH_PROMPT_DISABLED=1 GCM_INTERACTIVE=never (land.sh's),
 and gc.auto=0 and maintenance.auto=false appended through GIT_CONFIG_COUNT. Each child runs in its own session under a
-bound: gh 30 s, a clone or fetch 90 s, a push 60 s, local git 60 s, the classifier 30 s, the roll-up reader (6.4) 60
+bound: gh 30 s (a fix task's job-log read among them), a clone or fetch 90 s, a push 60 s, local git 60 s (a declared
+checkout's `git config` and the fix task's `cp -p` clone among them), the classifier 30 s, the roll-up reader (6.4) 60
 s, each cut to what is left of the pass's deadline; one that reaches it has its process group stopped (BJ.kill_group,
-5 s grace). TERM, INT and HUP stop the live child's group and the pass exits 128 + N, landings.json as the last per-PR
+5 s grace). The note lock (the fix task paragraph) is waited for up to THREAD_NOTE_LOCK_TIMEOUT (30 s), cut the same
+way. TERM, INT and HUP stop the live child's group and the pass exits 128 + N, landings.json as the last per-PR
 write left it.
 
 run, one pass:
@@ -40,9 +42,11 @@ run, one pass:
      it stopped. The deadline
      is checked before each PR. landings.json is written after each PR, and earlier where a record must precede its
      act: a changed binding (5f) before that PR's first GitHub write, a resolver push's `pushed` and `pushedFrom`
-     before the push. A pass cut mid-PR keeps that PR's old entry unless it already wrote to GitHub.
+     before the push, and every vault write (a fix task filed or noted) at once. A pass cut mid-PR keeps that PR's old
+     entry unless it already wrote to GitHub or the vault.
   5. Read, per PR (Phase A).
-     a. `GET repos/<slug>/pulls/<n>`. Merged: the entry is dropped. Closed: the tombstone rule (8), else dropped. In
+     a. `GET repos/<slug>/pulls/<n>`. Merged: the entry is dropped. Closed: the tombstone rule (8), else dropped. (Any
+        drop of an entry whose fix task is open writes its closing line first: the fix task paragraph's drop rule.) In
         scope only when its labels hold `landing` or its head.ref is land.sh's close-out branch (land.sh's
         `branch="close/$cdate-$s-$sha12"` and its slug rule): `^close/YYYY-MM-DD-<a-z0-9, - inside, 1-40>-<12 hex>$`.
         Out of scope (an unlabelled `close/issue-12`): dropped after this one read, no write, no entry. Another
@@ -53,15 +57,19 @@ run, one pass:
      c. The kind: `close-out` (the grammar, labelled or not); `own-unqueued` (a draft); `own-auto` (auto_merge set);
         else the comments are read (`GET repos/<slug>/issues/<n>/comments?per_page=100`, paginated) and M is the newest
         marker-class comment by the login (the `marker` grammar below): a `Landing queued (ADR 0078 d2): <S>` M is
-        evaluated by the binding (5f), `own-marked` when it holds or advances, else `own-unqueued`. A labelled PR on a
-        branch outside the grammar (`close/fix-thing`) takes these own-branch kinds.
+        evaluated by the binding (5f), `own-marked` when it holds or advances, else `own-unqueued`. The carrier also
+        reads which marker M is: a `Landing held (ADR 0028 § 3)` one is own-unqueued with the outcome `held (ADR 0028
+        § 3): left to its session; its close follow-up task carries it`, and files no review fix task (6.0). A
+        labelled PR on a branch outside the grammar (`close/fix-thing`) takes these own-branch kinds.
      d. The head, for the 24 h clock only (the binding is 5f's). `gh_update_merge(H, X)`, the one predicate: H is a
         GitHub-made update-branch merge from X when `GET commits/<H>` shows parents [X, P2] and the committer email
         `noreply@github.com` (GitHub stamps it on the update-branch merges it makes, the carrier's, land.sh's and a
         person's button alike), and `GET compare/<base.ref>...<P2>` reads behind or identical (P2 on base). A head
         that differs from entry.head is a carrier change when it is entry.pushed (the carrier's resolver push) or
         gh_update_merge(head, entry.head) holds; anything else is an author change, which restarts movedAt and the
-        rerun count. A failed read counts as a carrier change: a failed read never restarts the clock.
+        rerun count, and is a clearing verdict (the fix task paragraph's settle rule). A failed read counts as a
+        carrier change: a failed read never restarts the clock. Any new head drops `redHeld` (6.4b's hold), and
+        `redBrought` unless the old head is it (kept one hop, for 6.4b to read on the head its update-branch made).
      e. The checks on head.sha, land.sh LAND_CHECKS_PY's classes (`GET commits/<sha>/check-runs?per_page=100` and
         `/status`, a check run's latest id per name): red (a failure), infra (cancelled, timed_out, startup_failure,
         action_required, stale, a status error), pending, green. No check on the head reads the base tip's (the
@@ -82,14 +90,27 @@ run, one pass:
   6. Act (Phase B): the first step that applies is taken. Every write first runs `python3 <dir>/landing-register.py
      check --slug <slug>` and goes ahead only on exit 0 (the decided "re-check the register before each push", for
      every write), and needs the repo's `permissions.push` (one `GET repos/<slug>` per repo per pass, which also gives
-     `allow_auto_merge`).
-     0. own-unqueued or a draft: no write ("left to its session").
+     `allow_auto_merge`): write_block, which says whether a refusal is definite (no push permission read, or the
+     register's exit 3) or a read that failed (the repo read, a register check cut at its bound, any other exit). A
+     definite refusal at any write (an update-branch, a re-run POST, a merge PUT, the auto-merge queue, the
+     supersession close, the resolver's push) is the pass's clearing verdict.
+     0. own-unqueued or a draft: no write ("left to its session"). An own PR so unmoved for a day gets the review fix
+        task (the fix task paragraph) when its comments were read and its newest marker is no hold; an own draft, whose
+        marker 5c never read, has it read once then, after the vault and project are found. Never a held landing (its
+        close follow-up task carries it, ADR 0070 d5), never a failed read, and never a draft close-out (act's draft
+        return is a clearing verdict).
      1. A superseded close-out: supersession (below): a `Superseded (ADR 0078 d2): …` comment, then `PATCH
         pulls/<n> state=closed`.
      2. A close-out with auto_merge null and allow_auto_merge not false: `gh pr merge <n> -R <slug> --auto --merge`.
         A refusal, or allow_auto_merge false, is not terminal: the steps below still run.
      3. dirty: the resolver (below), when this repo's bring-current slot is free. An ineligible PR gets no write and
-        an outcome naming why; a dirty PR gets nothing else this pass.
+        an outcome naming why; a dirty PR gets nothing else this pass. A close-out under 6.4b's hold (_held, checked
+        just before the resolver) gets no push: `dirty: held for its fix task [[<stem>]]: …`, verdict `held`; once the
+        hold lifts the resolver runs as for any dirty PR. The resolver's verdict: `dirty: waiting its turn …` unread;
+        `… the merge is clean: left to update-branch` clean; every `not resolved: …` but a clone failure conflict; a
+        clone failure unread; `not pushed: no write (<why>)` nowrite when write_block's refusal is definite, else
+        unread; `would resolve …` and `resolved … and pushed …` pushed; `… but the push failed` failed. conflict and
+        nowrite are clearing verdicts.
      4. red or infra, nothing pending, fewer than 2 reruns for this head: the rerun rule (ADR 0069 and 0073 d4, as
         merge-task.sh applies them). Every non-pass completed check (pass: success, neutral, skipped) must be proven
         re-runnable, or nothing on the head is re-run. Each GitHub Actions run a check run names (app.slug
@@ -99,8 +120,9 @@ run, one pass:
         a newer run in its concurrency group; merge-task's cancelled_required); failure, timed_out or startup_failure
         gives the steps that concluded failure, and a job with no failed step is genuine (merge-task's per-run guard:
         a hang or a timeout is never proven to be setup); anything else is genuine (action_required, stale, a check run
-        that is no Actions job, any failed or errored status context, a details_url naming no run, a jobs read that
-        fails, a run whose jobs show no non-pass job). A roll-up check is read through the jobs it needs first (p54-11,
+        that is no Actions job, any failed or errored status context, a details_url naming no run); a jobs read that
+        fails, or a run whose jobs show no non-pass job, re-runs nothing and is unread (below). A roll-up check is read
+        through the jobs it needs first (p54-11,
         p54-12): a job with a non-empty `needs:` and a job-level `if:` holding `always()` or `!cancelled()`, like this
         repo's `make test (ubuntu-latest)` over its `fast tier (shard K/3)` jobs, fails whenever a job it needs failed
         or was cut, and its own failed step reads genuine. A run with two or more non-pass jobs, one of them not
@@ -109,21 +131,61 @@ run, one pass:
         --whole --job-id <its non-pass jobs>` (_rollup and _stands_for, the reader merge-task.sh runs). Exit 0 leaves
         out each roll-up that stands for a non-pass job it needs, so only those jobs are classed (`rerun-failed-jobs`
         re-runs the roll-up with them); exit 3 (no roll-up, or one whose needed jobs all passed, so its red is its own)
-        classes the run's jobs as they are; anything else (no lead-integrate.py, a clone or head fetch that fails, a
-        roll-up not proven, a reader cut at its bound) is genuine (fail-closed). A run with one non-pass job, or only
-        cancelled ones, is never read so. Every collected step name, from every job on the head, goes once
-        to `bash <skills>/execute/scripts/merge-task.sh --classify-steps`, which prints classify_failed_steps' verdict,
-        the classifier merge-task.sh itself runs on a red required check's failed steps before its own
-        rerun-failed-jobs; anything but `infra`, or no merge-task.sh, is genuine. Not the brief's classifier:
+        classes the run's jobs as they are; exit 1 (a roll-up not proven) or a non-pass job with no id is genuine;
+        anything else (no lead-integrate.py, a clone or head fetch that fails, the reader cut at its bound, any other
+        exit, unreadable JSON) is unread: nothing is re-run (fail-closed) and the red is no real one. A run with one
+        non-pass job, or only cancelled ones, is never read so. Every collected step name, from every job on the head,
+        goes once to `bash <skills>/execute/scripts/merge-task.sh --classify-steps`, which prints
+        classify_failed_steps' verdict, the classifier merge-task.sh itself runs on a red required check's failed steps
+        before its own rerun-failed-jobs; `genuine`, or no merge-task.sh (a fixed fact of the install), is genuine;
+        `infra` is re-runnable; a cut, a non-zero exit or any other output is unread (`not re-run: the step classifier
+        could not be read (<why>)`). Not the brief's classifier:
         reconcile-rollout.py `_merge_task_infra_stop` reads merge-task.sh's own stop-reason text (MERGE_TASK_INFRA,
         FAIL_CELL_RE; ADR 0069 d3's one reader of the GitHub-side cause) and never a CI step name, and the carrier holds
         failed step names, so it runs the one classifier that reads them. A genuine failure anywhere on the head beats
         cancellations everywhere else: `rerun-failed-jobs` re-runs a run's failed jobs with its cancelled ones, so one
         genuine job (a fail-fast matrix's one real failure, its siblings cancelled) means no run is re-run. All proven:
         `POST repos/<slug>/actions/runs/<run>/rerun-failed-jobs` once per affected run, one rerun of the head, at most
-        2 per head. The outcome names the genuine jobs and their steps, or `rerun budget spent`.
+        2 per head. The outcome names the genuine jobs and their steps, or `rerun budget spent`. Real or unread, never
+        parsed from the outcome: a red is real when the next pass would read the same head the same way: not an Actions
+        job, a failed or errored status, `concluded <c>`, a job with no failed step, a roll-up not proven, `shows no
+        failed job beside its roll-up checks`, a classifier `genuine`, and `rerun budget spent`. It is unread when a
+        later pass may read it otherwise: a jobs read that fails, `run <r> shows no failed job`, an unread roll-up or
+        classifier, no run to re-run, a re-run POST that fails, and a re-run made. A real red goes to 6.4b (a close-out)
+        or to the red fix task at once (own-auto, own-marked: _own_red); an unread one files nothing.
+     4b. A close-out's real red (_closeout_red), read against its base, the first rule that applies:
+        - Held (_held: entry.redHeld is this head, its checks read neither green nor none, and its fix task is open,
+          unreadable or absent): no GitHub write; the red key is computed again for the fix task (the same key on an
+          open task writes nothing; no task, it is tried again). `<prev>; held for its fix task [[<stem>]]: red while
+          up to date at <head12>, brought current again only once that task closes or its checks read green`, or with
+          `; no fix task (<why>)` after it.
+        - redHeld is this head and its task is closed (a carried fix counts): the same key is (d); a new key files the
+          next numbered task, and the hold stays.
+        - Brought current for its red: entry.redBrought (the head a red bring-current, here or (d), was asked from;
+          5d keeps it one hop) is not this head, and gh_update_merge(head, redBrought) holds. This head merged a green
+          base tip, so it is read as up to date even when the base has moved since: the red fix task (`<prev>; red on
+          the head update-branch made from a green <base_ref>: …`) and entry.redHeld = head, no base read. So a real
+          red is brought current at most once, never chased round a base that moves while its CI runs.
+        - Otherwise the base tip and its checks (read_checks on it; one with no checks reads `none`). A read that fails
+          is unread: `<prev>; cannot read <base_ref>'s checks (<why>)`, no key. A pending base only waits: `<prev>;
+          its base <base_ref> reads pending at <tip12>: waiting for it to turn green`, no write and no key (master's CI
+          still running after a merge is no broken base). A red or infra base is timed from the base itself:
+          entry.baseRedSince is set by the first pass that reads it red or infra, kept across a pending read, dropped
+          by a green or none one. Under a day of it, the same waiting outcome; a day or more: the base fix task, key
+          `base:<head>`. A green base: a clearing verdict when fix.key is a base key (the settle rule), then `GET
+          compare/<tip>...<head>` (a failed read is unread); behind or diverged: _bring_current, recording redBrought
+          (skipped while mergeability is unsettled); ahead or identical: the red fix task, key `red:<head>:<the
+          failing check names, sorted>`, and entry.redHeld = head.
+        The hold is head-specific (5d drops it on any new head); on its head it lifts when its task closes or its checks
+        read green or none, never when the base moves, since a base move cannot show a fix landed.
+     (d) The fix has landed: a real red whose fix task is closed (a carried fix counts) with the same key, a green
+        base, and a compare that reads behind or diverged is brought current once (_bring_current, recording
+        redBrought), its mergeability settled. Otherwise the outcome gains `; its fix task [[<stem>]] is closed, and
+        the landing has not moved (ADR 0078 d1)`, and the landing is listed: the task is done at Live (it carries no
+        `clears:`), so this row is the check that it did not move the landing.
      5. behind and green or none: `PUT pulls/<n>/update-branch -f expected_head_sha=<sha>` when the slot is free;
-        `updatedFrom` records the head it was asked from (named in the outcome, read by no rule).
+        `updatedFrom` records the head it was asked from (named in the outcome, read by no rule). _bring_current is
+        this step, shared with 6.4b and (d).
      6. clean or has_hooks, green or none: a close-out whose auto-merge is off gets `PUT pulls/<n>/merge -f
         merge_method=merge -f sha=<head.sha>`; own-marked the same with sha=<bound> (REST's --match-head-commit);
         own-auto, or a close-out whose auto-merge is on, no call: GitHub merges it with the method its session chose.
@@ -132,7 +194,9 @@ run, one pass:
      that needs it. Under a strict up-to-date rule only one can win, so the rest spend no CI run a merge then stales.
   7. Stuck: now - movedAt >= 24 h marks the entry `stuck` and prints `<slug>#<n>: stuck: unmoved since <movedAt16>:
      <outcome>` once. movedAt is first sight or the last author change; the carrier's own update-branch, resolver push
-     or rerun never moves it, so a PR caught in update-branch cycles is listed after a day.
+     or rerun never moves it, so a PR caught in update-branch cycles is listed after a day. A covered landing (_covered:
+     its fix task open, never null, still covering it, and not taken out) is not stuck: _finish settles fix.current
+     first, then reads it.
   8. Tombstones. A PR closed as superseded by L keeps its entry (`supersededBy`) while L is open; L merged drops it; L
      closed unmerged reopens it (a register check, a comment, `PATCH state=open`; `reopened`). A reopen that fails
      flags it stuck until it is open again or merged. The chain: when the carrier closes L itself as superseded, every
@@ -141,8 +205,8 @@ run, one pass:
      so P's). Passed on when L closes, not on P's next read, because L's own entry is dropped once M merges, and P's
      read can come after that. So only a target closed unmerged by someone else reopens a PR.
   9. Output: one stdout line per act or transition only (update-branch requested, resolved and pushed, re-ran,
-     auto-merge queued, merged, closed as superseded, reopened, became stuck, search failed); failures go to the
-     entry's outcome, so a pass that does nothing prints nothing. Exit 0 for a pass, whatever it did; 3 not due (no
+     auto-merge queued, merged, closed as superseded, reopened, became stuck, search failed, fix task filed, fix task
+     noted); failures go to the entry's outcome, so a pass that does nothing prints nothing. Exit 0 for a pass, whatever it did; 3 not due (no
      call, no write); 1 when BJ cannot be loaded; 2 on usage. --dry-run makes reads only, prints `would …` lines and
      writes no state.
 
@@ -189,6 +253,98 @@ not superseded this pass; newest first): the add side base ∪ L.head (a line in
 Resume line would otherwise never be carried), and C less its newest commit within base..L.head; the entry records
 `supersededBy`. The verdict is cached in entry.checked by (the base tip, P's head, the later close-outs' heads).
 
+The fix task (ADR 0078 d2 as amended by p47-20: Lachy's ruling of 2026-11-24, "File a fix task"). A landing the carrier
+cannot move for a reason a task can carry gets one undated fix task in its project (ADR 0077: no approval), which the
+Backlog orient grades and schedules like any other; every code change stays inside a scheduled, reviewed rollout.
+  - Filed: a real red (6.4) on own-auto or own-marked, the red variant at once (_own_red); a close-out's real red, the
+    red or base variant by 6.4b; the review variant, key `review:<head>`, for an own PR own-unqueued a day (6.0). A
+    landing once held and queued again is own-marked, its newest marker a queued one, so no longer held. Never a held
+    landing (it stays on the day stop, its close follow-up task carrying it: ADR 0070 d5), never a draft close-out,
+    never a foreign PR, and never from a read that failed (a failed log read still files, without the excerpt).
+  - Where: `run --vault DIR` (VAULT_DEFAULT, ~/repos/obsidian; primary-refresh's `run --now <stamp>` passes none). With
+    no Work/Tasks/ there: `; no fix task (no vault at <dir>)`. The project (_project_for, read only when a task is to be
+    filed, cached per pass): the live project notes under Work/Projects/** (Archive/ left out; `tags:` holding
+    `project` and not `archived`; status not done, merged or dropped; `done:` not true) whose `repos:` (a block list, a
+    flow list or a scalar) holds an entry that, through os.path.expanduser, is absolute and whose `git -C <dir> config
+    --get remote.origin.url` (local git's bound; a failing call skips it) parses to the slug through
+    landing-register.py's ORIGIN_RE and parse_slug, compared case-insensitively. On a tie status active wins, then
+    path order. None: `; no fix task (no live project's repos: has origin <slug>)`.
+  - Its name, the stem walk (_stem_walk): `landing-fix-<owner>-<name>-<n>`, each run outside [a-z0-9] of the lowercased
+    key one `-`, then `-2`, `-3` and on, walked when there is no fix record or its task is closed and the key is new. A
+    root note whose `landing_pr:` is this PR (case-insensitively) is adopted and noted when open, walked past when
+    closed; an unreadable root note stops the walk (the unreadable rule below); a readable root note for another PR,
+    or the name under Work/Tasks/Archive/ (any year folder), is walked past; nothing of that name is filed there.
+  - Open (_fix_open): true when the note sits at Work/Tasks/<stem>.md, _fm reads it, its status is not done, merged,
+    dropped or cancelled, it is no carried fix, and its tags hold no `archived`. A carried fix is `status: review` with
+    a valued `merged:` (not empty, `null` or `~`, its ` # comment` dropped and quotes stripped; reconcile-rollout.py
+    _carried_fix and _valued): it reads closed, since a held landing waiting on an open one would never move. False for
+    any other readable root note, and for a note under Archive/ or gone. Null (unreadable) for a root note _fm cannot
+    read: no write of any kind (no line, no `-2`, no retire), the outcome gains `; no fix task ([[<stem>]]'s
+    frontmatter cannot be read)`, no key is set, so the landing is uncovered and listed after a day, and a held
+    close-out stays held, (d) never firing.
+  - _fm reads between the first two `---` lines: blank lines and lines whose first non-space character is `#` are
+    skipped; top-level `key: value` scalars (` # comment` dropped, quotes stripped, as _scalar), flow lists, and block
+    `- item` lists under an empty-valued key; a `[[x|y]]` item unwraps to x; any other line (a nested map, a block
+    scalar) makes the frontmatter unreadable.
+  - Its shape mirrors reconcile-rollout.py _new_task_fm, not imported, the carrier being stdlib-only and bundled:
+    `tags: [task, <area tag>]` (the project's first `area:`, `[[ ]]` and an alias stripped, else its folder:
+    resolve-target.py area_of; lowercased, each run outside [a-z0-9] one `-`), `status: open`, `priority: normal`,
+    `work_depth: shallow`, `projects: ["[[<Project>]]", "[[<Area>]]"]` (no area, none), `contexts: []`, empty
+    `scheduled:` and `due:` (ADR 0077), `captured:` the local date, `launch:` only when the project has one, and
+    `landing_pr: "<slug>#<n>"`. No `fixes:` (an Escape is landed work) and no `clears:` (ADR 0078 Decided 12): it is
+    proven at Live, and the carrier is the check that the landing moved, by (d) and the stuck list. The body: `## Notes`
+    (who filed it; the PR url, head_ref → base_ref and its kind; the cause; for a red variant read `unstable`, that the
+    failing check is not a required one, so GitHub would merge it, and the carrier holds it for green, ADR 0028 § 2;
+    **What to do**; **Verify:** the carrier merges `<slug>#<n>`), `## Failing checks` for the red and base variants (up
+    to 3 failing checks with their links, and a ```text fence of the first failing Actions job's log, `gh api
+    repos/<slug>/actions/jobs/<id>/logs`, the 15 lines ending at its first `##[error]`, else its last 15, timestamps
+    and ANSI codes dropped, each cut to 200 characters, ``` defused; read only when a task is filed, never under
+    --dry-run), `## Launch` (the project's launch alias, else `claude` from the entry; `**Repo:**` the `repos:` entry
+    as written; `**MCP:** none`), `## Resume prompt` (what is picked up, Launch, Read first, Next move; no capture
+    line) and `## Carrier log`, its first line `- <stamp> <head12> (<variant>): filed: <reason>`. What to do, one line
+    per variant (_fix_line): red on an own branch, fix the failing check on head_ref and queue it again, or fix it on
+    base_ref; red on a close-out, its diff is THREAD.md and handoff docs only and it is up to date with a green
+    base_ref, so fix it there or re-run it, then mark the task done; base, make base_ref green; review, finish its
+    landing (/fresh-review, the fixes, `land.sh --queue`; a draft marked ready first) or close the PR.
+  - The record, entry.fix {task, key, open, marker, current, at}, open true, false or null: a live task with the same
+    key writes nothing; a new key on a live task adds one line, `- <stamp> <head12> (<variant>): <reason>`, with `;
+    what to do now: <What to do>` when its variant differs from the note's last tagged line (or it has none) and the
+    unstable clause when this pass reads `unstable` on a red variant and the note lacks it; a closed task with a new key
+    gets the next numbered task; a closed task with the same key gets no write ((d), or the outcome names it); an
+    unreadable task gets no write. Each pass with a record re-reads its note after 5a and before 5d (_refresh_fix):
+    open, and marker from `taken_out_next:`; a missing vault keeps the last values.
+  - Writes, all under Work/Tasks/: a new task is an `open(path, "x")` create (an existing name moves to the next); a
+    line, a retire or both go under the note's lock: the note re-read (a frontmatter it cannot read: nothing written),
+    the line appended under `## Carrier log` (the section added when missing), a retire's top-level `status:` set to
+    `dropped`, then _replace_note. An OSError (the lock not taken among them): no task or no line, `; no fix task
+    (cannot write <stem>: <why>)`, fix.key as it was. --dry-run prints `would file fix task [[<stem>]]`, `would note
+    [[<stem>]]` or `would drop [[<stem>]]` and writes nothing. Each vault write sets ctx.wrote and saves the entry at
+    once (step 4). stdout: `<key>: fix task filed: [[<stem>]]` or `<key>: fix task noted: [[<stem>]]`; a retire and the
+    other note lines print nothing.
+  - The settle rule (_settle_fix, once per pass, first in _finish): the pass holds a scratch {key, clear}, reset in
+    handle. A key computed this pass (filed, noted, or the same key on a live task) sets fix.current true; else a
+    clearing verdict sets it false, and when it was true on an open task writes one line, `- <stamp> <head12>: this
+    task no longer covers the landing: <outcome>`; else it is kept. The clearing verdicts: checks green or none; the
+    resolver's conflict or nowrite; a definite no-write at any other write; a draft close-out; a hold (5c's held
+    marker); an author change at 5d (which records the verdict and writes nothing itself); 6.4b's green base read when
+    fix.key is a base key (`base:`), the base task's stop being gone (a red key the same pass computes still wins, and
+    a red key is never cleared by it). Kept: unread results, pending checks, waiting for the base, a re-run or
+    bring-current just asked for, the resolver's pushed, clean, failed, unread and held, a no-write that is a read
+    failure, a held close-out, an unreadable task, a refused vault write.
+  - The drop rule (_drop): every drop of an entry whose fix task is open (the PR merged, at 5a or 6.6: `the PR merged:
+    nothing left for this landing`; closed: `the PR was closed`; out of scope: `the PR is no longer a landing`;
+    supersession's close once it succeeds: `closed as superseded: <by>`, the tombstone case then dropping its fix
+    record) re-reads the note under its lock and writes `- <stamp> <head12>: <why>; <tail>`. _retire: a note still
+    `status: open` with no valued `rollout:` is set to `status: dropped` in the same replace (tail `dropped: nothing is
+    left for it to fix`); any other live status is left to land (tail `left open (it is stamped rollout: <r> | its
+    status is <s>)`). A closed, gone or unreadable note gets no write.
+  - The note lock and the replace mirror reconcile-rollout.py's, so the carrier and the engine take one lock for a
+    task note: _note_lock_path is `<dir>/<sha256 of the realpath of the note's directory, first 16>-<its basename,
+    first 60>.lock`, dir THREAD_NOTE_LOCK_DIR when absolute, else XDG_STATE_HOME/thread/note-locks, else
+    ~/.local/state/thread/note-locks; _NoteLock an fcntl flock waited for up to THREAD_NOTE_LOCK_TIMEOUT (30 s) cut to
+    the pass's deadline, held only for the re-read and the replace; _replace_note _replace_keeping_metadata's temp file
+    beside the note (a `cp -p` clone under local git's bound on macOS), mode and created time kept, then os.replace.
+
 marker --login L: stdin is one or more concatenated JSON arrays of issue comments (`gh api --paginate`); the newest
 comment by L (by id) whose first line starts with a marker prefix (`Landing queued (ADR 0078 d2): `, `Landing withdrawn
 (ADR 0078 d2)`, `Landing held (ADR 0028 § 3)`) decides: `queued <S>` when it is `Landing queued (ADR 0078 d2): <S>`,
@@ -200,25 +356,33 @@ oldest first; `line` is `Landings: <key>: <outcome> (unmoved since <16>) · …`
 movedAt (never one in the future), a tombstone flagged stuck, a search spell 24 h old (key `search`). --slug OWNER/NAME
 keeps only the rows whose key's repo part (before its last `#`) is that slug, compared case-insensitively, as
 landing-register.py `check --slug` matches, and the search spell, since a failed search carries nothing in any repo;
-`line` is built from the rows kept, null when none is. A slug outside land.sh origin_slug's form (`<owner>/<name>`, a
+`line` is built from the rows kept, null when none is. A due row whose entry is covered (_covered, step 7) is left
+out before --slug filters: its open fix task is ordinary backlog work. A row whose fix task carries ADR 0070's
+take-out marker (`taken_out_next:`, `rewrite` or `you`) stays, its outcome prefixed `its fix task [[<stem>]] was taken
+out (taken_out_next: <v>): `. The JSON keys stay as they are, and only landings.json is read. A slug outside land.sh origin_slug's form (`<owner>/<name>`, a
 name not all dots) is usage. Without --slug the output is every due row, as it always was. Exit 0, 1 when BJ cannot be
 loaded, 2 on usage. Consumers (the Stage's machinery-health read, /thread:status's Landings line, /thread:open's
 landings line through --slug, any later reader) call this verb, never the file.
 
 State: ${XDG_STATE_HOME:-~/.local/state}/thread/landings.json (or --state), {"v": 1, "landings": {"<owner>/<name>#<n>":
 entry, "_pass": {...}}}; an entry holds url, kind, since, movedAt, head, handledAt, outcome, updatedFrom, slotAt,
-pushed, pushedFrom, rerunHead, reruns, markerId, bound, cleared, stuck, supersededBy, closedAt and checked. `_pass` is no entry:
+pushed, pushedFrom, rerunHead, reruns, markerId, bound, cleared, stuck, supersededBy, closedAt, checked, redHeld (6.4b's
+hold: the head a close-out was read red on while up to date), redBrought (the head a real red was brought current
+from, kept one hop), baseRedSince (when 6.4b first read the base red or infra) and fix ({task, key, open, marker,
+current, at}: the fix task paragraph's record; a tombstone carries none). `_pass` is no entry:
 it is the pass record (lastPass, searchFailedSince, searchFailedWhy), in the same map only because BJ.write_state writes
 one key; an entry key always holds `#` and `_pass` never does. landings.json is the carrier's own. A corrupt file is one
 WARN and is rewritten valid; an entry with no readable since is dropped with a WARN.
 """
 import argparse
+import hashlib
 import importlib.util
 import json
 import os
 import re
 import shutil
 import signal
+import stat
 import subprocess
 import sys
 import tempfile
@@ -226,6 +390,11 @@ import time
 from datetime import datetime, timedelta
 from pathlib import Path
 from urllib.parse import quote
+
+try:
+    import fcntl
+except ImportError:  # no flock (Windows): the atomic replace alone, as reconcile-rollout.py's note lock
+    fcntl = None
 
 sys.dont_write_bytecode = True
 
@@ -264,6 +433,23 @@ INFRA_CONC = ("cancelled", "timed_out", "startup_failure", "action_required", "s
 JOB_URL = re.compile(r"/actions/runs/([0-9]+)/job/([0-9]+)")
 DATE_LINE = re.compile(r"^last_touched:[ \t]*([0-9]{4}-[0-9]{2}-[0-9]{2})[ \t]*$")
 SLUG_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*/[A-Za-z0-9._-]+$")   # land.sh origin_slug's form (stuck --slug)
+VAULT_DEFAULT = "~/repos/obsidian"   # run --vault: where the fix task is filed (the fix task paragraph)
+NOTE_LOCK_TIMEOUT = 30.0             # reconcile-rollout.py's, read from THREAD_NOTE_LOCK_TIMEOUT the same way
+FIX_LOG = "## Carrier log"
+FIX_CLOSED = ("done", "merged", "dropped", "cancelled")
+PROJECT_DEAD = ("done", "merged", "dropped")
+LOG_LINES = 15
+LOG_COLS = 200
+FAILING_SHOWN = 3
+STEM_TRIES = 1000
+HELD_WHY = "held (ADR 0028 § 3): left to its session; its close follow-up task carries it"
+UNSTABLE_MARK = "GitHub reads it unstable:"
+TAGGED = re.compile(r"^- \S+ [0-9a-f]{12} \((red|base|review)\):")
+FM_KEY = re.compile(r"^([A-Za-z0-9_][A-Za-z0-9_.-]*):(?:[ \t]+(.*))?$")
+FM_ITEM = re.compile(r"^[ \t]*-(?:[ \t]+(.*))?$")
+LINK = re.compile(r"\[\[(.*)\]\]", re.S)
+LOG_TS = re.compile(r"^\ufeff?[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(?:\.[0-9]+)?Z ?")
+ANSI = re.compile(r"\x1b\[[0-9;?]*[A-Za-z]")
 MARK = 32
 OURS, BASE, SEP, THEIRS = "<" * MARK + " head", "|" * MARK + " base", "=" * MARK, ">" * MARK + " origin"
 DROP = object()   # a handler's verdict: no entry for this PR
@@ -441,7 +627,8 @@ def _pages(text):
 
 
 def newest_marker(comments, login):
-    """(id, S or None) for the newest marker-class comment by login, or None: the one copy of the marker grammar."""
+    """(id, S or None, cls) for the newest marker-class comment by login, or None: the one copy of the marker grammar.
+    cls is which marker it is, `queued`, `withdrawn` or `held`; S is set only for a queued one."""
     best = None
     for c in comments:
         if not isinstance(c, dict) or (c.get("user") or {}).get("login") != login:
@@ -453,7 +640,9 @@ def newest_marker(comments, login):
     if best is None:
         return None
     cid, first = best
-    return (cid, first[len(QUEUED):].strip()) if first.startswith(QUEUED) else (cid, None)
+    if first.startswith(QUEUED):
+        return cid, first[len(QUEUED):].strip(), "queued"
+    return cid, None, "withdrawn" if first.startswith(WITHDRAWN) else "held"
 
 
 def closeout_shaped(rel):
@@ -563,6 +752,41 @@ class Pass:
         self.superseded = set()
         self._scratch = None
         self.wrote = False
+        self.vault = Path(os.path.expanduser(args.vault))
+        self.tasks = self.vault / "Work" / "Tasks"
+        self.fx = {"key": None, "clear": None}   # this PR's fix verdicts, settled once in _finish (_settle_fix)
+        self.projects, self.origins = {}, {}
+        self._archived, self._register = None, False
+
+    def vault_ok(self):
+        return self.tasks.is_dir()
+
+    def archived(self):
+        """The fix-task names under Work/Tasks/Archive/ (any year folder), read once per pass."""
+        if self._archived is None:
+            try:
+                self._archived = {p.name for p in (self.tasks / "Archive").rglob("landing-fix-*.md")}
+            except OSError:
+                self._archived = set()
+        return self._archived
+
+    def register(self):
+        """landing-register.py, loaded by path once per pass (its ORIGIN_RE and parse_slug), or None."""
+        if self._register is False:
+            try:
+                spec = importlib.util.spec_from_file_location("thread_landing_register", str(REGISTER))
+                mod = importlib.util.module_from_spec(spec)
+                spec.loader.exec_module(mod)
+                self._register = mod
+            except Exception:  # noqa: BLE001 — an unloadable register matches no checkout: no fix task, said why
+                self._register = None
+        return self._register
+
+    def keep(self, it, e):
+        """A vault write saves the entry at once (step 4), so a cut pass keeps its fix record."""
+        if not self.dry:
+            self.state[it.key] = dict(e)
+            self.save()
 
     # -- output and state --
     def say(self, line):
@@ -665,25 +889,30 @@ class Pass:
                 self.gum[k] = (None, None)
         return self.gum[k]
 
-    def may_write(self, slug):
-        """None when a write to slug may go ahead (push permission, then the register, read fresh), else why not."""
+    def write_block(self, slug):
+        """(why, definite): why is None when a write to slug may go ahead (push permission, then the register, read
+        fresh), else why not; definite when the refusal is a verdict (no push permission read, or the register's exit
+        3), not a read that failed."""
         info = self.repo(slug)
         if info["err"]:
-            return info["err"]
+            return info["err"], False
         if not info["push"]:
-            return f"no push permission on {slug}"
+            return f"no push permission on {slug}", True
         t = _bound(GH_TIMEOUT)
         rc, out, err, timed_out = _run([sys.executable, "-B", str(REGISTER), "check", "--slug", slug], t)
         if timed_out:
-            return f"the landing register check ran past {t:.0f} s"
+            return f"the landing register check ran past {t:.0f} s", False
         if rc != 0:
-            return f"landing register: {_flat(out) or _why(err) or f'exit {rc}'}"
-        return None
+            return f"landing register: {_flat(out) or _why(err) or f'exit {rc}'}", rc == 3
+        return None, False
 
     def act(self, slug, key, desc, argv):
-        """One GitHub write, after may_write: (True, None), or (False, why). --dry-run prints `would <desc>`."""
-        why = self.may_write(slug)
+        """One GitHub write, after write_block: (True, None), or (False, why). --dry-run prints `would <desc>`. A
+        definite refusal is this pass's clearing verdict (the fix task paragraph's settle rule)."""
+        why, definite = self.write_block(slug)
         if why:
+            if definite:
+                self.fx["clear"] = f"no write ({why})"
             return False, f"no write ({why})"
         if self.dry:
             self.say(f"{key}: would {desc}")
@@ -825,7 +1054,10 @@ def handle(ctx, it):
     """One PR: Phase A, then Phase B, then its entry written. False when the deadline cut it (the pass stops)."""
     old = ctx.state.get(it.key)
     e = dict(old) if isinstance(old, dict) else None
+    if e is not None and isinstance(e.get("fix"), dict):
+        e["fix"] = dict(e["fix"])
     ctx.wrote = False
+    ctx.fx = {"key": None, "clear": None}
     try:
         res = pr_pass(ctx, it, e)
     except _Deadline:
@@ -847,11 +1079,19 @@ def _entry(ctx, it, url, head):
     return {"url": url, "since": ctx.stamp, "movedAt": ctx.stamp, "head": head}
 
 
+def _day_old(ctx, e, field="movedAt"):
+    """The entry is unmoved for a day: movedAt (first sight or the last author change) 24 h or more before now; with
+    field baseRedSince, its base has read red or infra that long (6.4b)."""
+    moved = _parse_iso(e.get(field))
+    return moved is not None and moved <= ctx.now and ctx.now - moved >= STUCK_AFTER
+
+
 def _finish(ctx, it, e, kind, outcome):
-    """The entry after its act: the kind, outcome, handledAt and the stuck rule (step 7)."""
+    """The entry after its act: the kind, outcome, handledAt, fix.current settled (_settle_fix), then the stuck rule
+    (step 7), which a covered landing never meets."""
     e["kind"], e["outcome"], e["handledAt"] = kind, outcome, ctx.stamp
-    moved = _parse_iso(e.get("movedAt"))
-    if moved is not None and moved <= ctx.now and ctx.now - moved >= STUCK_AFTER:
+    _settle_fix(ctx, it, e, outcome)
+    if not _covered(e) and _day_old(ctx, e):
         if not e.get("stuck") and not ctx.dry:
             ctx.say(f"{it.key}: stuck: unmoved since {str(e.get('movedAt'))[:16]}: {outcome}")
         e["stuck"] = True
@@ -879,17 +1119,20 @@ def pr_pass(ctx, it, e):
             e["outcome"], e["handledAt"] = f"cannot read the PR: {ex}", ctx.stamp
             return e
         return _finish(ctx, it, e, e.get("kind") or "unread", f"cannot read the PR: {ex}")
+    head_ref, head = pr["head"]["ref"], pr["head"]["sha"]
     if pr.get("merged"):
+        _drop(ctx, it, e, "the PR merged: nothing left for this landing", head)
         return DROP
     if pr["state"] == "closed":
         if e and e.get("supersededBy"):
             return tombstone(ctx, it, e)
+        _drop(ctx, it, e, "the PR was closed", head)
         return DROP
     labels = {x.get("name") for x in (pr.get("labels") or []) if isinstance(x, dict)}
-    head_ref, head = pr["head"]["ref"], pr["head"]["sha"]
     base_ref = pr["base"]["ref"]
     grammar = bool(CLOSE_RE.match(head_ref))
     if "landing" not in labels and not grammar:
+        _drop(ctx, it, e, "the PR is no longer a landing", head)
         return DROP
     url = pr.get("html_url") or it.url
     if e is None:
@@ -897,13 +1140,18 @@ def pr_pass(ctx, it, e):
     e["url"] = url
     e.pop("supersededBy", None)
     e.pop("closedAt", None)
+    _refresh_fix(ctx, e)
 
     # 5d: the head, for the clock only
     prev = e.get("head")
     if prev and prev != head:
+        e.pop("redHeld", None)   # the hold is head-specific
+        if e.get("redBrought") != prev:
+            e.pop("redBrought", None)   # kept for one hop only: 6.4b reads it on the head its update-branch made
         carrier = head == e.get("pushed") or ctx.gh_update_merge(slug, head, prev, base_ref)[0] is not False
         if not carrier:
             e["movedAt"], e["reruns"], e["rerunHead"] = ctx.stamp, 0, head
+            ctx.fx["clear"] = "an author push"
     e["head"] = head
 
     login = (pr.get("user") or {}).get("login")
@@ -917,19 +1165,21 @@ def pr_pass(ctx, it, e):
 
     # 5c / 5f: the kind
     before = (e.get("markerId"), e.get("bound"), e.get("cleared"))
-    why = None
+    why, review = None, False
     if grammar:
         kind = "close-out"
     elif pr.get("draft"):
-        kind, why = "own-unqueued", "a draft: left to its session"
+        kind, why, review = "own-unqueued", "a draft: left to its session", None   # None: its marker read at filing
     elif pr.get("auto_merge"):
         kind = "own-auto"
     else:
-        kind, why = own_kind(ctx, it, pr, e)
+        kind, why, review = own_kind(ctx, it, pr, e)
     if (e.get("markerId"), e.get("bound"), e.get("cleared")) != before and not ctx.dry:
         ctx.state[it.key] = dict(e)   # O1: a changed binding is on disk before any write for this PR
         ctx.save()
     if kind == "own-unqueued":
+        if _day_old(ctx, e):
+            why = _review_fix(ctx, it, pr, e, why, review)
         return _finish(ctx, it, e, kind, why)
 
     # 5e: the checks
@@ -941,37 +1191,44 @@ def pr_pass(ctx, it, e):
 
 
 def own_kind(ctx, it, pr, e):
-    """(kind, why) of an own PR with no auto-merge: its newest marker, then the binding (5f)."""
+    """(kind, why, review) of an own PR with no auto-merge: its newest marker, then the binding (5f). review is True
+    only when the comments were read and the newest marker is no hold: an own-unqueued PR may then get its review
+    fix task a day on (step 6.0). A hold is a clearing verdict (the fix task paragraph's settle rule)."""
     slug, n = it.slug, it.n
     try:
         m = newest_marker(api_json(f"repos/{slug}/issues/{n}/comments?per_page=100", paginate=True), ctx.me)
     except GhError as ex:
-        return "own-unqueued", f"cannot read its comments ({ex}): left to its session"
+        return "own-unqueued", f"cannot read its comments ({ex}): left to its session", False
+    if m is not None and m[2] == "held":
+        ctx.fx["clear"] = HELD_WHY
+        return "own-unqueued", HELD_WHY, False
     if m is None or m[1] is None:
-        return "own-unqueued", "not queued: left to its session"
-    cid, s = m
+        return "own-unqueued", "not queued: left to its session", True
+    cid, s, _ = m
     if e.get("markerId") == cid and e.get("cleared"):
-        return "own-unqueued", "its queue marker no longer binds: left to its session"
+        return "own-unqueued", "its queue marker no longer binds: left to its session", True
     b = e.get("bound") if e.get("markerId") == cid and e.get("bound") else s
     head = pr["head"]["sha"]
     if head == b or (head == e.get("pushed") and e.get("pushedFrom") == b):
         e.update(markerId=cid, bound=head, cleared=False)
-        return "own-marked", None
+        return "own-marked", None, False
     v, p2 = ctx.gh_update_merge(slug, head, b, pr["base"]["ref"])
     if v is None:
-        return "own-unqueued", "cannot read whether the head follows its queue marker: left to its session"
+        return "own-unqueued", "cannot read whether the head follows its queue marker: left to its session", False
     if v:
         try:
             cl = ctx.clone(slug, pr["base"]["ref"])
             cl.fetch_head(n, pr["head"]["ref"], head)
             follows = cl.merge_tree(b, p2) == cl.git("rev-parse", f"{head}^{{tree}}")
         except CloneError as ex:
-            return "own-unqueued", f"cannot read whether the head follows its queue marker ({ex}): left to its session"
+            return ("own-unqueued", f"cannot read whether the head follows its queue marker ({ex}): left to its session",
+                    False)
         if follows:
             e.update(markerId=cid, bound=head, cleared=False)
-            return "own-marked", None
+            return "own-marked", None, False
     e.update(markerId=cid, bound=None, cleared=True)
-    return "own-unqueued", f"its queue marker is for {str(b)[:12]} and the head moved past it: left to its session"
+    return ("own-unqueued", f"its queue marker is for {str(b)[:12]} and the head moved past it: left to its session",
+            True)
 
 
 def read_checks(ctx, slug, sha, base_ref):
@@ -1039,7 +1296,10 @@ def act(ctx, it, pr, e, kind, checks):
     auto_on = bool(pr.get("auto_merge"))
     note = None
     if pr.get("draft"):
+        ctx.fx["clear"] = "a draft close-out"
         return _finish(ctx, it, e, kind, "a draft: left to its session")
+    if green:
+        ctx.fx["clear"] = f"checks {checks['cls']}"
 
     if kind == "close-out":
         sup = supersession(ctx, it, pr, e)
@@ -1062,27 +1322,23 @@ def act(ctx, it, pr, e, kind, checks):
         return _finish(ctx, it, e, kind, f"{note}; {outcome}" if note else outcome)
 
     if settled and st == "dirty":
-        return done(resolver(ctx, it, pr, e))
+        if _held(e, head, checks):
+            return done(f"dirty: {_hold_text(e, head)}")
+        outcome, verdict = resolver(ctx, it, pr, e)
+        if verdict in ("conflict", "nowrite"):
+            ctx.fx["clear"] = outcome
+        return done(outcome)
     if checks["cls"] in ("red", "infra") and not checks["pending"]:
         reruns = (e.get("reruns") or 0) if e.get("rerunHead") == head else 0
         if reruns >= RERUN_MAX:
-            return done("rerun budget spent")
-        return done(rerun(ctx, it, pr, e, checks, reruns))
+            outcome, real = "rerun budget spent", True
+        else:
+            outcome, real = rerun(ctx, it, pr, e, checks, reruns)
+        if real:
+            outcome = (_closeout_red if kind == "close-out" else _own_red)(ctx, it, pr, e, checks, outcome)
+        return done(outcome)
     if settled and st == "behind" and green:
-        if ctx.slots.get(slug.lower()):
-            return done("waiting its turn to be brought current")
-        ctx.slots[slug.lower()] = key
-        if not ctx.dry:
-            e["slotAt"] = ctx.stamp
-        ok, why = ctx.act(slug, key, f"request update-branch (from {head[:12]})",
-                          ["api", "--method", "PUT", f"repos/{slug}/pulls/{n}/update-branch",
-                           "-f", f"expected_head_sha={head}"])
-        if not ok:
-            return done(f"update-branch not requested: {why}")
-        if not ctx.dry:
-            e["updatedFrom"] = head
-            ctx.say(f"{key}: update-branch requested (from {head[:12]})")
-        return done(f"update-branch requested (from {head[:12]})")
+        return done(_bring_current(ctx, it, e, head))
     if settled and st in ("clean", "has_hooks") and green:
         if kind == "close-out" and not auto_on:
             sha = head
@@ -1097,34 +1353,188 @@ def act(ctx, it, pr, e, kind, checks):
         if ctx.dry:
             return done(f"would merge at {sha[:12]}")
         ctx.say(f"{key}: merged at {sha[:12]}")
+        _drop(ctx, it, e, "the PR merged: nothing left for this landing", head)
         return DROP
     return done(_wait_outcome(pr, checks, settled))
+
+
+def _bring_current(ctx, it, e, head, red=False):
+    """Step 6.5's bring-current, shared with 6.4b and (d): the repo's slot, then `PUT update-branch` pinned to the
+    head; its outcome. red (6.4b and (d), a real red brought current): a request made records entry.redBrought."""
+    slug, n, key = it.slug, it.n, it.key
+    if ctx.slots.get(slug.lower()):
+        return "waiting its turn to be brought current"
+    ctx.slots[slug.lower()] = key
+    if not ctx.dry:
+        e["slotAt"] = ctx.stamp
+    ok, why = ctx.act(slug, key, f"request update-branch (from {head[:12]})",
+                      ["api", "--method", "PUT", f"repos/{slug}/pulls/{n}/update-branch",
+                       "-f", f"expected_head_sha={head}"])
+    if not ok:
+        return f"update-branch not requested: {why}"
+    if not ctx.dry:
+        e["updatedFrom"] = head
+        if red:
+            e["redBrought"] = head
+        ctx.say(f"{key}: update-branch requested (from {head[:12]})")
+    return f"update-branch requested (from {head[:12]})"
+
+
+# ---- step 6.4b and (d): a real red ------------------------------------------------------------------------------------
+
+def _failing(checks):
+    """The sorted names of the checks that read failing: a completed non-pass check run, a status neither success
+    nor pending."""
+    names = {n for n, r in checks.get("runs", {}).items()
+             if r.get("status") == "completed" and (r.get("conclusion") or "") not in PASS_CONC}
+    names |= {n for n, s in checks.get("statuses", {}).items() if (s.get("state") or "") not in ("success", "pending")}
+    return sorted(names)
+
+
+def _red_key(head, checks):
+    return f"red:{head}:{','.join(_failing(checks))}"
+
+
+def _held(e, head, checks):
+    """The hold (6.4b): a close-out read red while up to date on this head, its checks reading neither green nor none,
+    and its fix task open, unreadable or absent. 6.3 and 6.4b read it; nothing else reads redHeld."""
+    if e.get("redHeld") != head or checks["cls"] in ("green", "none"):
+        return False
+    fx = e.get("fix")
+    return not isinstance(fx, dict) or fx.get("open") is not False
+
+
+def _hold_text(e, head):
+    fx = e.get("fix") if isinstance(e.get("fix"), dict) else {}
+    named = f" [[{fx['task']}]]" if fx.get("task") else ""
+    return (f"held for its fix task{named}: red while up to date at {head[:12]}, brought current again only once that "
+            "task closes or its checks read green")
+
+
+def _closed_text(stem):
+    return f"its fix task [[{stem}]] is closed, and the landing has not moved (ADR 0078 d1)"
+
+
+def _compare(ctx, it, tip, head):
+    """GET compare/<tip>...<head>'s status; GhError when unread."""
+    try:
+        status = api_json(f"repos/{it.slug}/compare/{tip}...{head}").get("status")
+    except AttributeError:
+        raise GhError("unexpected compare JSON") from None
+    if not isinstance(status, str):
+        raise GhError("no compare status")
+    return status
+
+
+def _rule_d(ctx, it, pr, e, prev, stem):
+    """(d) the fix has landed: a real red whose fix task is closed with the same key is brought current once its
+    base is green and it is behind or diverged; otherwise the closed task is named and the landing is listed."""
+    head, base_ref = pr["head"]["sha"], pr["base"]["ref"]
+    try:
+        tip = ctx.base_tip(it.slug, base_ref)
+        if read_checks(ctx, it.slug, tip, base_ref)["cls"] in ("green", "none") \
+                and _compare(ctx, it, tip, head) in ("behind", "diverged") and pr.get("mergeable_state") != "unknown":
+            return f"{prev}; its fix task [[{stem}]] is closed: {_bring_current(ctx, it, e, head, red=True)}"
+    except GhError:
+        pass
+    return f"{prev}; {_closed_text(stem)}"
+
+
+def _own_red(ctx, it, pr, e, checks, prev):
+    """A real red on own-auto or own-marked: the red variant at once, or (d) once its task is closed."""
+    state, text = _file_fix(ctx, it, pr, e, "red", _red_key(pr["head"]["sha"], checks), prev, checks)
+    if state == "closed":
+        return _rule_d(ctx, it, pr, e, prev, text)
+    return f"{prev}; {text}"
+
+
+def _closeout_red(ctx, it, pr, e, checks, prev):
+    """Step 6.4b: a close-out's real red read against its base (the module docstring's rules, in order)."""
+    slug, head, base_ref = it.slug, pr["head"]["sha"], pr["base"]["ref"]
+    fx = e.get("fix") if isinstance(e.get("fix"), dict) else None
+    rkey = _red_key(head, checks)
+    rwhy = f"{prev}, while up to date with a green {base_ref}"
+    if _held(e, head, checks):
+        state, text = _file_fix(ctx, it, pr, e, "red", rkey, rwhy, checks)
+        return f"{prev}; {_hold_text(e, head)}" + (f"; {text}" if state == "none" else "")
+    if e.get("redHeld") == head and fx and fx.get("open") is False:
+        state, text = _file_fix(ctx, it, pr, e, "red", rkey, rwhy, checks)
+        return _rule_d(ctx, it, pr, e, prev, text) if state == "closed" else f"{prev}; {text}"
+    brought = e.get("redBrought")
+    if brought and brought != head and ctx.gh_update_merge(slug, head, brought, base_ref)[0] is True:
+        # the head this red's bring-current made: it merged a green base tip, so it is read as up to date
+        e["redHeld"] = head
+        made = f"on the head update-branch made from a green {base_ref}"
+        state, text = _file_fix(ctx, it, pr, e, "red", rkey, f"{prev}, {made}", checks)
+        return f"{prev}; {_closed_text(text)}" if state == "closed" else f"{prev}; red {made}: {text}"
+    try:
+        tip = ctx.base_tip(slug, base_ref)
+        bchecks = read_checks(ctx, slug, tip, base_ref)
+    except GhError as ex:
+        return f"{prev}; cannot read {base_ref}'s checks ({ex})"
+    bcls, at = bchecks["cls"], f"its base {base_ref} reads {bchecks['cls']} at {tip[:12]}"
+    if bcls not in ("green", "none"):
+        if bcls != "pending":
+            e.setdefault("baseRedSince", ctx.stamp)   # timed from the base's first red read, kept across pending
+        if bcls == "pending" or not _day_old(ctx, e, "baseRedSince"):
+            return f"{prev}; {at}: waiting for it to turn green"
+        state, text = _file_fix(ctx, it, pr, e, "base", f"base:{head}", f"{at}, a day on", bchecks)
+        return f"{prev}; {at}; {_closed_text(text)}" if state == "closed" else f"{prev}; {at}: {text}"
+    e.pop("baseRedSince", None)
+    if fx and str(fx.get("key") or "").startswith("base:"):
+        ctx.fx["clear"] = at   # the base task's stop is gone; a key this pass computes still wins
+    try:
+        status = _compare(ctx, it, tip, head)
+    except GhError as ex:
+        return f"{prev}; cannot read how {head[:12]} compares with {base_ref} ({ex})"
+    if status in ("behind", "diverged"):
+        if pr.get("mergeable_state") == "unknown":
+            return f"{prev}; GitHub has not settled its mergeability"
+        return f"{prev}; {_bring_current(ctx, it, e, head, red=True)}"
+    if status not in ("ahead", "identical"):
+        return f"{prev}; cannot read how {head[:12]} compares with {base_ref} (status {status})"
+    e["redHeld"] = head
+    state, text = _file_fix(ctx, it, pr, e, "red", rkey, rwhy, checks)
+    if state == "closed":
+        return f"{prev}; {_closed_text(text)}"
+    return f"{prev}; red while up to date with a green {base_ref}: {text}"
 
 
 # ---- step 6.4: the rerun rule -----------------------------------------------------------------------------------------
 
 def _classify(steps):
+    """(verdict, why): merge-task.sh --classify-steps' `infra` or `genuine`, `genuine` too with no merge-task.sh (a
+    fixed fact of the install), and `unread` (why says how) for a cut, a non-zero exit or any other output."""
     if not MERGE_TASK.is_file():
-        return "genuine"
+        return "genuine", None
     t = _bound(CLASSIFY_TIMEOUT)
-    rc, out, _, timed_out = _run(["bash", str(MERGE_TASK), "--classify-steps"], t, input="\n".join(steps) + "\n")
-    return "infra" if not timed_out and rc == 0 and out.strip() == "infra" else "genuine"
+    rc, out, err, timed_out = _run(["bash", str(MERGE_TASK), "--classify-steps"], t, input="\n".join(steps) + "\n")
+    if timed_out:
+        return "unread", f"it ran past {t:.0f} s and was stopped"
+    if rc != 0:
+        return "unread", f"exit {rc}: {_why(err or out) or 'no output'}"
+    v = out.strip()
+    if v in ("infra", "genuine"):
+        return v, None
+    return "unread", f"it printed {_flat(v)[:60]!r}"
 
 
 def _rollups(ctx, it, pr, run, jobs, bad):
-    """Step 6.4's roll-up read: (bad less each roll-up job that stands for a non-pass job it needs, None), or (None,
-    why) when the head's workflow cannot be read or a roll-up is not proven (fail-closed)."""
+    """Step 6.4's roll-up read: (bad less each roll-up job that stands for a non-pass job it needs, None, None) on
+    exit 0 or 3; (None, why, True) when a roll-up is not proven (exit 1) or a non-pass job has no id, a real red; and
+    (None, why, False) when the head's workflow could not be read (no lead-integrate.py, a clone or head fetch that
+    fails, the reader cut at its bound, any other exit, unreadable JSON), unread."""
     head = pr["head"]["sha"]
     if not LEAD_INTEGRATE.is_file():
-        return None, f"run {run}'s roll-up checks cannot be read (no lead-integrate.py)"
+        return None, f"run {run}'s roll-up checks cannot be read (no lead-integrate.py)", False
     try:
         cl = ctx.clone(it.slug, pr["base"]["ref"])
         cl.fetch_head(it.n, pr["head"]["ref"], head)
     except CloneError as ex:
-        return None, f"run {run}'s roll-up checks cannot be read ({ex})"
+        return None, f"run {run}'s roll-up checks cannot be read ({ex})", False
     ids = [str(j["id"]) for j in bad if isinstance(j.get("id"), int)]
     if len(ids) != len(bad):
-        return None, f"run {run} has a non-pass job with no id"
+        return None, f"run {run} has a non-pass job with no id", True
     doc = {"jobs": [dict(j, databaseId=j.get("id")) for j in jobs if isinstance(j, dict)]}
     wf = next((j.get("workflow_name") for j in jobs if isinstance(j, dict) and j.get("workflow_name")), None)
     if isinstance(wf, str):
@@ -1135,73 +1545,84 @@ def _rollups(ctx, it, pr, run, jobs, bad):
     rc, out, err, timed_out = _run([sys.executable, "-B", str(LEAD_INTEGRATE), "shards", "--repo", str(cl.dir),
                                     "--head", head, "--jobs", str(f), "--whole", "--job-id", *ids], t)
     if timed_out:
-        return None, f"run {run}'s roll-up read ran past {t:.0f} s and was stopped"
+        return None, f"run {run}'s roll-up checks cannot be read (the reader ran past {t:.0f} s and was stopped)", False
     if rc == 3:
-        return bad, None
+        return bad, None, None
+    if rc == 1:
+        return None, f"run {run}: a roll-up check is not proven ({_why(err) or 'lead-integrate.py shards exit 1'})", True
+    if rc != 0:
+        return None, (f"run {run}'s roll-up checks cannot be read (lead-integrate.py shards exit {rc}: "
+                      f"{_why(err) or 'no output'})"), False
     try:
-        kept = {j.get("databaseId") for j in json.loads(out)["jobs"]} if rc == 0 else None
+        kept = {j.get("databaseId") for j in json.loads(out)["jobs"]}
     except (ValueError, KeyError, TypeError, AttributeError):
-        kept = None
-    if kept is None:
-        return None, f"run {run}: a roll-up check is not proven ({_why(err) or f'lead-integrate.py shards exit {rc}'})"
-    return [j for j in bad if j.get("id") in kept], None
+        return None, f"run {run}'s roll-up checks cannot be read (unreadable JSON from lead-integrate.py shards)", False
+    return [j for j in bad if j.get("id") in kept], None, None
 
 
 def rerun(ctx, it, pr, e, checks, reruns):
+    """Step 6.4: (outcome, real). real is True when the next pass would read the same head the same way (a red no
+    re-run can clear), False when a later pass may read it otherwise (a read that failed, a re-run asked for)."""
     slug, key, head = it.slug, it.key, pr["head"]["sha"]
-    genuine, runs, steps, owners = None, [], [], []
+    stop, real, runs, steps, owners = None, True, [], [], []
     for name, r in checks["runs"].items():
         if r.get("status") != "completed" or (r.get("conclusion") or "") in PASS_CONC:
             continue
         m = JOB_URL.search(str(r.get("details_url") or ""))
         if ((r.get("app") or {}).get("slug")) != "github-actions" or not m:
-            genuine = f"{name} is not a GitHub Actions job"
+            stop = f"{name} is not a GitHub Actions job"
             break
         if int(m.group(1)) not in runs:
             runs.append(int(m.group(1)))
     for name, s in checks["statuses"].items():
-        if not genuine and (s.get("state") or "") not in ("success", "pending"):
-            genuine = f"status {name} is {s.get('state')}"
+        if not stop and (s.get("state") or "") not in ("success", "pending"):
+            stop = f"status {name} is {s.get('state')}"
     words = {"failure": "failed", "timed_out": "timed out", "startup_failure": "failed to start"}
-    for run in ([] if genuine else runs):
+    for run in ([] if stop else runs):
         try:
             jobs = api_json(f"repos/{slug}/actions/runs/{run}/jobs?per_page=100").get("jobs") or []
         except (GhError, AttributeError) as ex:
-            genuine = f"cannot read the jobs of run {run} ({ex})"
+            stop, real = f"cannot read the jobs of run {run} ({ex})", False
             break
         bad = [j for j in jobs if isinstance(j, dict) and j.get("status") == "completed"
                and (j.get("conclusion") or "") not in PASS_CONC]
         if not bad:
-            genuine = f"run {run} shows no failed job"
+            stop, real = f"run {run} shows no failed job", False
             break
         if len(bad) > 1 and any((j.get("conclusion") or "") != "cancelled" for j in bad):
-            bad, genuine = _rollups(ctx, it, pr, run, jobs, bad)   # a roll-up is read through the jobs it needs
-            if not genuine and not bad:
-                genuine = f"run {run} shows no failed job beside its roll-up checks"
-            if genuine:
+            bad, why, rreal = _rollups(ctx, it, pr, run, jobs, bad)   # a roll-up is read through the jobs it needs
+            if why:
+                stop, real = why, rreal
+                break
+            if not bad:
+                stop = f"run {run} shows no failed job beside its roll-up checks"
                 break
         for j in bad:
             c, jn = j.get("conclusion") or "", _flat(j.get("name")) or str(j.get("id"))
             if c == "cancelled":
                 continue
             if c not in words:
-                genuine = f"{jn} concluded {c}"
+                stop = f"{jn} concluded {c}"
                 break
             failed = [_flat(s.get("name")) for s in (j.get("steps") or [])
                       if isinstance(s, dict) and s.get("conclusion") == "failure"]
             if not failed:
-                genuine = f"{jn} {words[c]} with no failed step"
+                stop = f"{jn} {words[c]} with no failed step"
                 break
             steps += failed
             owners.append(f"{jn} ({failed[0]})")
-        if genuine:
+        if stop:
             break
-    if not genuine and steps and _classify(steps) != "infra":
-        genuine = "a genuine failure in " + "; ".join(owners[:3])
-    if genuine:
-        return f"not re-run: {genuine}"
+    if not stop and steps:
+        verdict, why = _classify(steps)
+        if verdict == "unread":
+            return f"not re-run: the step classifier could not be read ({why})", False
+        if verdict != "infra":
+            stop = "a genuine failure in " + "; ".join(owners[:3])
+    if stop:
+        return f"not re-run: {stop}", real
     if not runs:
-        return "not re-run: no GitHub Actions run to re-run"
+        return "not re-run: no GitHub Actions run to re-run", False
     if not ctx.dry:
         e["rerunHead"], e["reruns"] = head, reruns + 1
     failed = []
@@ -1211,11 +1632,12 @@ def rerun(ctx, it, pr, e, checks, reruns):
         if not ok:
             failed.append(f"run {run}: {why}")
     if failed:
-        return "re-run failed: " + "; ".join(failed)
+        return "re-run failed: " + "; ".join(failed), False
     what = "cancelled jobs" if not steps else "infra steps " + ", ".join(sorted(set(steps)))[:120]
     if not ctx.dry:
         ctx.say(f"{key}: re-ran run{'s' if len(runs) > 1 else ''} {', '.join(map(str, runs))} ({what})")
-    return f"re-ran run{'s' if len(runs) > 1 else ''} {', '.join(map(str, runs))} ({what}; {reruns + 1} of {RERUN_MAX})"
+    return (f"re-ran run{'s' if len(runs) > 1 else ''} {', '.join(map(str, runs))} ({what}; {reruns + 1} of "
+            f"{RERUN_MAX})"), False
 
 
 # ---- step 6.3: the resolver -------------------------------------------------------------------------------------------
@@ -1281,32 +1703,33 @@ def _resolve_text(text, path, head_first):
 
 
 def resolver(ctx, it, pr, e):
-    """Step 6.3: an outcome."""
+    """Step 6.3: (outcome, verdict), verdict one of unread, clean, conflict, nowrite, pushed, failed (the module
+    docstring's step 6.3); conflict and nowrite are clearing verdicts."""
     slug, n, key = it.slug, it.n, it.key
     head, head_ref = pr["head"]["sha"], pr["head"]["ref"]
     base_ref = pr["base"]["ref"]
     if ctx.slots.get(slug.lower()):
-        return "dirty: waiting its turn to be brought current"
+        return "dirty: waiting its turn to be brought current", "unread"
     try:
         cl = ctx.clone(slug, base_ref)
         base = cl.base
         cl.fetch_head(n, head_ref, head)
         rc, out = cl.git("merge-tree", "--write-tree", "-z", head, base, ok=(0, 1), raw=True)
         if rc == 0:
-            return "dirty on GitHub, but the merge is clean: left to update-branch"
+            return "dirty on GitHub, but the merge is clean: left to update-branch", "clean"
         tree, conflicts, msgs = _parse_merge_tree(out.decode("utf-8", "replace"))
         for paths, typ in msgs:
             if typ not in ("Auto-merging", "CONFLICT (contents)"):
-                return f"not resolved: a {typ} conflict on {', '.join(paths)}"
+                return f"not resolved: a {typ} conflict on {', '.join(paths)}", "conflict"
         for path in sorted(conflicts):
             if not closeout_shaped(path):
-                return f"not resolved: {path} conflicts, and it is no close-out path"
+                return f"not resolved: {path} conflicts, and it is no close-out path", "conflict"
         mb = cl.git("merge-base", head, base)
         resolved = {}
         for path in sorted(conflicts):
             stages = conflicts[path]
             if set(stages) != {1, 2, 3}:
-                return f"not resolved: {path} is not changed on both sides"
+                return f"not resolved: {path} is not changed on both sides", "conflict"
             files = {}
             d = Path(ctx.scratch()) / f"m{n}"
             d.mkdir(exist_ok=True)
@@ -1327,7 +1750,7 @@ def resolver(ctx, it, pr, e):
 
             text, why = _resolve_text(merged.decode("utf-8", "replace"), path, head_first)
             if text is None:
-                return f"not resolved: {why}"
+                return f"not resolved: {why}", "conflict"
             resolved[path] = (stages[2][0], text)
         idx = {"GIT_INDEX_FILE": str(Path(ctx.scratch()) / f"index-{n}")}
         cl.git("read-tree", tree, env=idx)
@@ -1340,20 +1763,20 @@ def resolver(ctx, it, pr, e):
                + "".join(f"- {p}\n" for p in sorted(resolved)))
         commit = cl.git("commit-tree", new_tree, "-p", head, "-p", base, input=msg)
     except CloneError as ex:
-        return f"not resolved: {ex}"
+        return f"not resolved: {ex}", "unread"
     names = ", ".join(sorted(resolved))
     if ctx.dry:
-        why = ctx.may_write(slug)
+        why, definite = ctx.write_block(slug)
         if why:
-            return f"not pushed: no write ({why})"
+            return f"not pushed: no write ({why})", "nowrite" if definite else "unread"
         ctx.say(f"{key}: would resolve {names} and push {commit[:12]}")
-        return f"would resolve {names}"
+        return f"would resolve {names}", "pushed"
     e["pushed"], e["pushedFrom"] = commit, head
     ctx.state[key] = dict(e)   # O1: the push is recorded before it is made
     ctx.save()
-    why = ctx.may_write(slug)
+    why, definite = ctx.write_block(slug)
     if why:
-        return f"not pushed: no write ({why})"
+        return f"not pushed: no write ({why})", "nowrite" if definite else "unread"
     ctx.slots[slug.lower()] = key
     e["slotAt"] = ctx.stamp
     ctx.wrote = True
@@ -1361,9 +1784,9 @@ def resolver(ctx, it, pr, e):
         cl.git("-c", "core.hooksPath=/dev/null", "push", "origin", f"{commit}:refs/heads/{head_ref}",
                timeout=PUSH_TIMEOUT)
     except CloneError as ex:
-        return f"resolved {names}, but the push failed: {ex}"
+        return f"resolved {names}, but the push failed: {ex}", "failed"
     ctx.say(f"{key}: resolved {names} and pushed {commit[:12]}")
-    return f"resolved {names} and pushed {commit[:12]}"
+    return f"resolved {names} and pushed {commit[:12]}", "pushed"
 
 
 # ---- step 6.1 and step 8: supersession and tombstones -----------------------------------------------------------------
@@ -1529,8 +1952,10 @@ def close_superseded(ctx, it, pr, e, sup):
     ctx.superseded.add(key)
     ctx.say(f"{key}: closed as superseded ({by})")
     pass_on(ctx, key, None if what == "base" else l)
+    _drop(ctx, it, e, f"closed as superseded: {by}", pr["head"]["sha"])
     if what == "base":
         return DROP
+    e.pop("fix", None)   # a tombstone carries no fix record
     e["supersededBy"], e["closedAt"] = l[0].key, ctx.stamp
     e["kind"], e["outcome"], e["handledAt"], e["stuck"] = "close-out", f"closed as superseded ({by})", ctx.stamp, False
     return e
@@ -1587,6 +2012,645 @@ def tombstone(ctx, it, e):
     return e
 
 
+# ---- the fix task (ADR 0078 d2 as amended by p47-20) ------------------------------------------------------------------
+
+def _drop_comment(raw):
+    """reconcile-rollout.py _drop_comment's rule: a value without its ` # comment`; a lone comment is ''."""
+    return re.sub(r"\s+#.*$|^#(\s.*)?$", "", raw)
+
+
+def _scalar(value):
+    """reconcile-rollout.py _scalar's rule: ` # comment` dropped, quotes and whitespace stripped ('' for None or a
+    list)."""
+    if value is None or isinstance(value, list):
+        return ""
+    s = _drop_comment(str(value)).strip()
+    return s.strip('"').strip("'").strip()
+
+
+def _valued(value):
+    """reconcile-rollout.py _valued: says something once quotes and a comment are dropped, and is not YAML's null; a
+    non-empty list does."""
+    if isinstance(value, list):
+        return any(_valued(x) for x in value)
+    return _scalar(value).lower() not in ("", "null", "~")
+
+
+def _unlink(s):
+    m = LINK.fullmatch(s.strip())
+    return m.group(1).split("|")[0].split("#")[0].strip() if m else s
+
+
+def _as_list(value):
+    if value is None:
+        return []
+    return [x for x in value if x] if isinstance(value, list) else ([value] if value else [])
+
+
+def _flow(val):
+    """A flow list's items ([a, "[[b|c]]"]: each unquoted, a link unwrapped), or None when it does not close."""
+    if not val.endswith("]"):
+        return None
+    items, cur, q, depth = [], "", None, 0
+    for ch in val[1:-1]:
+        if q:
+            q = None if ch == q else q
+        elif ch in "\"'":
+            q = ch
+        elif ch == "[":
+            depth += 1
+        elif ch == "]":
+            depth -= 1
+        elif ch == "," and depth == 0:
+            items.append(cur)
+            cur = ""
+            continue
+        cur += ch
+    if q or depth:
+        return None
+    items.append(cur)
+    return [x for x in (_unlink(_scalar(i)) for i in items) if x]
+
+
+def _fm(text):
+    """The note's frontmatter, {key: scalar | [items] | None}, or None when unreadable (the fix task paragraph's _fm
+    grammar): between the first two `---` lines, blank and `#` lines skipped, top-level `key: value` scalars
+    (_scalar's rule), flow lists, and block `- item` lists under an empty-valued key; any other line is unreadable."""
+    lines = text.split("\n")
+    if not lines or lines[0].rstrip("\r").rstrip() != "---":
+        return None
+    out, cur = {}, None
+    for raw in lines[1:]:
+        ln = raw.rstrip("\r")
+        if ln.rstrip() == "---":
+            return out
+        s = ln.strip()
+        if not s or s.startswith("#"):
+            continue
+        m = FM_KEY.match(ln)
+        if m:
+            key, val, cur = m.group(1), _drop_comment(m.group(2) or "").strip(), None
+            if not val:
+                out[key], cur = None, key
+            elif val.startswith("[") and not (val.startswith("[[") and not val.startswith("[[[")):
+                items = _flow(val)
+                if items is None:
+                    return None
+                out[key] = items
+            else:
+                out[key] = _scalar(val)
+            continue
+        m = FM_ITEM.match(ln)
+        if m and cur is not None:
+            out[cur] = (out[cur] or []) + [x for x in [_unlink(_scalar(m.group(1) or ""))] if x]
+            continue
+        return None
+    return None
+
+
+def _tags(fm):
+    return {str(t).strip().lstrip("#") for t in _as_list(fm.get("tags")) if str(t).strip()}
+
+
+def _open_of(fm):
+    """A readable note's Open rule: its status is not done, merged, dropped or cancelled, it is no carried fix
+    (`status: review` with a valued `merged:`, reconcile-rollout.py _carried_fix), and its tags hold no `archived`."""
+    st = _scalar(fm.get("status")).lower()
+    if st in FIX_CLOSED or "archived" in _tags(fm):
+        return False
+    return not (st == "review" and _valued(fm.get("merged")))
+
+
+def _fix_note(ctx, stem):
+    return ctx.tasks / f"{stem}.md"
+
+
+def _fix_open(path):
+    """(open, fm): open True, False (closed, or no note at Work/Tasks/<stem>.md: archived or gone), or None (a root
+    note whose frontmatter _fm cannot read); fm is its frontmatter when read."""
+    try:
+        text = Path(path).read_text(encoding="utf-8")
+    except FileNotFoundError:
+        return False, None
+    except (OSError, UnicodeDecodeError):
+        return None, None
+    fm = _fm(text)
+    return (None, None) if fm is None else (_open_of(fm), fm)
+
+
+def _refresh_fix(ctx, e):
+    """Each pass with a fix record re-reads its note (after 5a, before 5d): open, and the take-out marker from
+    `taken_out_next:`. A missing vault keeps the last values."""
+    fx = e.get("fix")
+    if not isinstance(fx, dict) or not fx.get("task") or not ctx.vault_ok():
+        return
+    fx["open"], fm = _fix_open(_fix_note(ctx, fx["task"]))
+    if fm is not None:
+        fx["marker"] = _scalar(fm.get("taken_out_next")) or None
+
+
+def _covered(e):
+    """The landing is covered, so never stuck: its fix task open (never null), still covering it, and not taken out."""
+    fx = e.get("fix") if isinstance(e, dict) else None
+    return isinstance(fx, dict) and fx.get("open") is True and fx.get("current") is True and not fx.get("marker")
+
+
+def _note_lock_path(path):
+    """reconcile-rollout.py _note_lock_path's mirror: one lock per directory of notes, outside the vault, so the
+    carrier and the engine take the same lock for a task note."""
+    absolute = lambda v: v if v and os.path.isabs(v) else None   # noqa: E731  a relative dir is ignored (the XDG rule)
+    base = absolute(os.environ.get("THREAD_NOTE_LOCK_DIR")) or os.path.join(
+        absolute(os.environ.get("XDG_STATE_HOME")) or os.path.join(os.path.expanduser("~"), ".local", "state"),
+        "thread", "note-locks")
+    real = os.path.dirname(os.path.realpath(str(path)))
+    return Path(base) / f"{hashlib.sha256(real.encode()).hexdigest()[:16]}-{os.path.basename(real)[:60]}.lock"
+
+
+class _NoteLock:
+    """reconcile-rollout.py _note_lock's mirror: an flock on _note_lock_path, waited for up to
+    THREAD_NOTE_LOCK_TIMEOUT (30 s) cut to what is left of the pass's deadline, held only for a re-read and a
+    replace. Not taken: an OSError, nothing written. No fcntl: no lock, the atomic replace alone."""
+
+    def __init__(self, path):
+        self.lock_path, self.fh = _note_lock_path(path), None
+
+    def __enter__(self):
+        if fcntl is None:
+            return self
+        try:
+            timeout = float(os.environ.get("THREAD_NOTE_LOCK_TIMEOUT") or NOTE_LOCK_TIMEOUT)
+        except ValueError:
+            timeout = NOTE_LOCK_TIMEOUT
+        if DEADLINE_AT is not None:
+            timeout = max(0.0, min(timeout, DEADLINE_AT - time.monotonic() - 1))
+        self.lock_path.parent.mkdir(parents=True, exist_ok=True)
+        self.fh = open(self.lock_path, "a")
+        end = time.monotonic() + timeout
+        try:
+            while True:
+                try:
+                    fcntl.flock(self.fh, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                    return self
+                except BlockingIOError:
+                    if time.monotonic() >= end:
+                        raise OSError(f"timed out after {timeout:g}s waiting for the note lock {self.lock_path}")
+                    time.sleep(0.05)
+        except BaseException:
+            self.fh.close()
+            self.fh = None
+            raise
+
+    def __exit__(self, *exc):
+        if self.fh is not None:
+            self.fh.close()   # closing the file drops the flock
+        return False
+
+
+def _replace_note(target, text):
+    """reconcile-rollout.py _replace_keeping_metadata's mirror: a temp file beside the note (on macOS a `cp -p`
+    clone, under its bound), written, its mode and created time kept, then renamed over the note."""
+    tmp = target.with_name(f".{target.name}.{os.getpid()}.tmp")
+    try:
+        st = os.stat(target)
+        if sys.platform == "darwin":
+            _run(["/bin/cp", "-p", str(target), str(tmp)], _bound(GIT_TIMEOUT))   # best-effort
+            if tmp.exists():
+                os.chmod(tmp, 0o600)
+        with open(tmp, "w", encoding="utf-8") as f:
+            f.write(text)
+            f.flush()
+            os.fsync(f.fileno())
+        os.chmod(tmp, stat.S_IMODE(st.st_mode))
+        birth = getattr(st, "st_birthtime", None)
+        if birth is not None:
+            os.utime(tmp, (st.st_atime, birth))
+            now = time.time()
+            os.utime(tmp, (now, now))
+        os.replace(tmp, target)
+    finally:
+        tmp.unlink(missing_ok=True)
+
+
+def _rewrite(ctx, path, edit):
+    """Under the note's lock: re-read it, edit(text, fm) -> the new text (None: no write), then the replace. True
+    written, False not (the edit declined), None the frontmatter cannot be read (nothing written). OSError when the
+    lock is not taken or the note cannot be read or written."""
+    target = Path(os.path.realpath(str(path)))
+    with _NoteLock(target):
+        try:
+            text = target.read_text(encoding="utf-8")
+        except UnicodeDecodeError:
+            return None
+        fm = _fm(text)
+        if fm is None:
+            return None
+        new = edit(text, fm)
+        if new is None or new == text:
+            return False
+        _replace_note(target, new)
+    ctx.wrote = True
+    return True
+
+
+def _append_log(text, line):
+    """The note with line appended under `## Carrier log`, the section added at the end when missing."""
+    lines = text.split("\n")
+    if lines and lines[-1] == "":
+        lines.pop()
+    if FIX_LOG not in lines:
+        while lines and not lines[-1].strip():
+            lines.pop()
+        return "\n".join(lines + ["", FIX_LOG, "", line]) + "\n"
+    i = lines.index(FIX_LOG)
+    j = i + 1
+    while j < len(lines) and not lines[j].startswith("## "):
+        j += 1
+    k = j
+    while k > i + 1 and not lines[k - 1].strip():
+        k -= 1
+    return "\n".join(lines[:k] + ([line] if k > i + 1 else ["", line]) + lines[k:]) + "\n"
+
+
+def _last_variant(text):
+    """The variant of the Carrier log's last tagged line, or None."""
+    lines = text.split("\n")
+    if FIX_LOG not in lines:
+        return None
+    last = None
+    for ln in lines[lines.index(FIX_LOG) + 1:]:
+        if ln.startswith("## "):
+            break
+        m = TAGGED.match(ln)
+        if m:
+            last = m.group(1)
+    return last
+
+
+def _set_status(text, value):
+    """The note with its top-level frontmatter `status:` line set to value."""
+    lines = text.split("\n")
+    for i in range(1, len(lines)):
+        if lines[i].rstrip("\r").rstrip() == "---":
+            break
+        if re.match(r"^status:", lines[i]):
+            lines[i] = f"status: {value}"
+            break
+    return "\n".join(lines)
+
+
+def _fix_line(variant, pr):
+    """The fix task's one-line What to do, per variant (reused on a variant change)."""
+    hr, br = pr["head"]["ref"], pr["base"]["ref"]
+    if variant == "red" and CLOSE_RE.match(hr):
+        return (f"its diff is THREAD.md and handoff docs only and it is up to date with a green `{br}`, so the red is "
+                f"the workflow's own or a flake: fix it on `{br}` or re-run it, then mark this task done, which lets "
+                "the carrier bring the PR current")
+    if variant == "red":
+        return f"fix the failing check on `{hr}` and queue it again (`land.sh --queue`), or fix it on `{br}`"
+    if variant == "base":
+        return f"make `{br}` green; the carrier brings the PR current once it is"
+    return ("finish its landing (/fresh-review, the fixes, then `land.sh --queue`; a draft is marked ready first), "
+            "or close the PR")
+
+
+def _unstable(names, br):
+    which = ", ".join(f"`{x}`" for x in names) or "its failing check"
+    verb = "are not required checks" if len(names) > 1 else "is not a required check"
+    return (f"{UNSTABLE_MARK} {which} {verb}, so GitHub would merge it as is; the carrier holds it for green (ADR "
+            f"0028 § 2), so making it pass on `{br}`, or retiring it from the workflow, is the fix")
+
+
+def _log_excerpt(ctx, it, checks):
+    """(lines, why): the first failing Actions job's log, the 15 lines ending at its first `##[error]` (else its
+    last 15), timestamps and ANSI codes dropped, each line cut to 200 characters and ``` defused; why when the read
+    failed. (None, None) when no failing check is an Actions job."""
+    for _name, r in (checks or {}).get("runs", {}).items():
+        if r.get("status") != "completed" or (r.get("conclusion") or "") in PASS_CONC:
+            continue
+        m = JOB_URL.search(str(r.get("details_url") or ""))
+        if ((r.get("app") or {}).get("slug")) != "github-actions" or not m:
+            continue
+        try:
+            text = gh("api", f"repos/{it.slug}/actions/jobs/{m.group(2)}/logs")
+        except GhError as ex:
+            return None, f"its log could not be read: {ex}"
+        lines = [ANSI.sub("", LOG_TS.sub("", ln.rstrip("\r"))) for ln in text.split("\n")]
+        while lines and not lines[-1].strip():
+            lines.pop()
+        err = next((i for i, ln in enumerate(lines) if ln.lstrip().startswith("##[error]")), None)
+        pick = lines[max(0, err - LOG_LINES + 1):err + 1] if err is not None else lines[-LOG_LINES:]
+        return [re.sub(r"`{3,}", lambda x: "'" * len(x.group()), ln[:LOG_COLS]) for ln in pick], None
+    return None, None
+
+
+def _project_for(ctx, slug):
+    """(project, why): the live project note whose `repos:` holds a checkout with origin slug (the fix task
+    paragraph's rule), cached per pass; project is {name, links, tag, launch, entry}, or None with why."""
+    k = slug.lower()
+    if k in ctx.projects:
+        return ctx.projects[k]
+    reg = ctx.register()
+    root = ctx.vault / "Work" / "Projects"
+    found = []
+    try:
+        paths = sorted(root.rglob("*.md")) if reg is not None else []
+    except OSError:
+        paths = []
+    for p in paths:
+        rel = p.relative_to(root).parts
+        if "Archive" in rel[:-1]:
+            continue
+        try:
+            fm = _fm(p.read_text(encoding="utf-8"))
+        except (OSError, UnicodeDecodeError):
+            continue
+        if fm is None:
+            continue
+        tags, st = _tags(fm), _scalar(fm.get("status")).lower()
+        if "project" not in tags or "archived" in tags or st in PROJECT_DEAD or _scalar(fm.get("done")).lower() == "true":
+            continue
+        for entry in _as_list(fm.get("repos")):
+            d = os.path.expanduser(str(entry).strip())
+            if os.path.isabs(d) and _origin_of(ctx, reg, d) == k:
+                found.append((st != "active", len(found), rel, fm, str(entry).strip()))
+                break
+    if reg is None:
+        res = None, f"cannot load {REGISTER.name}"
+    elif not found:
+        res = None, f"no live project's repos: has origin {slug}"
+    else:
+        _, _, rel, fm, entry = min(found)
+        name = rel[-1][:-3]
+        folder = re.sub(r"\s*\(area\)", "", rel[0]).strip() if len(rel) > 1 else None
+        area = next((_unlink(str(a)) for a in _as_list(fm.get("area")) if _unlink(str(a))), None) or folder or None
+        res = {"name": name, "links": [name] + ([area] if area and area != name else []),
+               "tag": re.sub(r"[^a-z0-9]+", "-", area.lower()).strip("-") if area else "",
+               "launch": _scalar(fm.get("launch")), "entry": entry}, None
+    ctx.projects[k] = res
+    return res
+
+
+def _origin_of(ctx, reg, d):
+    """The lowercased owner/name of d's `remote.origin.url` (landing-register.py's ORIGIN_RE and parse_slug), or None;
+    cached per pass, each git call under its bound."""
+    if d not in ctx.origins:
+        rc, out, _, timed_out = _run(["git", "-C", d, "config", "--get", "remote.origin.url"], _bound(GIT_TIMEOUT))
+        slug = None
+        if rc == 0 and not timed_out:
+            m = reg.ORIGIN_RE.fullmatch(out.strip())
+            rest = m.group(1) if m else ""
+            rest = rest[:-1] if rest.endswith("/") else rest
+            s = reg.parse_slug(rest) if rest else None
+            slug = f"{s[0]}/{s[1]}".lower() if s else None
+        ctx.origins[d] = slug
+    return ctx.origins[d]
+
+
+def _stem_walk(ctx, it):
+    """(what, stem): the stem walk (the fix task paragraph's): `adopt` an open root note for this PR, `file` at the
+    first free name, or `unreadable` at a root note _fm cannot read."""
+    owner, _, name = it.slug.partition("/")
+    base = "landing-fix-" + re.sub(r"[^a-z0-9]+", "-", f"{owner}-{name}-{it.n}".lower()).strip("-")
+    for k in range(1, STEM_TRIES + 1):
+        stem = base if k == 1 else f"{base}-{k}"
+        p = _fix_note(ctx, stem)
+        if os.path.lexists(p):
+            op, fm = _fix_open(p)
+            if op is None:
+                return "unreadable", stem
+            if op and fm is not None and _scalar(fm.get("landing_pr")).lower() == it.key.lower():
+                return "adopt", stem
+        elif f"{stem}.md" not in ctx.archived():
+            return "file", stem
+    return "unreadable", base
+
+
+def _fix_text(ctx, it, pr, e, stem, variant, reason, proj, checks, log, lwhy):
+    """The new fix task: reconcile-rollout.py _new_task_fm's frontmatter (mirrored, the carrier being stdlib-only
+    and bundled), then its Notes, Failing checks, Launch, Resume prompt and Carrier log."""
+    hr, br, head = pr["head"]["ref"], pr["base"]["ref"], pr["head"]["sha"]
+    url = pr.get("html_url") or it.url
+    what = _fix_line(variant, pr)
+    names = _failing(checks) if checks else []
+    fm = ["---", f"tags: [task, {proj['tag']}]" if proj["tag"] else "tags: [task]", "status: open", "priority: normal",
+          "work_depth: shallow", "projects: [" + ", ".join(f'"[[{x}]]"' for x in proj["links"]) + "]", "contexts: []",
+          "scheduled:", "due:", f"captured: {ctx.now.astimezone().date().isoformat()}"]
+    if proj["launch"]:
+        fm.append(f"launch: {proj['launch']}")
+    fm += [f'landing_pr: "{it.key}"', "---"]
+    notes = ["Filed by the landing carrier (ADR 0078 d2 as amended by p47-20; ADR 0077: undated, no approval).",
+             f"PR: {url} (`{hr}` → `{br}`, {'a close-out' if CLOSE_RE.match(hr) else 'an own branch'}).",
+             f"Cause: {reason}."]
+    if variant == "red" and pr.get("mergeable_state") == "unstable":
+        notes.append(_unstable(names, br) + ".")
+    notes += [f"**What to do:** {what}.", f"**Verify:** the carrier merges `{it.key}`."]
+    body = ["", "## Notes", "", *notes]
+    if variant in ("red", "base"):
+        body += ["", "## Failing checks", ""]
+        runs, sts = checks.get("runs", {}), checks.get("statuses", {})
+        for x in names[:FAILING_SHOWN]:
+            r = runs.get(x) or {}
+            link = r.get("details_url") or r.get("html_url") or (sts.get(x) or {}).get("target_url") or "no link"
+            body.append(f"- `{x}`: {link}")
+        if not names:
+            body.append(f"- none reads failing yet (its checks read {checks.get('cls')})")
+        if log:
+            body += ["", "```text", *log, "```"]
+        elif lwhy:
+            body += ["", f"({lwhy})"]
+    launch = f"`{proj['launch']}`" if proj["launch"] else f"`claude` from `{proj['entry']}`"
+    body += ["", "## Launch", "", f"- **Launch:** {launch}", f"- **Repo:** `{proj['entry']}`", "- **MCP:** none",
+             "", "## Resume prompt", "", "```",
+             f'You\'re picking up "{stem}" ({proj["name"]}): the landing {it.key} the carrier cannot move ({variant}).',
+             f"Launch: `{proj['launch']}`, in {proj['entry']}" if proj["launch"] else f"Launch: `claude` from {proj['entry']}",
+             f"Read first: {os.path.abspath(_fix_note(ctx, stem))}, {url}",
+             f"Next move: {what}.", "```",
+             "", FIX_LOG, "", f"- {ctx.stamp} {head[:12]} ({variant}): filed: {reason}"]
+    return "\n".join(fm + body) + "\n"
+
+
+def _fix_record(e, stem, key):
+    old = e.get("fix") if isinstance(e.get("fix"), dict) else {}
+    e["fix"] = {"task": stem, "key": key, "open": True, "marker": None if old.get("task") != stem else old.get("marker"),
+                "current": bool(old.get("current")) if old.get("task") == stem else False, "at": None}
+    return e["fix"]
+
+
+def _note_fix(ctx, it, pr, e, stem, variant, key, reason, checks):
+    """A new key on a live task: one tagged Carrier log line, with the new What to do when the variant changes and the
+    unstable clause once per note."""
+    head = pr["head"]["sha"]
+    if ctx.dry:
+        ctx.say(f"{it.key}: would note [[{stem}]]")
+        return "dry", f"would note its fix task [[{stem}]]"
+    unstable = variant == "red" and pr.get("mergeable_state") == "unstable"
+
+    def edit(text, _fm_):
+        line = f"- {ctx.stamp} {head[:12]} ({variant}): {_flat(reason)}"
+        if _last_variant(text) != variant:
+            line += f"; what to do now: {_fix_line(variant, pr)}"
+        if unstable and UNSTABLE_MARK not in text:
+            line += f"; {_unstable(_failing(checks or {}), pr['base']['ref'])}"
+        return _append_log(text, line)
+    try:
+        done = _rewrite(ctx, _fix_note(ctx, stem), edit)
+    except OSError as ex:
+        return "none", f"no fix task (cannot write {stem}: {_flat(ex)[:160]})"
+    if done is None:
+        if isinstance(e.get("fix"), dict) and e["fix"].get("task") == stem:
+            e["fix"]["open"] = None
+        return "none", f"no fix task ([[{stem}]]'s frontmatter cannot be read)"
+    fx = _fix_record(e, stem, key)
+    fx["at"] = ctx.stamp
+    ctx.fx["key"] = key
+    ctx.say(f"{it.key}: fix task noted: [[{stem}]]")
+    ctx.keep(it, e)
+    return "noted", f"its fix task [[{stem}]] is noted"
+
+
+def _new_fix(ctx, it, pr, e, stem, variant, key, reason, checks):
+    """A new fix task at stem: an `x` create, so an existing name moves on to the next."""
+    proj, why = _project_for(ctx, it.slug)
+    if proj is None:
+        return "none", f"no fix task ({why})"
+    if ctx.dry:
+        ctx.say(f"{it.key}: would file fix task [[{stem}]]")
+        return "dry", f"would file fix task [[{stem}]]"
+    log, lwhy = _log_excerpt(ctx, it, checks) if variant in ("red", "base") else (None, None)
+    for _ in range(STEM_TRIES):
+        try:
+            with open(_fix_note(ctx, stem), "x", encoding="utf-8") as f:
+                f.write(_fix_text(ctx, it, pr, e, stem, variant, _flat(reason), proj, checks, log, lwhy))
+            break
+        except FileExistsError:
+            what, stem = _stem_walk(ctx, it)
+            if what == "adopt":
+                return _note_fix(ctx, it, pr, e, stem, variant, key, reason, checks)
+            if what == "unreadable":
+                return "none", f"no fix task ([[{stem}]]'s frontmatter cannot be read)"
+        except OSError as ex:
+            return "none", f"no fix task (cannot write {stem}: {_flat(ex)[:160]})"
+    else:
+        return "none", f"no fix task (no free name for {stem})"
+    ctx.wrote = True
+    fx = _fix_record(e, stem, key)
+    fx["at"] = ctx.stamp
+    ctx.fx["key"] = key
+    ctx.say(f"{it.key}: fix task filed: [[{stem}]]")
+    ctx.keep(it, e)
+    return "filed", f"its fix task [[{stem}]] is filed"
+
+
+def _file_fix(ctx, it, pr, e, variant, key, reason, checks):
+    """The fix task for a red, base or review key (the fix task paragraph's rules): (state, text). state is `filed`,
+    `noted`, `same` (a live task with this key), `dry`, `none` (text says why: nothing written) or `closed` (its
+    closed task has this key: text is its stem, for (d))."""
+    if not ctx.vault_ok():
+        return "none", f"no fix task (no vault at {ctx.vault})"
+    fx = e.get("fix") if isinstance(e.get("fix"), dict) else None
+    stem = fx.get("task") if fx else None
+    if stem:
+        if fx.get("open") is None:
+            return "none", f"no fix task ([[{stem}]]'s frontmatter cannot be read)"
+        if fx.get("open"):
+            if fx.get("key") == key:
+                ctx.fx["key"] = key
+                return "same", f"its fix task [[{stem}]] covers it"
+            return _note_fix(ctx, it, pr, e, stem, variant, key, reason, checks)
+        if fx.get("key") == key:
+            return "closed", stem
+    what, stem = _stem_walk(ctx, it)
+    if what == "unreadable":
+        return "none", f"no fix task ([[{stem}]]'s frontmatter cannot be read)"
+    if what == "adopt":
+        return _note_fix(ctx, it, pr, e, stem, variant, key, reason, checks)
+    return _new_fix(ctx, it, pr, e, stem, variant, key, reason, checks)
+
+
+def _review_fix(ctx, it, pr, e, why, review):
+    """Step 6.0's review fix task, for an own PR left unqueued a day: review True (own_kind's), or for a draft (None)
+    a newest-marker read made now, once the vault and project are found, that succeeds and is no hold."""
+    if review is None:
+        if not ctx.vault_ok():
+            return f"{why}; no fix task (no vault at {ctx.vault})"
+        fx = e.get("fix") if isinstance(e.get("fix"), dict) else {}
+        if not fx.get("open"):
+            proj, pwhy = _project_for(ctx, it.slug)
+            if proj is None:
+                return f"{why}; no fix task ({pwhy})"
+        try:
+            m = newest_marker(api_json(f"repos/{it.slug}/issues/{it.n}/comments?per_page=100", paginate=True), ctx.me)
+        except GhError as ex:
+            return f"{why}; no fix task (cannot read its comments: {ex})"
+        if m is not None and m[2] == "held":
+            ctx.fx["clear"] = HELD_WHY
+            return f"{why}; {HELD_WHY}"
+    elif not review:
+        return why
+    state, text = _file_fix(ctx, it, pr, e, "review", f"review:{pr['head']['sha']}", f"unqueued a day on ({why})", None)
+    return f"{why}; {_closed_text(text)}" if state == "closed" else f"{why}; {text}"
+
+
+def _note_line(ctx, it, e, stem, line):
+    """One untagged Carrier log line on the open fix task, best-effort (a refused write is no line)."""
+    if ctx.dry:
+        ctx.say(f"{it.key}: would note [[{stem}]]")
+        return
+    try:
+        if _rewrite(ctx, _fix_note(ctx, stem), lambda text, _fm_: _append_log(text, line)):
+            ctx.keep(it, e)
+    except OSError:
+        pass
+
+
+def _settle_fix(ctx, it, e, outcome):
+    """fix.current, settled once per pass: True when this pass computed a fix key; else False when a clearing verdict
+    happened (one line on the open task when it was True); else kept."""
+    fx = e.get("fix")
+    if not isinstance(fx, dict):
+        return
+    if ctx.fx["key"]:
+        fx["current"] = True
+    elif ctx.fx["clear"]:
+        was, fx["current"] = fx.get("current"), False
+        if was and fx.get("open") is True and fx.get("task") and ctx.vault_ok():
+            _note_line(ctx, it, e, fx["task"], f"- {ctx.stamp} {str(e.get('head') or '')[:12]}: this task no longer "
+                                               f"covers the landing: {_flat(outcome)}")
+
+
+def _drop(ctx, it, e, why, head):
+    """A dropped entry's open fix task gets one closing line under its lock; one still `status: open` with no valued
+    `rollout:` is retired (`status: dropped`) in the same replace (_retire). A closed, gone or unreadable note: no
+    write."""
+    fx = e.get("fix") if isinstance(e, dict) else None
+    if not isinstance(fx, dict) or not fx.get("task") or not ctx.vault_ok():
+        return
+    stem, h12 = fx["task"], str(head or e.get("head") or "")[:12]
+    if ctx.dry:
+        op, fm = _fix_open(_fix_note(ctx, stem))
+        if op:
+            ctx.say(f"{it.key}: would {'drop' if _retire(fm) else 'note'} [[{stem}]]")
+        return
+
+    def edit(text, fm):
+        if not _open_of(fm):
+            return None
+        tail = "dropped: nothing is left for it to fix" if _retire(fm) else (
+            f"left open (it is stamped rollout: {_scalar(fm.get('rollout')) or 'a rollout'})" if _valued(fm.get("rollout"))
+            else f"left open (its status is {_scalar(fm.get('status')).lower() or 'empty'})")
+        new = _append_log(text, f"- {ctx.stamp} {h12}: {why}; {tail}")
+        return _set_status(new, "dropped") if _retire(fm) else new
+    try:
+        _rewrite(ctx, _fix_note(ctx, stem), edit)
+    except OSError:
+        pass
+
+
+def _retire(fm):
+    """An unworked fix task: `status: open` exactly and no valued `rollout:`."""
+    return _scalar(fm.get("status")).lower() == "open" and not _valued(fm.get("rollout"))
+
+
 # ---- state, stuck and marker ------------------------------------------------------------------------------------------
 
 def read_state(path):
@@ -1614,7 +2678,7 @@ def cmd_stuck(args):
     state, _ = read_state(path)
     due = []
     for k, e in state.items():
-        if k == PASS:
+        if k == PASS or _covered(e):   # an open fix task still covers its stop: ordinary backlog work
             continue
         moved = _parse_iso(e.get("movedAt")) or _parse_iso(e.get("since"))
         if e.get("supersededBy"):
@@ -1633,11 +2697,20 @@ def cmd_stuck(args):
         due = [d for d in due if d[1] == "search" or d[1].rpartition("#")[0].casefold() == want]
     due.sort(key=lambda x: (x[0], x[1]))
     rows = [{"key": k, "url": e.get("url"), "kind": e.get("kind"), "movedAt": e.get("movedAt") or e.get("since"),
-             "outcome": _flat(e.get("outcome") or "")} for _, k, e in due]
+             "outcome": _row_outcome(e)} for _, k, e in due]
     line = ("Landings: " + " · ".join(f"{r['key']}: {r['outcome']} (unmoved since {str(r['movedAt'] or '')[:16]})"
                                       for r in rows)) if rows else None
     print(json.dumps({"state": str(path), "stuck": rows, "line": line}, ensure_ascii=False))
     return 0
+
+
+def _row_outcome(e):
+    """A stuck row's outcome: a fix task taken out (ADR 0070's marker) is named before it."""
+    out = _flat(e.get("outcome") or "")
+    fx = e.get("fix")
+    if isinstance(fx, dict) and fx.get("task") and fx.get("marker"):
+        out = f"its fix task [[{fx['task']}]] was taken out (taken_out_next: {fx['marker']}): {out}"
+    return out
 
 
 def cmd_marker(args):
@@ -1697,6 +2770,8 @@ def main(argv=None):
     r.add_argument("--deadline", type=_positive, default=200, help="the pass's own deadline, seconds")
     r.add_argument("--settle-wait", type=_nonneg, default=5, help="seconds between re-reads of an unknown mergeability")
     r.add_argument("--dry-run", action="store_true", help="reads only: print would-lines, write nothing")
+    r.add_argument("--vault", default=VAULT_DEFAULT, help="the Obsidian vault a fix task is filed in (default "
+                                                          f"{VAULT_DEFAULT})")
     r.set_defaults(func=cmd_run)
     s = sub.add_parser("stuck", allow_abbrev=False, help="the landings stuck a day (a read that writes nothing)")
     s.add_argument("--state", default=None)
