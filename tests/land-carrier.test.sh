@@ -850,7 +850,7 @@ ok "$(lines "$S19" 'no longer covers')|$(fx "o/r19#$N" open)|$(fx "o/r19#$N" cur
   "C19g: … one more uncover line; the task open, no longer current"
 
 echo "== C19h. the note lock: a held lock writes no line, and the next pass writes it once"
-python3 - "$CARRIER" "$TK/$S19.md" "$tmp/held" <<'PYH' &
+python3 -B - "$CARRIER" "$TK/$S19.md" "$tmp/held" <<'PYH' &   # -B: no bytecode beside the script
 import fcntl, importlib.util, sys, time
 spec = importlib.util.spec_from_file_location("lc", sys.argv[1]); lc = importlib.util.module_from_spec(spec); spec.loader.exec_module(lc)
 lp = lc._note_lock_path(sys.argv[2]); lp.parent.mkdir(parents=True, exist_ok=True)
